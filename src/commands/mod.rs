@@ -1,4 +1,4 @@
-pub mod test;
+mod test;
 
 pub type Context<'a> = poise::Context<'a, (), anyhow::Error>;
 pub type Command = poise::Command<(), anyhow::Error>;
