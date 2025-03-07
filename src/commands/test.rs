@@ -16,6 +16,6 @@ pub async fn greeting(ctx: Context<'_>) -> Result<()> {
     Ok(())
 }
 
-pub fn commands() -> [Command; 2] {
-    [ping(), greeting()]
+pub fn commands() -> Vec<Command> {
+    vec![ping(), greeting()]
 }
