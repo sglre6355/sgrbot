@@ -1,10 +1,13 @@
 mod commands;
 
-use anyhow::{bail, Result};
-use serenity::async_trait;
-use serenity::model::gateway::Ready;
-use serenity::prelude::{Client, Context, EventHandler, GatewayIntents};
 use std::env;
+
+use anyhow::{bail, Result};
+use serenity::{
+    async_trait,
+    model::gateway::Ready,
+    prelude::{Client, Context, EventHandler, GatewayIntents},
+};
 use tracing::{info, instrument, Level};
 
 struct Handler;

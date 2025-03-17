@@ -1,5 +1,6 @@
-use crate::commands::{Command, Context};
 use anyhow::Result;
+
+use super::{Command, Context};
 
 #[poise::command(slash_command)]
 pub async fn ping(ctx: Context<'_>) -> Result<()> {
