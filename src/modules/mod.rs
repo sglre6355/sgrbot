@@ -17,8 +17,8 @@ pub trait Module {
         state_store: &StateStore,
     );
 
-    fn configure_client(&self, builder: &mut ClientBuilder) {
-        let _ = builder;
+    fn configure_client(&self, builder: ClientBuilder) -> ClientBuilder {
+        builder
     }
 
     async fn handle_event(
@@ -49,14 +49,16 @@ pub fn register_enabled(
     info!("Registered {} enabled module(s)", modules.count());
 }
 
-pub fn configure_client(builder: &mut ClientBuilder) {
+pub fn configure_client(mut builder: ClientBuilder) -> ClientBuilder {
     let modules = inventory::iter::<&'static (dyn Module + Sync)>.into_iter();
 
     for module in modules {
-        module.configure_client(builder);
+        builder = module.configure_client(builder);
     }
 
     info!("Applied client configuration for enabled module(s)");
+
+    builder
 }
 
 pub async fn event_handler(

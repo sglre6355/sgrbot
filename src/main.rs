@@ -46,11 +46,11 @@ async fn main() -> Result<()> {
     let token = env::var("DISCORD_TOKEN").expect("`DISCORD_TOKEN` environment variable");
     let intents = GatewayIntents::non_privileged() | GatewayIntents::MESSAGE_CONTENT;
 
-    let mut builder = Client::builder(token, intents)
+    let builder = Client::builder(token, intents)
         .framework(framework)
         .event_handler(DefaultHandler);
 
-    modules::configure_client(&mut builder);
+    let builder = modules::configure_client(builder);
 
     let mut client = builder.await?;
     client.start().await?;
