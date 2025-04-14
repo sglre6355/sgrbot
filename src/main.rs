@@ -31,13 +31,14 @@ async fn main() -> Result<()> {
         },
         ..Default::default()
     };
-    modules::register_enabled(&mut options, &state_store);
+    modules::configure_framework_options(&mut options);
 
     let framework = poise::Framework::builder()
         .options(options)
-        .setup(|ctx, _ready, framework| {
+        .setup(|ctx, ready, framework| {
             Box::pin(async move {
                 poise::builtins::register_globally(ctx, &framework.options().commands).await?;
+                modules::setup_enabled(&state_store, ctx, ready, framework).await?;
                 Ok(state_store)
             })
         })

@@ -3,19 +3,30 @@ mod test;
 
 use anyhow::Result;
 use async_trait::async_trait;
-use poise::{FrameworkContext, FrameworkOptions};
-use serenity::all::{ClientBuilder, Context as SerenityContext, FullEvent};
+use poise::{Framework, FrameworkContext, FrameworkOptions};
+use serenity::all::{ClientBuilder, Context as SerenityContext, FullEvent, Ready};
 use tracing::info;
 
 use crate::StateStore;
 
 #[async_trait]
 pub trait Module {
-    fn register(
+    fn configure_framework_options(
         &self,
         options: &mut FrameworkOptions<StateStore, anyhow::Error>,
-        state_store: &StateStore,
     );
+
+    async fn setup(
+        &self,
+        state_store: &StateStore,
+        ctx: &SerenityContext,
+        ready: &Ready,
+        framework: &Framework<StateStore, anyhow::Error>,
+    ) -> Result<(), anyhow::Error> {
+        let _ = (state_store, ctx, ready, framework);
+
+        Ok(())
+    }
 
     fn configure_client(&self, builder: ClientBuilder) -> ClientBuilder {
         builder
@@ -36,14 +47,11 @@ pub trait Module {
 
 inventory::collect!(&'static (dyn Module + Sync));
 
-pub fn register_enabled(
-    options: &mut FrameworkOptions<StateStore, anyhow::Error>,
-    state_store: &StateStore,
-) {
+pub fn configure_framework_options(options: &mut FrameworkOptions<StateStore, anyhow::Error>) {
     let modules = inventory::iter::<&'static (dyn Module + Sync)>.into_iter();
 
     for module in modules.clone() {
-        module.register(options, state_store);
+        module.configure_framework_options(options);
     }
 
     info!("Registered {} enabled module(s)", modules.count());
@@ -59,6 +67,23 @@ pub fn configure_client(mut builder: ClientBuilder) -> ClientBuilder {
     info!("Applied client configuration for enabled module(s)");
 
     builder
+}
+
+pub async fn setup_enabled(
+    state_store: &StateStore,
+    ctx: &SerenityContext,
+    ready: &Ready,
+    framework: &Framework<StateStore, anyhow::Error>,
+) -> Result<(), anyhow::Error> {
+    let modules = inventory::iter::<&'static (dyn Module + Sync)>.into_iter();
+
+    for module in modules {
+        module.setup(state_store, ctx, ready, framework).await?
+    }
+
+    info!("Applied client configuration for enabled module(s)");
+
+    Ok(())
 }
 
 pub async fn event_handler(
