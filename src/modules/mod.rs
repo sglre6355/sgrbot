@@ -1,8 +1,11 @@
+mod error;
+
 #[cfg(feature = "test")]
 mod test;
 
 use anyhow::Result;
 use async_trait::async_trait;
+use error::ModuleError;
 use poise::{Framework, FrameworkContext, FrameworkOptions};
 use serenity::all::{ClientBuilder, Context as SerenityContext, FullEvent, Ready};
 use tracing::info;

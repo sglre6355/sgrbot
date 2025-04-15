@@ -13,6 +13,8 @@ use state::TestState;
 use super::Module;
 use crate::StateStore;
 
+pub const MODULE_NAME: &str = "test";
+
 pub struct TestModule;
 
 #[async_trait]

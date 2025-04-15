@@ -1,7 +1,7 @@
 use anyhow::{Context as _, Result};
 
-use super::state::TestState;
-use crate::{Command, Context};
+use super::{MODULE_NAME, state::TestState};
+use crate::{Command, Context, modules::ModuleError};
 
 #[poise::command(slash_command, guild_only)]
 pub async fn test(ctx: Context<'_>) -> Result<()> {
@@ -11,12 +11,18 @@ pub async fn test(ctx: Context<'_>) -> Result<()> {
                 .count
                 .lock()
                 .map_err(|e| anyhow::anyhow!(e.to_string()))
-                .context("failed to acquire lock in `test` command")?;
+                .context(format!(
+                    "failed to acquire lock in `{}` command",
+                    MODULE_NAME
+                ))?;
             *lock += 1;
             *lock
         }
         None => {
-            anyhow::bail!("state for `test` module is not registered")
+            return Err(ModuleError::StateNotRegistered {
+                module_name: MODULE_NAME.to_owned(),
+            }
+            .into());
         }
     };
 
