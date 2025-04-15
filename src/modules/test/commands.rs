@@ -1,6 +1,6 @@
 use anyhow::{Context as _, Result};
 
-use super::TestState;
+use super::state::TestState;
 use crate::{Command, Context};
 
 #[poise::command(slash_command, guild_only)]
