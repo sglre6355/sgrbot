@@ -2,13 +2,14 @@ mod commands;
 mod events;
 mod state;
 
-use std::sync::{Arc, Mutex};
+use std::sync::Arc;
 
 use anyhow::Result;
 use async_trait::async_trait;
 use poise::{Framework, FrameworkContext, FrameworkOptions};
 use serenity::all::{Context as SerenityContext, FullEvent, Ready};
 use state::TestState;
+use tokio::sync::Mutex;
 
 use super::Module;
 use crate::StateStore;

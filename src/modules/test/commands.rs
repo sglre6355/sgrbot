@@ -1,4 +1,4 @@
-use anyhow::{Context as _, Result};
+use anyhow::Result;
 
 use super::{MODULE_NAME, state::TestState};
 use crate::{Command, Context, modules::ModuleError};
@@ -7,14 +7,7 @@ use crate::{Command, Context, modules::ModuleError};
 pub async fn test(ctx: Context<'_>) -> Result<()> {
     let count = match ctx.data().get::<TestState>() {
         Some(state) => {
-            let mut lock = state
-                .count
-                .lock()
-                .map_err(|e| anyhow::anyhow!(e.to_string()))
-                .context(format!(
-                    "failed to acquire lock in `{}` command",
-                    MODULE_NAME
-                ))?;
+            let mut lock = state.count.lock().await;
             *lock += 1;
             *lock
         }
