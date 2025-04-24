@@ -1,5 +1,7 @@
 mod error;
 
+#[cfg(feature = "audio-player")]
+mod audio_player;
 #[cfg(feature = "test")]
 mod test;
 
