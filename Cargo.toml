@@ -20,7 +20,7 @@ serenity = "0.12.1"
 songbird = { version = "0.5.0", features = ["serenity"] }
 symphonia = { version = "0.5.4", features = ["aac", "mp3", "isomp4", "alac"] }
 thiserror = "2.0.12"
-tokio = { version = "1.37.0", features = ["macros", "rt-multi-thread"] }
+tokio = { version = "1.37.0", features = ["macros", "rt-multi-thread", "signal"] }
 tracing = "0.1.40"
 tracing-subscriber = "0.3.18"
 

@@ -9,6 +9,7 @@ use event_handler::DefaultHandler;
 use poise::FrameworkOptions;
 use serenity::prelude::{Client, GatewayIntents};
 use state_store::StateStore;
+use tokio::signal::unix::{SignalKind, signal};
 use tracing::{info, instrument};
 
 pub const VERSION: &str = env!("CARGO_PKG_VERSION");
@@ -54,7 +55,21 @@ async fn main() -> Result<()> {
     let builder = modules::configure_client(builder);
 
     let mut client = builder.await?;
-    client.start().await?;
+
+    let mut sigint = signal(SignalKind::interrupt())?;
+    let mut sigterm = signal(SignalKind::terminate())?;
+
+    tokio::select!(
+        result = client.start() => {
+            result?
+        },
+        _ = sigint.recv() => {
+            info!("Received SIGINT, terminating...");
+        },
+        _ = sigterm.recv() => {
+            info!("Received SIGTERM, terminating...");
+        }
+    );
 
     Ok(())
 }
