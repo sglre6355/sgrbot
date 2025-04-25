@@ -149,6 +149,13 @@ pub fn create_now_playing_embed(track: TrackData) -> CreateEmbed {
 
     if let Some(mut image_url) = track.info.artwork_url {
         // TODO
+        if source == Source::Youtube {
+            image_url = image_url
+                .replace("/sddefault", "/maxresdefault")
+                .replace("/hqdefault", "/maxresdefault")
+                .replace("/mqdefault", "/maxresdefault")
+                .replace("/default", "/maxresdefault");
+        }
         if source == Source::Twitch {
             image_url = image_url.replace("440x248", "1280x720");
         }
