@@ -1,3 +1,5 @@
+use std::time::Duration;
+
 use anyhow::Result;
 use chrono::Utc;
 use futures::{StreamExt, future};
@@ -75,6 +77,8 @@ pub async fn join(
 
 #[poise::command(slash_command, guild_only)]
 pub async fn leave(ctx: Context<'_>) -> Result<()> {
+    ctx.defer().await?;
+
     let guild_id = ctx
         .guild_id()
         .expect("this command should only be run in guilds");
@@ -84,6 +88,19 @@ pub async fn leave(ctx: Context<'_>) -> Result<()> {
         .ok_or(SongbirdError::SongbirdNotRegistered)?;
 
     let lavalink_client = get_lavalink_client(ctx.data())?;
+
+    if let Some(player_context) = lavalink_client.get_player_context(guild_id) {
+        let now_playing = player_context.get_player().await?.track;
+
+        if now_playing.is_some() {
+            player_context.get_queue().clear()?;
+            player_context.skip()?;
+        }
+
+        // wait for now playing embed to be deleted before disconnecting from voice channel
+        // TODO: detect now_playing_embed is None and proceed?
+        tokio::time::sleep(Duration::from_secs(1)).await;
+    }
 
     match leave_voice_channel(manager, lavalink_client, guild_id).await {
         Ok(_) => {}
