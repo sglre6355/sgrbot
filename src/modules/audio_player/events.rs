@@ -122,7 +122,7 @@ pub async fn track_end(client: LavalinkClient, session_id: String, event: &Track
         .expect("player context should have been initialized when `TrackEnd` event is dispatched");
     let data = player_context
         .data::<PlayerContextData>()
-        .expect("player context data should be ");
+        .expect("player context data should be initialized");
 
     let previous_track_embed = {
         let lock = data.now_playing_embed.lock().await;
