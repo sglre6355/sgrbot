@@ -30,37 +30,35 @@ pub async fn handler(
     let lavalink_client = get_lavalink_client(data)?;
 
     if let FullEvent::VoiceStateUpdate { new, .. } = event {
-        let guild_id = new.guild_id.expect("A");
+        let guild_id = new.guild_id.expect(
+            "`VoiceStateUpdate` events should only be dispatched from guild voice channels",
+        );
 
-        let channel_id = match songbird::get(ctx).await.expect("B").get(guild_id) {
-            Some(call) => {
-                let lock = call.lock().await;
-                lock.current_channel().expect("C")
-            }
-            // TODO: ?
-            _ => {
-                return Ok(());
+        let call = match manager.get(guild_id) {
+            Some(call) => call,
+            None => return Ok(()),
+        };
+        let channel_id = {
+            let lock = call.lock().await;
+            match lock.current_channel() {
+                Some(id) => id,
+                None => return Ok(()),
             }
         };
 
-        let guild_id = new.guild_id.expect("D");
-
-        let other_member_count = ctx
+        let user_count_in_channel = ctx
             .cache
             .guild(guild_id)
-            .expect("E")
+            .expect("`VoiceStateUpdate` events should only be dispatched from guild voice channels")
             .voice_states
             .values()
             .filter(|vs| vs.channel_id.map(songbird::id::ChannelId::from) == Some(channel_id))
-            .count()
-            - 1;
+            .count();
 
-        if other_member_count == 0 {
+        if user_count_in_channel <= 1 {
             let player_context = match lavalink_client.get_player_context(guild_id) {
                 Some(player_context) => player_context,
-                None => {
-                    return Ok(());
-                }
+                None => return Ok(()),
             };
             let now_playing = player_context.get_player().await?.track;
 
