@@ -8,12 +8,12 @@ use lavalink_rs::{
 };
 use poise::FrameworkContext;
 use serenity::all::{Context as SerenityContext, CreateMessage, FullEvent};
-use tracing::{debug, info};
+use tracing::{debug, info, warn};
 
 use super::{
     errors::SongbirdError,
     logic::{create_now_playing_embed, get_lavalink_client, leave_voice_channel},
-    models::PlayerContextData,
+    models::{NowPlayingEmbed, PlayerContextData},
 };
 use crate::state_store::StateStore;
 
@@ -97,27 +97,33 @@ pub async fn track_start(client: LavalinkClient, session_id: String, event: &Tra
     let player_context = client.get_player_context(event.guild_id).unwrap();
     let data = player_context.data::<PlayerContextData>().unwrap();
 
-    let now_playing_embed = {
-        let lock = data.now_playing_embed.lock().await;
-        lock.clone()
-    };
+    let mut lock = data.now_playing_embed.lock().await;
 
-    if let Some(message) = now_playing_embed {
-        message.delete(data.http.clone()).await.unwrap();
+    if let Some(now_playing_embed) = lock.take() {
+        if let Err(error) = now_playing_embed.message.delete(data.http.clone()).await {
+            warn!("failed to delete now playing embed: {}", error);
+        }
     }
 
     let track = event.track.clone();
-    let embed = create_now_playing_embed(track);
+    let embed = create_now_playing_embed(track.clone());
     let message = CreateMessage::new().embed(embed);
 
-    let message = {
-        let lock = *data.channel_id.lock().await;
-
-        lock.send_message(data.http.clone(), message).await.unwrap()
-    };
-
-    let mut lock = data.now_playing_embed.lock().await;
-    *lock = Some(message);
+    match data
+        .channel_id
+        .lock()
+        .await
+        .send_message(data.http.clone(), message)
+        .await
+    {
+        Ok(message) => {
+            *lock = Some(NowPlayingEmbed {
+                track_identifier: track.info.identifier,
+                message,
+            })
+        }
+        Err(error) => warn!("failed to send now playing embed: {}", error),
+    }
 }
 
 #[hook]
@@ -131,15 +137,13 @@ pub async fn track_end(client: LavalinkClient, session_id: String, event: &Track
         .data::<PlayerContextData>()
         .expect("player context data should be initialized");
 
-    let now_playing_embed = {
-        let lock = data.now_playing_embed.lock().await;
-        lock.clone()
-    };
-
-    if let Some(message) = now_playing_embed {
-        message.delete(data.http.clone()).await.unwrap();
-    }
-
     let mut lock = data.now_playing_embed.lock().await;
-    *lock = None;
+
+    if let Some(now_playing_embed) = lock.take() {
+        if now_playing_embed.track_identifier == event.track.info.identifier {
+            if let Err(error) = now_playing_embed.message.delete(data.http.clone()).await {
+                warn!("failed to delete now playing embed: {}", error);
+            }
+        }
+    }
 }

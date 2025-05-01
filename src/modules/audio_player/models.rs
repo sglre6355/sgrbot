@@ -6,10 +6,16 @@ use serenity::all::{ChannelId, Color, Http, Message};
 use tokio::sync::Mutex;
 
 #[derive(Debug)]
+pub struct NowPlayingEmbed {
+    pub track_identifier: String,
+    pub message: Message,
+}
+
+#[derive(Debug)]
 pub struct PlayerContextData {
     pub channel_id: Mutex<ChannelId>,
     pub http: Arc<Http>,
-    pub now_playing_embed: Mutex<Option<Message>>,
+    pub now_playing_embed: Mutex<Option<NowPlayingEmbed>>,
 }
 
 #[derive(Debug, Serialize, Deserialize)]
