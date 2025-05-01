@@ -6,12 +6,13 @@ use futures::{StreamExt, future};
 use lavalink_rs::prelude::{SearchEngines, TrackInQueue, TrackLoadData};
 use poise::CreateReply;
 use serenity::all::{Channel, Color, CreateEmbed};
+use tracing::error;
 
 use super::{
     errors::{JoinError, LeaveError, SongbirdError},
     logic::{
         get_lavalink_client, join_voice_channel, leave_voice_channel,
-        resolve_target_voice_channel_id, set_now_playing_text_channel,
+        resolve_target_voice_channel_id, search_tracks, set_now_playing_text_channel,
     },
     models::{PlayerContextData, TrackUserData},
 };
@@ -127,8 +128,39 @@ pub async fn leave(ctx: Context<'_>) -> Result<()> {
     Ok(())
 }
 
+async fn autocomplete_search_query<'a>(
+    ctx: Context<'_>,
+    partial: &str,
+) -> impl Iterator<Item = String> + Send + 'a {
+    let lavalink_client = match get_lavalink_client(ctx.data()) {
+        Ok(client) => client,
+        Err(error) => {
+            error!("autocomplete callback failed: {}", error);
+            return Vec::new().into_iter().take(0);
+        }
+    };
+
+    let search_result: Vec<String> = search_tracks(
+        lavalink_client,
+        ctx.guild_id()
+            .expect("this autocomplete callback should only be used with guild-only commands"),
+        SearchEngines::YouTube,
+        partial,
+    )
+    .await
+    .unwrap_or(Vec::new())
+    .iter()
+    .map(|track_info| track_info.title.to_owned())
+    .collect();
+
+    search_result.into_iter().take(10)
+}
+
 #[poise::command(slash_command, guild_only)]
-pub async fn play(ctx: Context<'_>, query: String) -> Result<()> {
+pub async fn play(
+    ctx: Context<'_>,
+    #[autocomplete = "autocomplete_search_query"] query: String,
+) -> Result<()> {
     ctx.defer().await?;
 
     let guild_id = ctx

@@ -1,6 +1,9 @@
 use std::{collections::HashMap, sync::Arc};
 
-use lavalink_rs::{client::LavalinkClient, model::track::TrackData};
+use lavalink_rs::{
+    model::track::{TrackData, TrackInfo},
+    prelude::{LavalinkClient, SearchEngines, TrackLoadData},
+};
 use serenity::all::{
     Channel, ChannelId, CreateEmbed, CreateEmbedAuthor, CreateEmbedFooter, GuildId, Http, UserId,
     VoiceState,
@@ -168,4 +171,23 @@ pub fn create_now_playing_embed(track: TrackData) -> CreateEmbed {
     }
 
     embed
+}
+
+pub async fn search_tracks(
+    lavalink_client: Arc<LavalinkClient>,
+    guild_id: GuildId,
+    search_engine: SearchEngines,
+    query: &str,
+) -> anyhow::Result<Vec<TrackInfo>> {
+    let query = search_engine.to_query(query)?;
+
+    let search_result: Vec<TrackInfo> =
+        match lavalink_client.load_tracks(guild_id, &query).await?.data {
+            Some(TrackLoadData::Search(tracks)) => {
+                tracks.iter().map(|track| track.info.to_owned()).collect()
+            }
+            _ => return Ok(Vec::new()),
+        };
+
+    Ok(search_result)
 }
