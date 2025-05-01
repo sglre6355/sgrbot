@@ -97,6 +97,15 @@ pub async fn track_start(client: LavalinkClient, session_id: String, event: &Tra
     let player_context = client.get_player_context(event.guild_id).unwrap();
     let data = player_context.data::<PlayerContextData>().unwrap();
 
+    let now_playing_embed = {
+        let lock = data.now_playing_embed.lock().await;
+        lock.clone()
+    };
+
+    if let Some(message) = now_playing_embed {
+        message.delete(data.http.clone()).await.unwrap();
+    }
+
     let track = event.track.clone();
     let embed = create_now_playing_embed(track);
     let message = CreateMessage::new().embed(embed);
