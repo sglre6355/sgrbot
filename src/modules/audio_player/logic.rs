@@ -4,6 +4,7 @@ use lavalink_rs::{
     model::track::{TrackData, TrackInfo},
     prelude::{LavalinkClient, SearchEngines, TrackLoadData},
 };
+use reqwest::{Client, StatusCode};
 use serenity::all::{
     Channel, ChannelId, CreateEmbed, CreateEmbedAuthor, CreateEmbedFooter, GuildId, Http, UserId,
     VoiceState,
@@ -123,7 +124,49 @@ pub fn format_track_length_ms(milliseconds: u64) -> String {
     parts.join(" ")
 }
 
-pub fn create_now_playing_embed(track: TrackData) -> CreateEmbed {
+async fn get_best_thumbnail(track_info: TrackInfo) -> Option<String> {
+    let source = Source::from_source_name(track_info.source_name);
+
+    let client = Client::new();
+
+    match source {
+        Source::Youtube => {
+            let qualities = ["maxresdefault", "sddefault", "hqdefault", "mqdefault"];
+
+            let mut resolved_url = None;
+
+            for quality in &qualities {
+                let url = format!(
+                    "https://img.youtube.com/vi/{}/{}.jpg",
+                    track_info.identifier, quality
+                );
+                match client.head(&url).send().await {
+                    Ok(response) if response.status() == StatusCode::OK => {
+                        resolved_url = Some(url);
+                    }
+                    _ => continue,
+                }
+            }
+
+            resolved_url.or(track_info.artwork_url)
+        }
+        Source::Twitch => {
+            let url = track_info
+                .artwork_url
+                .clone()
+                .expect("Twitch source should always have an artwork_url")
+                .replace("440x248", "1280x720");
+
+            match client.head(&url).send().await {
+                Ok(response) if response.status() == StatusCode::OK => Some(url),
+                _ => track_info.artwork_url,
+            }
+        }
+        _ => track_info.artwork_url,
+    }
+}
+
+pub async fn create_now_playing_embed(track: TrackData) -> CreateEmbed {
     let user_data: TrackUserData = serde_json::from_str(
         &track
             .user_data
@@ -132,38 +175,26 @@ pub fn create_now_playing_embed(track: TrackData) -> CreateEmbed {
     )
     .expect("encoded user data should be valid");
 
-    let source = Source::from_source_name(track.info.source_name);
+    let source = Source::from_source_name(track.info.source_name.clone());
 
     let author = CreateEmbedAuthor::new("Now Playing").icon_url(source.icon_url());
     let footer = CreateEmbedFooter::new(format!("Requested by {}", user_data.requester_name))
         .icon_url(user_data.requester_avatar_url);
 
     let mut embed = CreateEmbed::new()
-        .title(track.info.title)
+        .title(track.info.title.clone())
         .color(source.color())
         .author(author)
-        .field("Author", track.info.author, true)
+        .field("Author", track.info.author.clone(), true)
         .footer(footer)
         .timestamp(user_data.request_timestamp);
 
-    if let Some(uri) = track.info.uri {
+    if let Some(uri) = track.info.uri.clone() {
         embed = embed.url(uri);
     }
 
-    if let Some(mut image_url) = track.info.artwork_url {
-        // TODO
-        if source == Source::Youtube {
-            image_url = image_url
-                .replace("/sddefault", "/maxresdefault")
-                .replace("/hqdefault", "/maxresdefault")
-                .replace("/mqdefault", "/maxresdefault")
-                .replace("/default", "/maxresdefault");
-        }
-        if source == Source::Twitch {
-            image_url = image_url.replace("440x248", "1280x720");
-        }
-
-        embed = embed.image(image_url);
+    if let Some(thumbnail_url) = get_best_thumbnail(track.info.clone()).await {
+        embed = embed.image(thumbnail_url);
     }
 
     if !track.info.is_stream {

@@ -106,7 +106,7 @@ pub async fn track_start(client: LavalinkClient, session_id: String, event: &Tra
     }
 
     let track = event.track.clone();
-    let embed = create_now_playing_embed(track.clone());
+    let embed = create_now_playing_embed(track.clone()).await;
     let message = CreateMessage::new().embed(embed);
 
     match data
