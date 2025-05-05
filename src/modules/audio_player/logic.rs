@@ -143,6 +143,7 @@ async fn get_best_thumbnail(track_info: TrackInfo) -> Option<String> {
                 match client.head(&url).send().await {
                     Ok(response) if response.status() == StatusCode::OK => {
                         resolved_url = Some(url);
+                        break;
                     }
                     _ => continue,
                 }
