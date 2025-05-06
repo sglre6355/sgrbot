@@ -1,3 +1,4 @@
+mod error_handler;
 mod event_handler;
 mod modules;
 mod state_store;
@@ -10,7 +11,7 @@ use poise::FrameworkOptions;
 use serenity::prelude::{Client, GatewayIntents};
 use state_store::StateStore;
 use tokio::signal::unix::{SignalKind, signal};
-use tracing::{info, instrument};
+use tracing::{error, info, instrument};
 
 pub const VERSION: &str = env!("CARGO_PKG_VERSION");
 
@@ -29,6 +30,13 @@ async fn main() -> Result<()> {
     let mut options: FrameworkOptions<StateStore, anyhow::Error> = FrameworkOptions {
         event_handler: |ctx, event, framework, data| {
             Box::pin(modules::event_handler(ctx, event, framework, data))
+        },
+        on_error: |error| {
+            Box::pin(async move {
+                if let Err(error) = error_handler::on_error(error).await {
+                    error!("Error handling failed: {}", error);
+                }
+            })
         },
         ..Default::default()
     };
