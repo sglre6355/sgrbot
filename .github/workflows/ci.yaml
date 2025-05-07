@@ -66,6 +66,8 @@ jobs:
             usr-local-cargo-registry
             app-target
           key: cache-${{ hashFiles('Cargo.lock', 'Containerfile') }}
+          restore-keys: |
+            cache-
       - name: Inject cache
         uses: reproducible-containers/buildkit-cache-dance@v3.1.0
         with:
