@@ -415,32 +415,13 @@ pub async fn skip(ctx: Context<'_>) -> Result<()> {
     Ok(())
 }
 
-#[poise::command(slash_command, guild_only)]
-pub async fn clear(ctx: Context<'_>) -> Result<()> {
-    let guild_id = ctx
-        .guild_id()
-        .expect("this command should only be run in guilds");
-
-    let lavalink_client = get_lavalink_client(ctx.data())?;
-
-    let Some(player_context) = lavalink_client.get_player_context(guild_id) else {
-        let embed = CreateEmbed::new().description("Not connected to any voice channel.");
-        let reply = CreateReply::default().embed(embed);
-        ctx.send(reply).await?;
-        return Ok(());
-    };
-
-    player_context.get_queue().clear()?;
-
-    let embed = CreateEmbed::new().description("Cleared the queue.");
-    let reply = CreateReply::default().embed(embed);
-    ctx.send(reply).await?;
-
+#[poise::command(slash_command, guild_only, subcommands("list", "clear"))]
+pub async fn queue(_ctx: Context<'_>) -> Result<()> {
     Ok(())
 }
 
 #[poise::command(slash_command, guild_only)]
-pub async fn queue(ctx: Context<'_>) -> Result<()> {
+pub async fn list(ctx: Context<'_>) -> Result<()> {
     let guild_id = ctx
         .guild_id()
         .expect("this command should only be run in guilds");
@@ -485,6 +466,30 @@ pub async fn queue(ctx: Context<'_>) -> Result<()> {
     Ok(())
 }
 
+#[poise::command(slash_command, guild_only)]
+pub async fn clear(ctx: Context<'_>) -> Result<()> {
+    let guild_id = ctx
+        .guild_id()
+        .expect("this command should only be run in guilds");
+
+    let lavalink_client = get_lavalink_client(ctx.data())?;
+
+    let Some(player_context) = lavalink_client.get_player_context(guild_id) else {
+        let embed = CreateEmbed::new().description("Not connected to any voice channel.");
+        let reply = CreateReply::default().embed(embed);
+        ctx.send(reply).await?;
+        return Ok(());
+    };
+
+    player_context.get_queue().clear()?;
+
+    let embed = CreateEmbed::new().description("Cleared the queue.");
+    let reply = CreateReply::default().embed(embed);
+    ctx.send(reply).await?;
+
+    Ok(())
+}
+
 pub fn all() -> Vec<Command> {
     vec![
         join(),
@@ -494,7 +499,6 @@ pub fn all() -> Vec<Command> {
         pause(),
         resume(),
         skip(),
-        clear(),
         queue(),
     ]
 }
