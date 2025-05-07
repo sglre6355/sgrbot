@@ -1,3 +1,4 @@
+mod autocompletes;
 mod commands;
 mod errors;
 mod events;
