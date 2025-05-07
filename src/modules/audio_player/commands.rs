@@ -542,15 +542,22 @@ pub async fn remove(
     }
 
     let index = track_number - 1;
-    let track_info = queue.get_track(index).await?.unwrap().track.info;
+    let track_info = queue
+        .get_track(index)
+        .await?
+        .expect("track at given index must exist due to prior bounds check")
+        .track
+        .info;
 
     queue.remove(index)?;
 
-    let embed = CreateEmbed::new().description(format!(
-        "Removed [{}]({}).",
-        track_info.title,
-        track_info.uri.unwrap(),
-    ));
+    let embed = CreateEmbed::new().description({
+        if let Some(uri) = track_info.uri {
+            format!("Removed [{}]({}).", track_info.title, uri)
+        } else {
+            format!("Removed **{}**.", track_info.title)
+        }
+    });
     let reply = CreateReply::default().embed(embed);
     ctx.send(reply).await?;
 
