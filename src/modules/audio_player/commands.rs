@@ -5,7 +5,7 @@ use chrono::Utc;
 use futures::{StreamExt, future};
 use lavalink_rs::prelude::{SearchEngines, TrackInQueue, TrackLoadData};
 use poise::CreateReply;
-use serenity::all::{Channel, Color, CreateEmbed};
+use serenity::all::{AutocompleteChoice, Channel, Color, CreateEmbed};
 use tracing::error;
 
 use super::{
@@ -415,7 +415,7 @@ pub async fn skip(ctx: Context<'_>) -> Result<()> {
     Ok(())
 }
 
-#[poise::command(slash_command, guild_only, subcommands("list", "clear"))]
+#[poise::command(slash_command, guild_only, subcommands("list", "remove", "clear"))]
 pub async fn queue(_ctx: Context<'_>) -> Result<()> {
     Ok(())
 }
@@ -460,6 +460,97 @@ pub async fn list(ctx: Context<'_>) -> Result<()> {
             CreateEmbed::new().title("Queue").description(description)
         }
     };
+    let reply = CreateReply::default().embed(embed);
+    ctx.send(reply).await?;
+
+    Ok(())
+}
+
+async fn autocomplete_track_number<'a>(
+    ctx: Context<'_>,
+    partial: &str,
+) -> impl Iterator<Item = AutocompleteChoice> + Send + 'a {
+    let guild_id = ctx
+        .guild_id()
+        .expect("this autocomplete should only be used with guild-only commands");
+
+    let lavalink_client = match get_lavalink_client(ctx.data()) {
+        Ok(client) => client,
+        Err(error) => {
+            error!("autocomplete callback failed: {}", error);
+            return Vec::new().into_iter().take(0);
+        }
+    };
+
+    let Some(player_context) = lavalink_client.get_player_context(guild_id) else {
+        return Vec::new().into_iter().take(0);
+    };
+
+    let Ok(queue) = player_context.get_queue().get_queue().await else {
+        return Vec::new().into_iter().take(0);
+    };
+
+    let choices: Vec<AutocompleteChoice> = queue
+        .iter()
+        .enumerate()
+        .filter_map(|(index, track_in_queue)| {
+            let track_number = index + 1;
+            let title = &track_in_queue.track.info.title;
+            let label = format!("{}. {}", track_number, title);
+
+            if track_number.to_string().starts_with(partial)
+                || title.to_lowercase().starts_with(&partial.to_lowercase())
+            {
+                Some(AutocompleteChoice::new(label, track_number))
+            } else {
+                None
+            }
+        })
+        .collect();
+
+    // Discord limits autocomplete suggestions to a maximum of 25 choices
+    choices.into_iter().take(25)
+}
+
+#[poise::command(slash_command, guild_only)]
+pub async fn remove(
+    ctx: Context<'_>,
+    #[autocomplete = "autocomplete_track_number"] track_number: usize,
+) -> Result<()> {
+    let guild_id = ctx
+        .guild_id()
+        .expect("this command should only be run in guilds");
+
+    let lavalink_client = get_lavalink_client(ctx.data())?;
+
+    let Some(player_context) = lavalink_client.get_player_context(guild_id) else {
+        let embed = CreateEmbed::new().description("Not connected to any voice channel.");
+        let reply = CreateReply::default().embed(embed);
+        ctx.send(reply).await?;
+        return Ok(());
+    };
+
+    let queue = player_context.get_queue();
+
+    if !(0 < track_number && track_number <= queue.get_count().await?) {
+        let embed = CreateEmbed::new()
+            .description("Invalid track number specified.")
+            .color(Color::RED);
+        let reply = CreateReply::default().embed(embed);
+        ctx.send(reply).await?;
+        return Ok(());
+    }
+
+    let index = track_number - 1;
+    let track_info = queue.get_track(index).await?.unwrap().track.info;
+
+    queue.remove(index)?;
+
+    let embed = CreateEmbed::new().description(format!(
+        "Removed [{}]({}).",
+        track_info.title,
+        track_info.uri.unwrap(),
+    ));
     let reply = CreateReply::default().embed(embed);
     ctx.send(reply).await?;
 
