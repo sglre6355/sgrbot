@@ -230,7 +230,7 @@ pub async fn play(
 
     let description = {
         if let Some(info) = playlist_info {
-            format!("Added playlist to the queue: `{}`", info.name)
+            format!("Added playlist **{}** to the queue", info.name)
         } else {
             let first = tracks.first().unwrap();
             format!(
