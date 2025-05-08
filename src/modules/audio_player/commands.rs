@@ -2,7 +2,6 @@ use std::time::Duration;
 
 use anyhow::Result;
 use chrono::Utc;
-use futures::{StreamExt, future};
 use lavalink_rs::prelude::{SearchEngines, TrackInQueue, TrackLoadData};
 use poise::CreateReply;
 use serenity::all::{Channel, Color, CreateEmbed};
@@ -11,7 +10,7 @@ use super::{
     autocompletes::{autocomplete_search_query, autocomplete_track_number},
     errors::{JoinError, LeaveError, SongbirdError},
     logic::{
-        get_lavalink_client, join_voice_channel, leave_voice_channel,
+        create_queue_embed, get_lavalink_client, join_voice_channel, leave_voice_channel,
         resolve_target_voice_channel_id, set_now_playing_text_channel,
     },
     models::{PlayerContextData, TrackUserData},
@@ -393,7 +392,7 @@ pub async fn queue(_ctx: Context<'_>) -> Result<()> {
 }
 
 #[poise::command(slash_command, guild_only)]
-pub async fn list(ctx: Context<'_>) -> Result<()> {
+pub async fn list(ctx: Context<'_>, page: Option<usize>) -> Result<()> {
     let guild_id = ctx
         .guild_id()
         .expect("this command should only be run in guilds");
@@ -407,32 +406,9 @@ pub async fn list(ctx: Context<'_>) -> Result<()> {
         return Ok(());
     };
 
-    let embed = {
-        let queue = player_context.get_queue();
-        let max = queue.get_count().await?.min(9);
-
-        if queue.get_count().await? == 0 {
-            CreateEmbed::new().description("Queue is empty.")
-        } else {
-            let description = queue
-                .enumerate()
-                .take_while(|(index, _)| future::ready(*index < max))
-                .map(|(index, x)| {
-                    format!(
-                        "{}. [{}]({}) - {}",
-                        index + 1,
-                        x.track.info.title,
-                        x.track.info.uri.unwrap(),
-                        x.track.info.author,
-                    )
-                })
-                .collect::<Vec<_>>()
-                .await
-                .join("\n");
-            CreateEmbed::new().title("Queue").description(description)
-        }
-    };
-    let reply = CreateReply::default().embed(embed);
+    let page = page.map(|n| n - 1).unwrap_or(0);
+    let embed = create_queue_embed(player_context.get_queue(), page).await;
+    let reply = CreateReply::default().embed(embed).ephemeral(true);
     ctx.send(reply).await?;
 
     Ok(())

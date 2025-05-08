@@ -1,7 +1,9 @@
 use std::{collections::HashMap, sync::Arc};
 
+use futures::{StreamExt as _, future};
 use lavalink_rs::{
     model::track::{TrackData, TrackInfo},
+    player_context::QueueRef,
     prelude::{LavalinkClient, SearchEngines, TrackLoadData},
 };
 use reqwest::{Client, StatusCode};
@@ -203,6 +205,65 @@ pub async fn create_now_playing_embed(track: TrackData) -> CreateEmbed {
     }
 
     embed
+}
+
+pub async fn create_queue_embed(queue: QueueRef, page: usize) -> CreateEmbed {
+    const TRACKS_PER_PAGE: usize = 10;
+
+    let track_count = queue.get_count().await.expect(
+        "this function should only be called when the bot is connected to a voice channel.",
+    );
+    let total_pages = track_count.div_ceil(TRACKS_PER_PAGE);
+
+    // TODO
+    let page = if page < total_pages {
+        page
+    } else {
+        total_pages - 1
+    };
+
+    let start = page * TRACKS_PER_PAGE;
+    let end = (start + TRACKS_PER_PAGE).min(track_count);
+
+    let description = {
+        if track_count == 0 {
+            "Queue is empty.".to_owned()
+        } else {
+            queue
+                .enumerate()
+                .filter(|(index, _)| future::ready(start <= *index && *index < end))
+                .map(|(index, x)| {
+                    if let Some(uri) = x.track.info.uri {
+                        format!(
+                            "{}. [{}]({}) - {}",
+                            index + 1,
+                            x.track.info.title,
+                            uri,
+                            x.track.info.author,
+                        )
+                    } else {
+                        format!(
+                            "{}. **{}** - {}",
+                            index + 1,
+                            x.track.info.title,
+                            x.track.info.author,
+                        )
+                    }
+                })
+                .collect::<Vec<_>>()
+                .await
+                .join("\n")
+        }
+    };
+
+    CreateEmbed::new()
+        .title("Queue")
+        .description(description)
+        .footer(CreateEmbedFooter::new(format!(
+            "Page {}/{}",
+            page + 1,
+            total_pages
+        )))
 }
 
 pub async fn search_tracks(
