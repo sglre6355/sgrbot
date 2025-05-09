@@ -220,7 +220,7 @@ pub async fn on_error<U, E: Display + Debug>(
             );
         }
         FrameworkError::UnknownInteraction { interaction, .. } => {
-            warn!("received unknown interaction \"{}\"", interaction.data.name);
+            warn!("Received unknown interaction \"{}\"", interaction.data.name);
         }
         FrameworkError::__NonExhaustive(unreachable) => match unreachable {},
     }

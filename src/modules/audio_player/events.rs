@@ -101,7 +101,7 @@ pub async fn track_start(client: LavalinkClient, session_id: String, event: &Tra
 
     if let Some(now_playing_embed) = lock.take() {
         if let Err(error) = now_playing_embed.message.delete(data.http.clone()).await {
-            warn!("failed to delete now playing embed: {}", error);
+            warn!("Failed to delete now playing embed: {}", error);
         }
     }
 
@@ -122,7 +122,7 @@ pub async fn track_start(client: LavalinkClient, session_id: String, event: &Tra
                 message,
             })
         }
-        Err(error) => warn!("failed to send now playing embed: {}", error),
+        Err(error) => warn!("Failed to send now playing embed: {}", error),
     }
 }
 
@@ -144,7 +144,7 @@ pub async fn track_end(client: LavalinkClient, session_id: String, event: &Track
     if let Some(ref mut now_playing_embed) = *lock {
         if now_playing_embed.track_identifier == event.track.info.identifier {
             if let Err(error) = now_playing_embed.message.delete(data.http.clone()).await {
-                warn!("failed to delete now playing embed: {}", error);
+                warn!("Failed to delete now playing embed: {}", error);
             }
 
             *lock = None;

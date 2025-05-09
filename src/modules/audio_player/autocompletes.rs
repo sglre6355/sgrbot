@@ -12,7 +12,7 @@ pub async fn autocomplete_search_query<'a>(
     let lavalink_client = match get_lavalink_client(ctx.data()) {
         Ok(client) => client,
         Err(error) => {
-            error!("autocomplete callback failed: {}", error);
+            error!("Autocomplete callback failed: {}", error);
             return Vec::new().into_iter().take(0);
         }
     };
@@ -44,7 +44,7 @@ pub async fn autocomplete_track_number<'a>(
     let lavalink_client = match get_lavalink_client(ctx.data()) {
         Ok(client) => client,
         Err(error) => {
-            error!("autocomplete callback failed: {}", error);
+            error!("Autocomplete callback failed: {}", error);
             return Vec::new().into_iter().take(0);
         }
     };
