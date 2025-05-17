@@ -19,14 +19,20 @@ pub enum JoinError {
     #[error(transparent)]
     ModuleError(#[from] ModuleError),
     #[error(transparent)]
-    SongbirdError(#[from] SongbirdError),
+    SongbirdError(Box<SongbirdError>),
     #[error(transparent)]
-    LavalinkError(#[from] LavalinkError),
+    LavalinkError(Box<LavalinkError>),
 }
 
 impl From<SongbirdJoinError> for JoinError {
     fn from(value: SongbirdJoinError) -> Self {
-        Self::SongbirdError(SongbirdError::JoinError(value))
+        Self::SongbirdError(Box::new(SongbirdError::JoinError(value)))
+    }
+}
+
+impl From<LavalinkError> for JoinError {
+    fn from(value: LavalinkError) -> Self {
+        Self::LavalinkError(Box::new(value))
     }
 }
 
