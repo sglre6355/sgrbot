@@ -89,13 +89,12 @@ pub async fn leave(ctx: Context<'_>) -> Result<()> {
 
     let lavalink_client = get_lavalink_client(ctx.data())?;
 
-    if let Some(player_context) = lavalink_client.get_player_context(guild_id) {
-        let now_playing = player_context.get_player().await?.track;
-
-        if now_playing.is_some() {
-            player_context.get_queue().clear()?;
-            player_context.skip()?;
-        }
+    if let Some(player_context) = lavalink_client.get_player_context(guild_id)
+        && let now_playing = player_context.get_player().await?.track
+        && now_playing.is_some()
+    {
+        player_context.get_queue().clear()?;
+        player_context.skip()?;
 
         // wait for now playing embed to be deleted before disconnecting from voice channel
         // TODO: detect now_playing_embed is None and proceed?

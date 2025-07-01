@@ -34,16 +34,11 @@ pub async fn handler(
             "`VoiceStateUpdate` events should only be dispatched from guild voice channels",
         );
 
-        let call = match manager.get(guild_id) {
-            Some(call) => call,
-            None => return Ok(()),
+        let Some(call) = manager.get(guild_id) else {
+            return Ok(());
         };
-        let channel_id = {
-            let lock = call.lock().await;
-            match lock.current_channel() {
-                Some(id) => id,
-                None => return Ok(()),
-            }
+        let Some(channel_id) = call.lock().await.current_channel() else {
+            return Ok(());
         };
 
         let user_count_in_channel = ctx
@@ -55,23 +50,22 @@ pub async fn handler(
             .filter(|vs| vs.channel_id.map(songbird::id::ChannelId::from) == Some(channel_id))
             .count();
 
-        if user_count_in_channel <= 1 {
-            let player_context = match lavalink_client.get_player_context(guild_id) {
-                Some(player_context) => player_context,
-                None => return Ok(()),
-            };
-            let now_playing = player_context.get_player().await?.track;
+        if user_count_in_channel > 1 {
+            return Ok(());
+        }
 
-            if now_playing.is_some() {
-                player_context.get_queue().clear()?;
-                player_context.skip()?;
-            }
+        if let Some(player_context) = lavalink_client.get_player_context(guild_id)
+            && let now_playing = player_context.get_player().await?.track
+            && now_playing.is_some()
+        {
+            player_context.get_queue().clear()?;
+            player_context.skip()?;
 
             // wait for track end event to dispatch
             tokio::time::sleep(Duration::from_secs(5)).await;
-
-            leave_voice_channel(manager, lavalink_client.clone(), guild_id).await?;
         }
+
+        leave_voice_channel(manager, lavalink_client.clone(), guild_id).await?;
     }
 
     Ok(())
@@ -141,13 +135,13 @@ pub async fn track_end(client: LavalinkClient, session_id: String, event: &Track
 
     // If now playing message data exists and the track identifier matches that of the event,
     // remove the corresponding message and set the now playing data to None.
-    if let Some(ref mut now_playing_embed) = *lock {
-        if now_playing_embed.track_identifier == event.track.info.identifier {
-            if let Err(error) = now_playing_embed.message.delete(data.http.clone()).await {
-                warn!("Failed to delete now playing embed: {}", error);
-            }
-
-            *lock = None;
+    if let Some(ref mut now_playing_embed) = *lock
+        && now_playing_embed.track_identifier == event.track.info.identifier
+    {
+        if let Err(error) = now_playing_embed.message.delete(data.http.clone()).await {
+            warn!("Failed to delete now playing embed: {}", error);
         }
+
+        *lock = None;
     }
 }
