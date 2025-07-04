@@ -66,7 +66,7 @@ pub async fn join(
     .await?;
 
     let embed = CreateEmbed::new()
-        .description(format!("Connected to <#{}>.", voice_channel_id))
+        .description(format!("Connected to <#{voice_channel_id}>."))
         .color(Color::new(0x08c404));
     let reply = CreateReply::default().embed(embed);
 

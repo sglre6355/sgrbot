@@ -63,7 +63,7 @@ pub async fn autocomplete_track_number<'a>(
         .filter_map(|(index, track_in_queue)| {
             let track_number = index + 1;
             let title = &track_in_queue.track.info.title;
-            let label = format!("{}. {}", track_number, title);
+            let label = format!("{track_number}. {title}");
 
             if track_number.to_string().starts_with(partial)
                 || title.to_lowercase().starts_with(&partial.to_lowercase())

@@ -33,8 +33,7 @@ pub async fn test(ctx: Context<'_>) -> Result<()> {
     };
 
     ctx.say(format!(
-        "This is a test message and the {}{} response since the last restart.",
-        count, ordinal_suffix
+        "This is a test message and the {count}{ordinal_suffix} response since the last restart."
     ))
     .await?;
 

@@ -71,12 +71,9 @@ pub async fn on_error<U, E: Display + Debug>(
                 None => "Please check the help menu for usage information",
             };
             let description = if let Some(input) = input {
-                format!(
-                    "**Cannot parse `{}` as argument: {}**\n{}",
-                    input, error, usage
-                )
+                format!("**Cannot parse `{input}` as argument: {error}**\n{usage}")
             } else {
-                format!("**{}**\n{}", error, usage)
+                format!("**{error}**\n{usage}")
             };
 
             let mentions = CreateAllowedMentions::new()
@@ -134,8 +131,7 @@ pub async fn on_error<U, E: Display + Debug>(
             let embed = CreateEmbed::new()
                 .title("Missing Bot Permissions")
                 .description(format!(
-                    "Command cannot be executed because the bot is lacking permissions: {}",
-                    missing_permissions,
+                    "Command cannot be executed because the bot is lacking permissions: {missing_permissions}",
                 ))
                 .color(Color::DARK_RED);
             let reply = CreateReply::default().embed(embed);
