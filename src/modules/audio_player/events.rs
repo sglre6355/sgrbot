@@ -93,10 +93,10 @@ pub async fn track_start(client: LavalinkClient, session_id: String, event: &Tra
 
     let mut lock = data.now_playing_embed.lock().await;
 
-    if let Some(now_playing_embed) = lock.take() {
-        if let Err(error) = now_playing_embed.message.delete(data.http.clone()).await {
-            warn!("Failed to delete now playing embed: {}", error);
-        }
+    if let Some(now_playing_embed) = lock.take()
+        && let Err(error) = now_playing_embed.message.delete(data.http.clone()).await
+    {
+        warn!("Failed to delete now playing embed: {}", error);
     }
 
     let track = event.track.clone();
