@@ -11,9 +11,7 @@ type InteractionHandler func(s *discordgo.Session, i *discordgo.InteractionCreat
 type EventHandler any
 
 // ModuleDependencies provides dependencies that modules may need during initialization.
-type ModuleDependencies struct {
-	Config *Config
-}
+type ModuleDependencies struct{}
 
 // Module defines the interface that all bot modules must implement.
 type Module interface {
@@ -35,4 +33,13 @@ type Module interface {
 
 	// Shutdown gracefully shuts down the module.
 	Shutdown() error
+}
+
+// ConfigurableModule is an optional interface for modules that need configuration.
+// Modules implementing this interface will have LoadConfig called before Init.
+type ConfigurableModule interface {
+	// LoadConfig loads and validates module-specific configuration.
+	// Called before Init() and before Discord connection is established.
+	// Should return an error if required configuration is missing or invalid.
+	LoadConfig() error
 }

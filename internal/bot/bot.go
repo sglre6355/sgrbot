@@ -32,6 +32,11 @@ func (b *Bot) LoadModules() {
 
 // Start initializes the bot, connects to Discord, and registers commands.
 func (b *Bot) Start() error {
+	// Load module configurations first (fail fast on config errors)
+	if err := b.loadModuleConfigs(); err != nil {
+		return fmt.Errorf("failed to load module configs: %w", err)
+	}
+
 	// Create Discord session
 	session, err := discordgo.New("Bot " + b.config.DiscordToken)
 	if err != nil {
@@ -90,9 +95,7 @@ func (b *Bot) Stop() error {
 
 // initModules initializes all loaded modules.
 func (b *Bot) initModules() error {
-	deps := ModuleDependencies{
-		Config: b.config,
-	}
+	deps := ModuleDependencies{}
 
 	for _, mod := range b.modules {
 		if err := mod.Init(deps); err != nil {
@@ -106,6 +109,20 @@ func (b *Bot) initModules() error {
 		moduleNames[i] = mod.Name()
 	}
 	slog.Info("initialized modules", "modules", moduleNames)
+
+	return nil
+}
+
+// loadModuleConfigs calls LoadConfig on modules that implement ConfigurableModule.
+func (b *Bot) loadModuleConfigs() error {
+	for _, mod := range b.modules {
+		if cm, ok := mod.(ConfigurableModule); ok {
+			if err := cm.LoadConfig(); err != nil {
+				return fmt.Errorf("failed to load config for %s module: %w", mod.Name(), err)
+			}
+			slog.Debug("loaded config for module", "module", mod.Name())
+		}
+	}
 
 	return nil
 }
