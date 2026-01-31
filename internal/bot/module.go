@@ -11,7 +11,9 @@ type InteractionHandler func(s *discordgo.Session, i *discordgo.InteractionCreat
 type EventHandler any
 
 // ModuleDependencies provides dependencies that modules may need during initialization.
-type ModuleDependencies struct{}
+type ModuleDependencies struct {
+	Session *discordgo.Session
+}
 
 // Module defines the interface that all bot modules must implement.
 type Module interface {
