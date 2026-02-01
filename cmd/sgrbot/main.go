@@ -46,5 +46,7 @@ func main() {
 	if err := b.Stop(); err != nil {
 		slog.Error("failed to shutdown", "error", err)
 	}
+
 	slog.Info("completed bot shutdown")
+	os.Exit(0)
 }
