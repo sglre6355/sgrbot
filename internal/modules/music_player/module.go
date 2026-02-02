@@ -6,6 +6,7 @@ import (
 
 	"github.com/bwmarrin/discordgo"
 	"github.com/caarlos0/env/v11"
+	"github.com/disgoorg/snowflake/v2"
 	"github.com/sglre6355/sgrbot/internal/bot"
 	"github.com/sglre6355/sgrbot/internal/modules/music_player/application/events"
 	"github.com/sglre6355/sgrbot/internal/modules/music_player/application/usecases"
@@ -25,6 +26,7 @@ type MusicPlayerModule struct {
 	config          *Config
 	handlers        *presentation.Handlers
 	autocomplete    *presentation.AutocompleteHandler
+	eventHandlers   *presentation.EventHandlers
 	lavalinkAdapter *infrastructure.LavalinkAdapter
 
 	// Event-driven components
@@ -149,12 +151,17 @@ func (m *MusicPlayerModule) initWithLavalink(deps bot.ModuleDependencies) error 
 	m.playbackHandler.Start(m.ctx)
 	m.notificationHandler.Start(m.ctx)
 
-	// Set event bus on Lavalink adapter for track end events
+	// Set event bus on Lavalink adapter for event publishing
 	lavalinkAdapter.SetEventBus(m.eventBus)
 
 	// Create presentation handlers
+	botID, err := snowflake.Parse(deps.Session.State.User.ID)
+	if err != nil {
+		return err
+	}
 	m.handlers = presentation.NewHandlers(voiceChannel, playback, queue, trackLoader)
 	m.autocomplete = presentation.NewAutocompleteHandler(repo, trackLoader)
+	m.eventHandlers = presentation.NewEventHandlers(botID, voiceChannel)
 
 	slog.Info("music_player module initialized with Lavalink")
 
@@ -201,11 +208,14 @@ func (m *MusicPlayerModule) handleVoiceServerUpdate(
 }
 
 func (m *MusicPlayerModule) handleVoiceStateUpdate(
-	_ *discordgo.Session,
+	s *discordgo.Session,
 	event *discordgo.VoiceStateUpdate,
 ) {
 	if m.lavalinkAdapter != nil {
 		m.lavalinkAdapter.OnVoiceStateUpdate(event)
+	}
+	if m.eventHandlers != nil {
+		m.eventHandlers.HandleVoiceStateUpdate(s, event)
 	}
 }
 

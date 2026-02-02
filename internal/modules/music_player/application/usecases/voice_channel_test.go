@@ -371,3 +371,138 @@ func TestVoiceChannelService_Leave_PublishesPlaybackFinishedEvent(t *testing.T) 
 		t.Error("expected PlaybackFinishedEvent to be published")
 	}
 }
+
+func TestVoiceChannelService_HandleBotVoiceStateChange_Disconnected(t *testing.T) {
+	guildID := snowflake.ID(1)
+	notificationChannelID := snowflake.ID(3)
+	voiceChannelID := snowflake.ID(4)
+	nowPlayingMsgID := snowflake.ID(999)
+
+	repo := newMockRepository()
+	bus := events.NewBus(10)
+	defer bus.Close()
+
+	// Create connected state with a now playing message
+	state := repo.createConnectedState(guildID, voiceChannelID, notificationChannelID)
+	state.SetNowPlayingMessageID(nowPlayingMsgID)
+
+	service := NewVoiceChannelService(repo, nil, nil, bus)
+
+	// Start listening for the event
+	eventReceived := make(chan events.PlaybackFinishedEvent, 1)
+	go func() {
+		select {
+		case event := <-bus.PlaybackFinished():
+			eventReceived <- event
+		case <-time.After(time.Second):
+		}
+	}()
+
+	// Handle bot disconnected (nil channel means disconnected)
+	service.HandleBotVoiceStateChange(BotVoiceStateChangeInput{
+		GuildID:      guildID,
+		NewChannelID: nil,
+	})
+
+	// Verify the event was published
+	select {
+	case event := <-eventReceived:
+		if event.GuildID != guildID {
+			t.Errorf("expected GuildID %d, got %d", guildID, event.GuildID)
+		}
+		if event.LastMessageID == nil || *event.LastMessageID != nowPlayingMsgID {
+			t.Errorf("expected LastMessageID %d, got %v", nowPlayingMsgID, event.LastMessageID)
+		}
+	case <-time.After(time.Second):
+		t.Error("expected PlaybackFinishedEvent to be published")
+	}
+
+	// Verify state was deleted
+	if repo.Get(guildID) != nil {
+		t.Error("expected state to be deleted")
+	}
+}
+
+func TestVoiceChannelService_HandleBotVoiceStateChange_Moved(t *testing.T) {
+	guildID := snowflake.ID(1)
+	notificationChannelID := snowflake.ID(3)
+	oldVoiceChannel := snowflake.ID(4)
+	newVoiceChannel := snowflake.ID(999)
+
+	repo := newMockRepository()
+
+	// Create connected state
+	repo.createConnectedState(guildID, oldVoiceChannel, notificationChannelID)
+
+	service := NewVoiceChannelService(repo, nil, nil, nil)
+
+	// Handle bot moved to different channel
+	service.HandleBotVoiceStateChange(BotVoiceStateChangeInput{
+		GuildID:      guildID,
+		NewChannelID: &newVoiceChannel,
+	})
+
+	// Verify voice channel was updated
+	state := repo.Get(guildID)
+	if state == nil {
+		t.Fatal("expected state to exist")
+	}
+	if state.GetVoiceChannelID() != newVoiceChannel {
+		t.Errorf("expected VoiceChannelID %d, got %d", newVoiceChannel, state.GetVoiceChannelID())
+	}
+}
+
+func TestVoiceChannelService_HandleBotVoiceStateChange_NoState(t *testing.T) {
+	guildID := snowflake.ID(1)
+
+	repo := newMockRepository()
+
+	service := NewVoiceChannelService(repo, nil, nil, nil)
+
+	// Handle bot disconnected when no state exists - should not panic
+	service.HandleBotVoiceStateChange(BotVoiceStateChangeInput{
+		GuildID:      guildID,
+		NewChannelID: nil,
+	})
+
+	// Verify nothing was deleted (no state existed)
+	if len(repo.deleted) != 0 {
+		t.Error("expected no deletions when state doesn't exist")
+	}
+}
+
+func TestVoiceChannelService_HandleBotVoiceStateChange_DisconnectedNoMessage(t *testing.T) {
+	guildID := snowflake.ID(1)
+	notificationChannelID := snowflake.ID(3)
+	voiceChannelID := snowflake.ID(4)
+
+	repo := newMockRepository()
+	bus := events.NewBus(10)
+	defer bus.Close()
+
+	// Create connected state WITHOUT a now playing message
+	repo.createConnectedState(guildID, voiceChannelID, notificationChannelID)
+
+	service := NewVoiceChannelService(repo, nil, nil, bus)
+
+	// Handle bot disconnected
+	service.HandleBotVoiceStateChange(BotVoiceStateChangeInput{
+		GuildID:      guildID,
+		NewChannelID: nil,
+	})
+
+	// Event should still be published but with nil LastMessageID
+	select {
+	case event := <-bus.PlaybackFinished():
+		if event.LastMessageID != nil {
+			t.Errorf("expected LastMessageID to be nil, got %v", event.LastMessageID)
+		}
+	case <-time.After(100 * time.Millisecond):
+		// No event is also acceptable since LastMessageID is nil
+	}
+
+	// Verify state was deleted
+	if repo.Get(guildID) != nil {
+		t.Error("expected state to be deleted")
+	}
+}

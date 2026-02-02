@@ -48,6 +48,68 @@ func (p *pendingVoiceConnection) onEvent(isVoiceState bool) {
 	}
 }
 
+// voiceEventBuffer buffers voice events to ensure both VoiceStateUpdate and
+// VoiceServerUpdate are received before forwarding to Lavalink.
+// This prevents "Partial Lavalink voice state" errors when events arrive out of order.
+type voiceEventBuffer struct {
+	mu sync.Mutex
+
+	// From VoiceStateUpdate
+	hasVoiceState bool
+	channelID     *snowflake.ID
+	sessionID     string
+
+	// From VoiceServerUpdate
+	hasVoiceServer bool
+	token          string
+	endpoint       string
+}
+
+// setVoiceState stores voice state data and returns true if both events are now ready.
+func (b *voiceEventBuffer) setVoiceState(channelID *snowflake.ID, sessionID string) bool {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+
+	b.hasVoiceState = true
+	b.channelID = channelID
+	b.sessionID = sessionID
+
+	return b.hasVoiceState && b.hasVoiceServer
+}
+
+// setVoiceServer stores voice server data and returns true if both events are now ready.
+func (b *voiceEventBuffer) setVoiceServer(token, endpoint string) bool {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+
+	b.hasVoiceServer = true
+	b.token = token
+	b.endpoint = endpoint
+
+	return b.hasVoiceState && b.hasVoiceServer
+}
+
+// getData returns the buffered data and resets the buffer.
+func (b *voiceEventBuffer) getData() (channelID *snowflake.ID, sessionID, token, endpoint string) {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+
+	channelID = b.channelID
+	sessionID = b.sessionID
+	token = b.token
+	endpoint = b.endpoint
+
+	// Reset buffer
+	b.hasVoiceState = false
+	b.hasVoiceServer = false
+	b.channelID = nil
+	b.sessionID = ""
+	b.token = ""
+	b.endpoint = ""
+
+	return
+}
+
 // LavalinkAdapter wraps DisGoLink to implement the port interfaces.
 type LavalinkAdapter struct {
 	link    disgolink.Client
@@ -56,6 +118,10 @@ type LavalinkAdapter struct {
 
 	pendingMu sync.Mutex
 	pending   map[snowflake.ID]*pendingVoiceConnection
+
+	// voiceBuffers holds buffered voice events per guild to handle out-of-order events
+	voiceBufferMu sync.Mutex
+	voiceBuffers  map[snowflake.ID]*voiceEventBuffer
 
 	bus *events.Bus
 }
@@ -77,9 +143,10 @@ func NewLavalinkAdapter(
 	}
 
 	adapter := &LavalinkAdapter{
-		session: session,
-		botID:   botID,
-		pending: make(map[snowflake.ID]*pendingVoiceConnection),
+		session:      session,
+		botID:        botID,
+		pending:      make(map[snowflake.ID]*pendingVoiceConnection),
+		voiceBuffers: make(map[snowflake.ID]*voiceEventBuffer),
 	}
 
 	// Create DisGoLink client
@@ -317,9 +384,16 @@ func (c *LavalinkAdapter) OnVoiceServerUpdate(event *discordgo.VoiceServerUpdate
 		return
 	}
 
-	c.link.OnVoiceServerUpdate(context.Background(), guildID, event.Token, event.Endpoint)
+	// Get or create voice buffer for this guild
+	buffer := c.getOrCreateVoiceBuffer(guildID)
 
-	// Signal that we received the voice server update
+	// Store voice server data and check if both events are ready
+	if buffer.setVoiceServer(event.Token, event.Endpoint) {
+		// Both events received, forward to Lavalink
+		c.forwardBufferedVoiceEvents(guildID, buffer)
+	}
+
+	// Signal that we received the voice server update (for JoinChannel waiting)
 	c.pendingMu.Lock()
 	pending := c.pending[guildID]
 	c.pendingMu.Unlock()
@@ -356,18 +430,68 @@ func (c *LavalinkAdapter) OnVoiceStateUpdate(event *discordgo.VoiceStateUpdate) 
 		channelID = &id
 	}
 
-	c.link.OnVoiceStateUpdate(context.Background(), guildID, channelID, sessionID)
-
-	// Signal that we received the voice state update (only for connections, not disconnections)
-	if channelID != nil {
-		c.pendingMu.Lock()
-		pending := c.pending[guildID]
-		c.pendingMu.Unlock()
-
-		if pending != nil {
-			pending.onEvent(true)
-		}
+	// Handle disconnect immediately (no need to wait for VoiceServerUpdate)
+	if channelID == nil {
+		c.link.OnVoiceStateUpdate(context.Background(), guildID, nil, sessionID)
+		c.clearVoiceBuffer(guildID)
+		return
 	}
+
+	// Get or create voice buffer for this guild
+	buffer := c.getOrCreateVoiceBuffer(guildID)
+
+	// Store voice state data and check if both events are ready
+	if buffer.setVoiceState(channelID, sessionID) {
+		// Both events received, forward to Lavalink
+		c.forwardBufferedVoiceEvents(guildID, buffer)
+	}
+
+	// Signal that we received the voice state update (for JoinChannel waiting)
+	c.pendingMu.Lock()
+	pending := c.pending[guildID]
+	c.pendingMu.Unlock()
+
+	if pending != nil {
+		pending.onEvent(true)
+	}
+}
+
+// getOrCreateVoiceBuffer returns the voice buffer for a guild, creating one if needed.
+func (c *LavalinkAdapter) getOrCreateVoiceBuffer(guildID snowflake.ID) *voiceEventBuffer {
+	c.voiceBufferMu.Lock()
+	defer c.voiceBufferMu.Unlock()
+
+	buffer, exists := c.voiceBuffers[guildID]
+	if !exists {
+		buffer = &voiceEventBuffer{}
+		c.voiceBuffers[guildID] = buffer
+	}
+	return buffer
+}
+
+// clearVoiceBuffer removes the voice buffer for a guild.
+func (c *LavalinkAdapter) clearVoiceBuffer(guildID snowflake.ID) {
+	c.voiceBufferMu.Lock()
+	defer c.voiceBufferMu.Unlock()
+	delete(c.voiceBuffers, guildID)
+}
+
+// forwardBufferedVoiceEvents sends the buffered voice events to Lavalink.
+func (c *LavalinkAdapter) forwardBufferedVoiceEvents(
+	guildID snowflake.ID,
+	buffer *voiceEventBuffer,
+) {
+	channelID, sessionID, token, endpoint := buffer.getData()
+
+	slog.Debug("forwarding buffered voice events to Lavalink",
+		"guild", guildID,
+		"channel", channelID,
+		"hasSessionID", sessionID != "",
+	)
+
+	// Forward to Lavalink in the correct order
+	c.link.OnVoiceStateUpdate(context.Background(), guildID, channelID, sessionID)
+	c.link.OnVoiceServerUpdate(context.Background(), guildID, token, endpoint)
 }
 
 // SetEventBus sets the event bus for publishing Lavalink events.
