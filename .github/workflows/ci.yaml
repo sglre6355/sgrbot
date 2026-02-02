@@ -3,10 +3,13 @@ on:
   push:
     branches:
       - main
+    tags:
+      - v*
     paths:
       - "**.go"
       - "go.mod"
       - "go.sum"
+      - ".ko.yaml"
       - ".golangci.yaml"
       - ".github/workflows/ci.yaml"
   pull_request:
@@ -60,3 +63,45 @@ jobs:
           go-version-file: "go.mod"
       - name: Build
         run: go build -v ./cmd/sgrbot
+  container:
+    name: Build and Push Container Image
+    runs-on: ubuntu-latest
+    needs: [lint, test, build-check]
+    if: github.event_name == 'push'
+    permissions:
+      contents: read
+      packages: write
+    env:
+      KO_DOCKER_REPO: ghcr.io/sglre6355/sgrbot
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v6
+      - name: Set up Go
+        uses: actions/setup-go@v6
+        with:
+          go-version-file: "go.mod"
+      - name: Set up ko
+        uses: ko-build/setup-ko@v0.9
+      - name: Login to GitHub Container Registry
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ github.token }}
+      - name: Determine tags and version
+        id: meta
+        run: |
+          if [[ "${{ github.ref }}" == refs/tags/v* ]]; then
+            echo "tags=${{ github.ref_name }},latest" >> "$GITHUB_OUTPUT"
+            echo "version=${{ github.ref_name }}" >> "$GITHUB_OUTPUT"
+          else
+            echo "tags=latest" >> "$GITHUB_OUTPUT"
+            echo "version=${{ github.sha }}" >> "$GITHUB_OUTPUT"
+          fi
+      - name: Build and push
+        env:
+          VERSION: ${{ steps.meta.outputs.version }}
+        run: |
+          ko build ./cmd/sgrbot \
+            --bare \
+            --tags=${{ steps.meta.outputs.tags }}
