@@ -7,7 +7,6 @@ import (
 	"syscall"
 
 	"github.com/sglre6355/sgrbot/internal/bot"
-	_ "github.com/sglre6355/sgrbot/internal/modules/test"
 )
 
 // version is set at build time via ldflags:
