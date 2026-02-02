@@ -7,6 +7,7 @@ import (
 	"syscall"
 
 	"github.com/sglre6355/sgrbot/internal/bot"
+	_ "github.com/sglre6355/sgrbot/internal/modules/music_player"
 )
 
 // version is set at build time via ldflags:

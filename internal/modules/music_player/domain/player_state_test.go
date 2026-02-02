@@ -1,0 +1,279 @@
+package domain
+
+import (
+	"sync"
+	"testing"
+
+	"github.com/disgoorg/snowflake/v2"
+)
+
+const (
+	testGuildID        = snowflake.ID(1)
+	testVoiceChannelID = snowflake.ID(100)
+	testNotifyChannel  = snowflake.ID(200)
+)
+
+func newTestPlayerState() *PlayerState {
+	return NewPlayerState(testGuildID, testVoiceChannelID, testNotifyChannel)
+}
+
+func TestNewPlayerState(t *testing.T) {
+	guildID := snowflake.ID(123456789)
+	voiceID := snowflake.ID(111)
+	notifyID := snowflake.ID(222)
+
+	state := NewPlayerState(guildID, voiceID, notifyID)
+
+	if state.GuildID != guildID {
+		t.Errorf("expected GuildID %d, got %d", guildID, state.GuildID)
+	}
+	if state.VoiceChannelID != voiceID {
+		t.Errorf("expected VoiceChannelID %d, got %d", voiceID, state.VoiceChannelID)
+	}
+	if state.NotificationChannelID != notifyID {
+		t.Errorf("expected NotificationChannelID %d, got %d", notifyID, state.NotificationChannelID)
+	}
+	if state.IsPaused() {
+		t.Error("expected not to be paused")
+	}
+	if state.Queue == nil {
+		t.Error("expected Queue to be initialized")
+	}
+	if state.CurrentTrack() != nil {
+		t.Error("expected CurrentTrack to be nil")
+	}
+}
+
+func TestPlayerState_StatusMethods(t *testing.T) {
+	state := newTestPlayerState()
+
+	// Initial state is idle
+	if !state.IsIdle() {
+		t.Error("new state should be idle")
+	}
+	if state.IsPlaying() {
+		t.Error("new state should not be playing")
+	}
+	if state.IsPaused() {
+		t.Error("new state should not be paused")
+	}
+
+	// Set playing
+	state.SetPlaying(&Track{ID: "track-1"})
+	if state.IsIdle() {
+		t.Error("playing state should not be idle")
+	}
+	if !state.IsPlaying() {
+		t.Error("playing state should be playing")
+	}
+	if state.IsPaused() {
+		t.Error("playing state should not be paused")
+	}
+
+	// Set paused
+	state.SetPaused()
+	if state.IsIdle() {
+		t.Error("paused state should not be idle")
+	}
+	if state.IsPlaying() {
+		t.Error("paused state should not be playing")
+	}
+	if !state.IsPaused() {
+		t.Error("paused state should be paused")
+	}
+}
+
+func TestPlayerState_SetVoiceChannel(t *testing.T) {
+	state := newTestPlayerState()
+	newVoiceID := snowflake.ID(999)
+
+	state.SetVoiceChannel(newVoiceID)
+
+	if state.VoiceChannelID != newVoiceID {
+		t.Errorf("expected VoiceChannelID %d, got %d", newVoiceID, state.VoiceChannelID)
+	}
+}
+
+func TestPlayerState_SetNotificationChannel(t *testing.T) {
+	state := newTestPlayerState()
+	newNotifyID := snowflake.ID(888)
+
+	state.SetNotificationChannel(newNotifyID)
+
+	if state.NotificationChannelID != newNotifyID {
+		t.Errorf(
+			"expected NotificationChannelID %d, got %d",
+			newNotifyID,
+			state.NotificationChannelID,
+		)
+	}
+}
+
+func TestPlayerState_SetPlaying(t *testing.T) {
+	state := newTestPlayerState()
+	track := &Track{ID: "track-1", Title: "Test Song"}
+
+	state.SetPlaying(track)
+
+	if state.CurrentTrack() != track {
+		t.Error("expected CurrentTrack to be set")
+	}
+	if state.IsPaused() {
+		t.Error("expected not to be paused")
+	}
+	if !state.IsPlaying() {
+		t.Error("expected IsPlaying to return true")
+	}
+}
+
+func TestPlayerState_SetPaused(t *testing.T) {
+	state := newTestPlayerState()
+
+	// Pausing with no track should not change state
+	state.SetPaused()
+	if state.IsPaused() {
+		t.Error("should not pause without current track")
+	}
+
+	// Set a track and pause
+	state.SetPlaying(&Track{ID: "track-1"})
+	state.SetPaused()
+
+	if !state.IsPaused() {
+		t.Error("expected to be paused")
+	}
+}
+
+func TestPlayerState_SetResumed(t *testing.T) {
+	state := newTestPlayerState()
+
+	// Resume with no track should not change state
+	state.SetResumed()
+	if state.IsPaused() {
+		t.Error("should not change paused state without current track")
+	}
+
+	// Set a track, pause, then resume
+	state.SetPlaying(&Track{ID: "track-1"})
+	state.SetPaused()
+	state.SetResumed()
+
+	if state.IsPaused() {
+		t.Error("expected not to be paused")
+	}
+	if !state.IsPlaying() {
+		t.Error("expected IsPlaying to return true")
+	}
+}
+
+func TestPlayerState_SetStopped(t *testing.T) {
+	state := newTestPlayerState()
+	state.SetPlaying(&Track{ID: "track-1"})
+	state.SetPaused()
+
+	state.SetStopped()
+
+	if state.CurrentTrack() != nil {
+		t.Error("expected CurrentTrack to be nil")
+	}
+	if state.IsPaused() {
+		t.Error("expected not to be paused")
+	}
+	if !state.IsIdle() {
+		t.Error("expected IsIdle to return true")
+	}
+}
+
+func TestPlayerState_HasTrack(t *testing.T) {
+	state := newTestPlayerState()
+
+	if state.HasTrack() {
+		t.Error("new state should not have track")
+	}
+
+	state.SetPlaying(&Track{ID: "track-1"})
+	if !state.HasTrack() {
+		t.Error("state with track should have track")
+	}
+}
+
+func TestPlayerState_HasQueuedTracks(t *testing.T) {
+	state := newTestPlayerState()
+
+	if state.HasQueuedTracks() {
+		t.Error("new state should not have queued tracks")
+	}
+
+	// Just a current track, no queue
+	state.SetPlaying(&Track{ID: "current"})
+	if state.HasQueuedTracks() {
+		t.Error("state with only current track should not have queued tracks")
+	}
+
+	// Add a track to queue (after current)
+	state.Queue.Add(&Track{ID: "queued"})
+	if !state.HasQueuedTracks() {
+		t.Error("state with queued track should have queued tracks")
+	}
+}
+
+func TestPlayerState_TotalTracks(t *testing.T) {
+	state := newTestPlayerState()
+
+	if got := state.TotalTracks(); got != 0 {
+		t.Errorf("expected 0, got %d", got)
+	}
+
+	// Add current track
+	state.SetPlaying(&Track{ID: "current"})
+	if got := state.TotalTracks(); got != 1 {
+		t.Errorf("expected 1, got %d", got)
+	}
+
+	// Add queued tracks
+	state.Queue.Add(&Track{ID: "queued-1"})
+	state.Queue.Add(&Track{ID: "queued-2"})
+	if got := state.TotalTracks(); got != 3 {
+		t.Errorf("expected 3, got %d", got)
+	}
+
+	// Stop (remove current track)
+	state.SetStopped()
+	if got := state.TotalTracks(); got != 2 {
+		t.Errorf("expected 2, got %d", got)
+	}
+}
+
+func TestPlayerState_ConcurrentAccess(t *testing.T) {
+	state := newTestPlayerState()
+	state.SetPlaying(&Track{ID: "track-1"})
+
+	var wg sync.WaitGroup
+	const numGoroutines = 100
+
+	// Run concurrent reads and writes
+	for i := 0; i < numGoroutines; i++ {
+		wg.Add(3)
+
+		go func() {
+			defer wg.Done()
+			_ = state.IsPlaying()
+		}()
+
+		go func() {
+			defer wg.Done()
+			_ = state.IsPaused()
+		}()
+
+		go func(n int) {
+			defer wg.Done()
+			if n%2 == 0 {
+				state.SetPaused()
+			} else {
+				state.SetResumed()
+			}
+		}(i)
+	}
+
+	wg.Wait()
+}

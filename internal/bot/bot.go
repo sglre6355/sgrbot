@@ -44,7 +44,15 @@ func (b *Bot) Start() error {
 	}
 	b.session = session
 
-	// Initialize modules
+	// Register interaction handler (before Open so we don't miss events)
+	b.session.AddHandler(b.handleInteraction)
+
+	// Open connection first so session.State.User is populated
+	if err := b.session.Open(); err != nil {
+		return fmt.Errorf("failed to open Discord connection: %w", err)
+	}
+
+	// Initialize modules (after Open so session state is available)
 	if err := b.initModules(); err != nil {
 		return fmt.Errorf("failed to initialize modules: %w", err)
 	}
@@ -52,16 +60,8 @@ func (b *Bot) Start() error {
 	// Build handler map
 	b.buildHandlerMap()
 
-	// Register interaction handler
-	b.session.AddHandler(b.handleInteraction)
-
 	// Register module event handlers
 	b.registerEventHandlers()
-
-	// Open connection
-	if err := b.session.Open(); err != nil {
-		return fmt.Errorf("failed to open Discord connection: %w", err)
-	}
 
 	// Register commands
 	if err := b.registerCommands(); err != nil {
@@ -95,7 +95,9 @@ func (b *Bot) Stop() error {
 
 // initModules initializes all loaded modules.
 func (b *Bot) initModules() error {
-	deps := ModuleDependencies{}
+	deps := ModuleDependencies{
+		Session: b.session,
+	}
 
 	for _, mod := range b.modules {
 		if err := mod.Init(deps); err != nil {
@@ -156,17 +158,20 @@ func (b *Bot) collectCommands() []*discordgo.ApplicationCommand {
 func (b *Bot) registerCommands() error {
 	commands := b.collectCommands()
 
-	for _, cmd := range commands {
-		_, err := b.session.ApplicationCommandCreate(
-			b.session.State.User.ID,
-			"", // Empty string registers commands globally
-			cmd,
-		)
-		if err != nil {
-			return fmt.Errorf("failed to register command %s: %w", cmd.Name, err)
-		}
-		slog.Debug("registered command", "command", cmd.Name)
+	_, err := b.session.ApplicationCommandBulkOverwrite(
+		b.session.State.User.ID,
+		"", // Empty string registers commands globally
+		commands,
+	)
+	if err != nil {
+		return fmt.Errorf("failed to register commands: %w", err)
 	}
+
+	cmdNames := make([]string, len(commands))
+	for i, cmd := range commands {
+		cmdNames[i] = cmd.Name
+	}
+	slog.Debug("registered commands", "commands", cmdNames)
 
 	return nil
 }
