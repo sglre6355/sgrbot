@@ -3,10 +3,8 @@ package usecases
 import (
 	"context"
 	"testing"
-	"time"
 
 	"github.com/disgoorg/snowflake/v2"
-	"github.com/sglre6355/sgrbot/internal/modules/music_player/application/events"
 )
 
 func TestQueueService_List(t *testing.T) {
@@ -372,14 +370,13 @@ func TestQueueService_Add(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			repo := newMockRepository()
-			bus := events.NewBus(10)
-			defer bus.Close()
+			publisher := &mockEventPublisher{}
 
 			if tt.setupRepo != nil {
 				tt.setupRepo(repo)
 			}
 
-			service := NewQueueService(repo, bus)
+			service := NewQueueService(repo, publisher)
 			output, err := service.Add(context.Background(), tt.input)
 			if err != nil {
 				t.Errorf("unexpected error: %v", err)
@@ -391,16 +388,15 @@ func TestQueueService_Add(t *testing.T) {
 			}
 
 			// Verify the event was published
-			select {
-			case event := <-bus.TrackEnqueued():
-				if event.GuildID != tt.input.GuildID {
-					t.Errorf("event GuildID = %d, want %d", event.GuildID, tt.input.GuildID)
-				}
-				if event.WasIdle != tt.wantWasIdle {
-					t.Errorf("event WasIdle = %v, want %v", event.WasIdle, tt.wantWasIdle)
-				}
-			case <-time.After(100 * time.Millisecond):
-				t.Error("expected TrackEnqueuedEvent to be published")
+			if len(publisher.trackEnqueued) != 1 {
+				t.Fatalf("expected 1 TrackEnqueuedEvent, got %d", len(publisher.trackEnqueued))
+			}
+			event := publisher.trackEnqueued[0]
+			if event.GuildID != tt.input.GuildID {
+				t.Errorf("event GuildID = %d, want %d", event.GuildID, tt.input.GuildID)
+			}
+			if event.WasIdle != tt.wantWasIdle {
+				t.Errorf("event WasIdle = %v, want %v", event.WasIdle, tt.wantWasIdle)
 			}
 		})
 	}

@@ -3,10 +3,15 @@ package events
 import (
 	"log/slog"
 	"sync"
+
+	"github.com/sglre6355/sgrbot/internal/modules/music_player/application/ports"
 )
 
 // DefaultEventBufferSize is the default buffer size for event channels.
 const DefaultEventBufferSize = 100
+
+// Compile-time check that Bus implements ports.EventPublisher.
+var _ ports.EventPublisher = (*Bus)(nil)
 
 // Bus provides a channel-based event bus for async event handling.
 type Bus struct {
@@ -33,52 +38,79 @@ func NewBus(bufferSize int) *Bus {
 	}
 }
 
-// Publish sends an event to the appropriate channel.
+// PublishTrackEnqueued publishes a TrackEnqueuedEvent.
 // Non-blocking: if the channel buffer is full, the event is dropped with a warning.
-func (b *Bus) Publish(event Event) {
+func (b *Bus) PublishTrackEnqueued(event TrackEnqueuedEvent) {
 	b.mu.RLock()
 	defer b.mu.RUnlock()
 
 	if b.closed {
-		slog.Warn("attempted to publish to closed event bus", "event", event.eventType())
+		slog.Warn("attempted to publish to closed event bus", "type", "TrackEnqueued")
 		return
 	}
 
-	switch e := event.(type) {
-	case TrackEnqueuedEvent:
-		select {
-		case b.trackEnqueued <- e:
-			slog.Debug("published event", "type", e.eventType(), "guild", e.GuildID)
-		default:
-			slog.Warn("event buffer full, dropping event", "type", e.eventType())
-		}
-
-	case PlaybackStartedEvent:
-		select {
-		case b.playbackStarted <- e:
-			slog.Debug("published event", "type", e.eventType(), "guild", e.GuildID)
-		default:
-			slog.Warn("event buffer full, dropping event", "type", e.eventType())
-		}
-
-	case PlaybackFinishedEvent:
-		select {
-		case b.playbackFinished <- e:
-			slog.Debug("published event", "type", e.eventType(), "guild", e.GuildID)
-		default:
-			slog.Warn("event buffer full, dropping event", "type", e.eventType())
-		}
-
-	case TrackEndedEvent:
-		select {
-		case b.trackEnded <- e:
-			slog.Debug("published event", "type", e.eventType(), "guild", e.GuildID)
-		default:
-			slog.Warn("event buffer full, dropping event", "type", e.eventType())
-		}
-
+	select {
+	case b.trackEnqueued <- event:
+		slog.Debug("published event", "type", "TrackEnqueued", "guild", event.GuildID)
 	default:
-		slog.Warn("unknown event type", "event", event)
+		slog.Warn("event buffer full, dropping event", "type", "TrackEnqueued")
+	}
+}
+
+// PublishPlaybackStarted publishes a PlaybackStartedEvent.
+// Non-blocking: if the channel buffer is full, the event is dropped with a warning.
+func (b *Bus) PublishPlaybackStarted(event PlaybackStartedEvent) {
+	b.mu.RLock()
+	defer b.mu.RUnlock()
+
+	if b.closed {
+		slog.Warn("attempted to publish to closed event bus", "type", "PlaybackStarted")
+		return
+	}
+
+	select {
+	case b.playbackStarted <- event:
+		slog.Debug("published event", "type", "PlaybackStarted", "guild", event.GuildID)
+	default:
+		slog.Warn("event buffer full, dropping event", "type", "PlaybackStarted")
+	}
+}
+
+// PublishPlaybackFinished publishes a PlaybackFinishedEvent.
+// Non-blocking: if the channel buffer is full, the event is dropped with a warning.
+func (b *Bus) PublishPlaybackFinished(event PlaybackFinishedEvent) {
+	b.mu.RLock()
+	defer b.mu.RUnlock()
+
+	if b.closed {
+		slog.Warn("attempted to publish to closed event bus", "type", "PlaybackFinished")
+		return
+	}
+
+	select {
+	case b.playbackFinished <- event:
+		slog.Debug("published event", "type", "PlaybackFinished", "guild", event.GuildID)
+	default:
+		slog.Warn("event buffer full, dropping event", "type", "PlaybackFinished")
+	}
+}
+
+// PublishTrackEnded publishes a TrackEndedEvent.
+// Non-blocking: if the channel buffer is full, the event is dropped with a warning.
+func (b *Bus) PublishTrackEnded(event TrackEndedEvent) {
+	b.mu.RLock()
+	defer b.mu.RUnlock()
+
+	if b.closed {
+		slog.Warn("attempted to publish to closed event bus", "type", "TrackEnded")
+		return
+	}
+
+	select {
+	case b.trackEnded <- event:
+		slog.Debug("published event", "type", "TrackEnded", "guild", event.GuildID)
+	default:
+		slog.Warn("event buffer full, dropping event", "type", "TrackEnded")
 	}
 }
 
@@ -103,7 +135,7 @@ func (b *Bus) TrackEnded() <-chan TrackEndedEvent {
 }
 
 // Close closes all event channels.
-// After calling Close, Publish will no longer send events.
+// After calling Close, publishing will no longer send events.
 func (b *Bus) Close() {
 	b.mu.Lock()
 	defer b.mu.Unlock()

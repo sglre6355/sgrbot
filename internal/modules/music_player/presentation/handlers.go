@@ -10,7 +10,6 @@ import (
 	"github.com/disgoorg/snowflake/v2"
 	"github.com/sglre6355/sgrbot/internal/bot"
 	"github.com/sglre6355/sgrbot/internal/modules/music_player/application/usecases"
-	"github.com/sglre6355/sgrbot/internal/modules/music_player/domain"
 )
 
 // Embed colors.
@@ -522,7 +521,7 @@ func respondResumed(r bot.Responder) error {
 	})
 }
 
-func respondSkipped(r bot.Responder, track *domain.Track) error {
+func respondSkipped(r bot.Responder, track *usecases.Track) error {
 	var description string
 	if track.URI != "" {
 		description = fmt.Sprintf("Skipped [%s](%s).", track.Title, track.URI)
@@ -543,7 +542,7 @@ func respondSkipped(r bot.Responder, track *domain.Track) error {
 	})
 }
 
-func respondQueueRemoved(r bot.Responder, track *domain.Track) error {
+func respondQueueRemoved(r bot.Responder, track *usecases.Track) error {
 	var description string
 	if track.URI != "" {
 		description = fmt.Sprintf("Removed [%s](%s).", track.Title, track.URI)
@@ -578,7 +577,7 @@ func respondQueueCleared(r bot.Responder) error {
 	})
 }
 
-func respondQueueAdded(r bot.Responder, track *domain.Track) error {
+func respondQueueAdded(r bot.Responder, track *usecases.Track) error {
 	var description string
 	if track.URI != "" {
 		description = fmt.Sprintf("Added [%s](%s) to the queue.", track.Title, track.URI)

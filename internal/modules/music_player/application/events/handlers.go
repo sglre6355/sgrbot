@@ -139,7 +139,7 @@ func (h *PlaybackEventHandler) handleTrackEnded(ctx context.Context, event Track
 	// Delete the old "Now Playing" message before playing next
 	nowPlayingMsgID := state.GetNowPlayingMessageID()
 	if nowPlayingMsgID != nil {
-		h.bus.Publish(PlaybackFinishedEvent{
+		h.bus.PublishPlaybackFinished(PlaybackFinishedEvent{
 			GuildID:               event.GuildID,
 			NotificationChannelID: state.NotificationChannelID,
 			LastMessageID:         nowPlayingMsgID,
@@ -157,7 +157,7 @@ func (h *PlaybackEventHandler) handleTrackEnded(ctx context.Context, event Track
 		)
 
 		// Publish error notification if we have a channel
-		h.bus.Publish(PlaybackFinishedEvent{
+		h.bus.PublishPlaybackFinished(PlaybackFinishedEvent{
 			GuildID:               event.GuildID,
 			NotificationChannelID: state.NotificationChannelID,
 			LastMessageID:         state.GetNowPlayingMessageID(),

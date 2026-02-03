@@ -134,7 +134,7 @@ func TestPlaybackEventHandler_TrackEnqueued_WhenIdle_StartsPlayback(t *testing.T
 	defer handler.Stop()
 
 	// Publish event with wasIdle=true
-	bus.Publish(TrackEnqueuedEvent{
+	bus.PublishTrackEnqueued(TrackEnqueuedEvent{
 		GuildID: snowflake.ID(1),
 		Track:   mockTrack("track-1"),
 		WasIdle: true,
@@ -171,7 +171,7 @@ func TestPlaybackEventHandler_TrackEnqueued_WhenNotIdle_DoesNotStartPlayback(t *
 	defer handler.Stop()
 
 	// Publish event with wasIdle=false
-	bus.Publish(TrackEnqueuedEvent{
+	bus.PublishTrackEnqueued(TrackEnqueuedEvent{
 		GuildID: snowflake.ID(1),
 		Track:   mockTrack("track-1"),
 		WasIdle: false,
@@ -212,7 +212,7 @@ func TestPlaybackEventHandler_TrackEnded_Finished_AdvancesQueue(t *testing.T) {
 	defer handler.Stop()
 
 	// Publish track ended with "finished" reason
-	bus.Publish(TrackEndedEvent{
+	bus.PublishTrackEnded(TrackEndedEvent{
 		GuildID: guildID,
 		Reason:  TrackEndFinished,
 	})
@@ -252,7 +252,7 @@ func TestPlaybackEventHandler_TrackEnded_Stopped_DoesNotAdvanceQueue(t *testing.
 	defer handler.Stop()
 
 	// Publish track ended with "stopped" reason (user-initiated stop)
-	bus.Publish(TrackEndedEvent{
+	bus.PublishTrackEnded(TrackEndedEvent{
 		GuildID: guildID,
 		Reason:  TrackEndStopped,
 	})
@@ -319,7 +319,7 @@ func TestNotificationEventHandler_PlaybackStarted_SendsNowPlaying(t *testing.T) 
 	defer handler.Stop()
 
 	track := mockTrack("track-1")
-	bus.Publish(PlaybackStartedEvent{
+	bus.PublishPlaybackStarted(PlaybackStartedEvent{
 		GuildID:               guildID,
 		Track:                 track,
 		NotificationChannelID: snowflake.ID(200),
@@ -354,7 +354,7 @@ func TestNotificationEventHandler_PlaybackStarted_StoresMessageID(t *testing.T) 
 
 	handler.Start(t.Context())
 
-	bus.Publish(PlaybackStartedEvent{
+	bus.PublishPlaybackStarted(PlaybackStartedEvent{
 		GuildID:               guildID,
 		Track:                 mockTrack("track-1"),
 		NotificationChannelID: snowflake.ID(200),
@@ -386,7 +386,7 @@ func TestNotificationEventHandler_PlaybackFinished_DeletesMessage(t *testing.T) 
 
 	handler.Start(t.Context())
 
-	bus.Publish(PlaybackFinishedEvent{
+	bus.PublishPlaybackFinished(PlaybackFinishedEvent{
 		GuildID:               guildID,
 		NotificationChannelID: snowflake.ID(200),
 		LastMessageID:         &messageID,
@@ -421,7 +421,7 @@ func TestNotificationEventHandler_PlaybackFinished_NilMessageID_DoesNotDelete(t 
 
 	handler.Start(t.Context())
 
-	bus.Publish(PlaybackFinishedEvent{
+	bus.PublishPlaybackFinished(PlaybackFinishedEvent{
 		GuildID:               snowflake.ID(1),
 		NotificationChannelID: snowflake.ID(200),
 		LastMessageID:         nil,

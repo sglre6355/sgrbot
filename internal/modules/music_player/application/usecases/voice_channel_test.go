@@ -4,10 +4,8 @@ import (
 	"context"
 	"errors"
 	"testing"
-	"time"
 
 	"github.com/disgoorg/snowflake/v2"
-	"github.com/sglre6355/sgrbot/internal/modules/music_player/application/events"
 )
 
 func TestVoiceChannelService_Join(t *testing.T) {
@@ -327,24 +325,13 @@ func TestVoiceChannelService_Leave_PublishesPlaybackFinishedEvent(t *testing.T) 
 
 	repo := newMockRepository()
 	connection := &mockVoiceConnection{}
-	bus := events.NewBus(10)
-	defer bus.Close()
+	publisher := &mockEventPublisher{}
 
 	// Create connected state with a now playing message
 	state := repo.createConnectedState(guildID, voiceChannelID, notificationChannelID)
 	state.SetNowPlayingMessageID(nowPlayingMsgID)
 
-	service := NewVoiceChannelService(repo, connection, nil, bus)
-
-	// Start listening for the event
-	eventReceived := make(chan events.PlaybackFinishedEvent, 1)
-	go func() {
-		select {
-		case event := <-bus.PlaybackFinished():
-			eventReceived <- event
-		case <-time.After(time.Second):
-		}
-	}()
+	service := NewVoiceChannelService(repo, connection, nil, publisher)
 
 	err := service.Leave(context.Background(), LeaveInput{GuildID: guildID})
 	if err != nil {
@@ -352,23 +339,22 @@ func TestVoiceChannelService_Leave_PublishesPlaybackFinishedEvent(t *testing.T) 
 	}
 
 	// Verify the event was published
-	select {
-	case event := <-eventReceived:
-		if event.GuildID != guildID {
-			t.Errorf("expected GuildID %d, got %d", guildID, event.GuildID)
-		}
-		if event.NotificationChannelID != notificationChannelID {
-			t.Errorf(
-				"expected NotificationChannelID %d, got %d",
-				notificationChannelID,
-				event.NotificationChannelID,
-			)
-		}
-		if event.LastMessageID == nil || *event.LastMessageID != nowPlayingMsgID {
-			t.Errorf("expected LastMessageID %d, got %v", nowPlayingMsgID, event.LastMessageID)
-		}
-	case <-time.After(time.Second):
-		t.Error("expected PlaybackFinishedEvent to be published")
+	if len(publisher.playbackFinished) != 1 {
+		t.Fatalf("expected 1 PlaybackFinishedEvent, got %d", len(publisher.playbackFinished))
+	}
+	event := publisher.playbackFinished[0]
+	if event.GuildID != guildID {
+		t.Errorf("expected GuildID %d, got %d", guildID, event.GuildID)
+	}
+	if event.NotificationChannelID != notificationChannelID {
+		t.Errorf(
+			"expected NotificationChannelID %d, got %d",
+			notificationChannelID,
+			event.NotificationChannelID,
+		)
+	}
+	if event.LastMessageID == nil || *event.LastMessageID != nowPlayingMsgID {
+		t.Errorf("expected LastMessageID %d, got %v", nowPlayingMsgID, event.LastMessageID)
 	}
 }
 
@@ -379,24 +365,13 @@ func TestVoiceChannelService_HandleBotVoiceStateChange_Disconnected(t *testing.T
 	nowPlayingMsgID := snowflake.ID(999)
 
 	repo := newMockRepository()
-	bus := events.NewBus(10)
-	defer bus.Close()
+	publisher := &mockEventPublisher{}
 
 	// Create connected state with a now playing message
 	state := repo.createConnectedState(guildID, voiceChannelID, notificationChannelID)
 	state.SetNowPlayingMessageID(nowPlayingMsgID)
 
-	service := NewVoiceChannelService(repo, nil, nil, bus)
-
-	// Start listening for the event
-	eventReceived := make(chan events.PlaybackFinishedEvent, 1)
-	go func() {
-		select {
-		case event := <-bus.PlaybackFinished():
-			eventReceived <- event
-		case <-time.After(time.Second):
-		}
-	}()
+	service := NewVoiceChannelService(repo, nil, nil, publisher)
 
 	// Handle bot disconnected (nil channel means disconnected)
 	service.HandleBotVoiceStateChange(BotVoiceStateChangeInput{
@@ -405,16 +380,15 @@ func TestVoiceChannelService_HandleBotVoiceStateChange_Disconnected(t *testing.T
 	})
 
 	// Verify the event was published
-	select {
-	case event := <-eventReceived:
-		if event.GuildID != guildID {
-			t.Errorf("expected GuildID %d, got %d", guildID, event.GuildID)
-		}
-		if event.LastMessageID == nil || *event.LastMessageID != nowPlayingMsgID {
-			t.Errorf("expected LastMessageID %d, got %v", nowPlayingMsgID, event.LastMessageID)
-		}
-	case <-time.After(time.Second):
-		t.Error("expected PlaybackFinishedEvent to be published")
+	if len(publisher.playbackFinished) != 1 {
+		t.Fatalf("expected 1 PlaybackFinishedEvent, got %d", len(publisher.playbackFinished))
+	}
+	event := publisher.playbackFinished[0]
+	if event.GuildID != guildID {
+		t.Errorf("expected GuildID %d, got %d", guildID, event.GuildID)
+	}
+	if event.LastMessageID == nil || *event.LastMessageID != nowPlayingMsgID {
+		t.Errorf("expected LastMessageID %d, got %v", nowPlayingMsgID, event.LastMessageID)
 	}
 
 	// Verify state was deleted
@@ -477,13 +451,12 @@ func TestVoiceChannelService_HandleBotVoiceStateChange_DisconnectedNoMessage(t *
 	voiceChannelID := snowflake.ID(4)
 
 	repo := newMockRepository()
-	bus := events.NewBus(10)
-	defer bus.Close()
+	publisher := &mockEventPublisher{}
 
 	// Create connected state WITHOUT a now playing message
 	repo.createConnectedState(guildID, voiceChannelID, notificationChannelID)
 
-	service := NewVoiceChannelService(repo, nil, nil, bus)
+	service := NewVoiceChannelService(repo, nil, nil, publisher)
 
 	// Handle bot disconnected
 	service.HandleBotVoiceStateChange(BotVoiceStateChangeInput{
@@ -491,14 +464,9 @@ func TestVoiceChannelService_HandleBotVoiceStateChange_DisconnectedNoMessage(t *
 		NewChannelID: nil,
 	})
 
-	// Event should still be published but with nil LastMessageID
-	select {
-	case event := <-bus.PlaybackFinished():
-		if event.LastMessageID != nil {
-			t.Errorf("expected LastMessageID to be nil, got %v", event.LastMessageID)
-		}
-	case <-time.After(100 * time.Millisecond):
-		// No event is also acceptable since LastMessageID is nil
+	// No event should be published since NowPlayingMessageID is nil
+	if len(publisher.playbackFinished) != 0 {
+		t.Errorf("expected no PlaybackFinishedEvent, got %d", len(publisher.playbackFinished))
 	}
 
 	// Verify state was deleted

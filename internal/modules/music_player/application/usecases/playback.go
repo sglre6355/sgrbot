@@ -4,7 +4,6 @@ import (
 	"context"
 
 	"github.com/disgoorg/snowflake/v2"
-	"github.com/sglre6355/sgrbot/internal/modules/music_player/application/events"
 	"github.com/sglre6355/sgrbot/internal/modules/music_player/application/ports"
 	"github.com/sglre6355/sgrbot/internal/modules/music_player/domain"
 )
@@ -38,7 +37,7 @@ type PlaybackService struct {
 	repo        domain.PlayerStateRepository
 	audioPlayer ports.AudioPlayer
 	voiceState  ports.VoiceStateProvider
-	bus         *events.Bus
+	publisher   ports.EventPublisher
 }
 
 // NewPlaybackService creates a new PlaybackService.
@@ -46,13 +45,13 @@ func NewPlaybackService(
 	repo domain.PlayerStateRepository,
 	audioPlayer ports.AudioPlayer,
 	voiceState ports.VoiceStateProvider,
-	bus *events.Bus,
+	publisher ports.EventPublisher,
 ) *PlaybackService {
 	return &PlaybackService{
 		repo:        repo,
 		audioPlayer: audioPlayer,
 		voiceState:  voiceState,
-		bus:         bus,
+		publisher:   publisher,
 	}
 }
 
@@ -132,8 +131,8 @@ func (p *PlaybackService) Skip(ctx context.Context, input SkipInput) (*SkipOutpu
 
 	// Publish event to delete the "Now Playing" message
 	nowPlayingMsgID := state.GetNowPlayingMessageID()
-	if nowPlayingMsgID != nil && p.bus != nil {
-		p.bus.Publish(events.PlaybackFinishedEvent{
+	if nowPlayingMsgID != nil && p.publisher != nil {
+		p.publisher.PublishPlaybackFinished(ports.PlaybackFinishedEvent{
 			GuildID:               input.GuildID,
 			NotificationChannelID: state.NotificationChannelID,
 			LastMessageID:         nowPlayingMsgID,
@@ -195,8 +194,8 @@ func (p *PlaybackService) PlayNext(
 	state.SetResumed() // Clear paused flag, track is already at Queue[0]
 
 	// Publish event for "Now Playing" notification (async)
-	if p.bus != nil {
-		p.bus.Publish(events.PlaybackStartedEvent{
+	if p.publisher != nil {
+		p.publisher.PublishPlaybackStarted(ports.PlaybackStartedEvent{
 			GuildID:               guildID,
 			Track:                 nextTrack,
 			NotificationChannelID: state.NotificationChannelID,

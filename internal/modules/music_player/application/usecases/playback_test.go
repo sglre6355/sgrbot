@@ -6,7 +6,7 @@ import (
 	"testing"
 
 	"github.com/disgoorg/snowflake/v2"
-	"github.com/sglre6355/sgrbot/internal/modules/music_player/application/events"
+	"github.com/sglre6355/sgrbot/internal/modules/music_player/application/ports"
 )
 
 func TestPlaybackService_Pause(t *testing.T) {
@@ -367,14 +367,14 @@ func TestPlaybackService_Skip(t *testing.T) {
 
 func TestTrackEndReason_ShouldAdvanceQueue(t *testing.T) {
 	tests := []struct {
-		reason   events.TrackEndReason
+		reason   ports.TrackEndReason
 		expected bool
 	}{
-		{events.TrackEndFinished, true},
-		{events.TrackEndLoadFailed, true},
-		{events.TrackEndStopped, false},
-		{events.TrackEndReplaced, false},
-		{events.TrackEndCleanup, false},
+		{ports.TrackEndFinished, true},
+		{ports.TrackEndLoadFailed, true},
+		{ports.TrackEndStopped, false},
+		{ports.TrackEndReplaced, false},
+		{ports.TrackEndCleanup, false},
 	}
 
 	for _, tt := range tests {
