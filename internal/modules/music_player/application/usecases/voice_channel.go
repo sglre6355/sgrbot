@@ -4,7 +4,6 @@ import (
 	"context"
 
 	"github.com/disgoorg/snowflake/v2"
-	"github.com/sglre6355/sgrbot/internal/modules/music_player/application/events"
 	"github.com/sglre6355/sgrbot/internal/modules/music_player/application/ports"
 	"github.com/sglre6355/sgrbot/internal/modules/music_player/domain"
 )
@@ -38,7 +37,7 @@ type VoiceChannelService struct {
 	repo            domain.PlayerStateRepository
 	voiceConnection ports.VoiceConnection
 	voiceState      ports.VoiceStateProvider
-	bus             *events.Bus
+	publisher       ports.EventPublisher
 }
 
 // NewVoiceChannelService creates a new VoiceChannelService.
@@ -46,13 +45,13 @@ func NewVoiceChannelService(
 	repo domain.PlayerStateRepository,
 	voiceConnection ports.VoiceConnection,
 	voiceState ports.VoiceStateProvider,
-	bus *events.Bus,
+	publisher ports.EventPublisher,
 ) *VoiceChannelService {
 	return &VoiceChannelService{
 		repo:            repo,
 		voiceConnection: voiceConnection,
 		voiceState:      voiceState,
-		bus:             bus,
+		publisher:       publisher,
 	}
 }
 
@@ -112,8 +111,8 @@ func (v *VoiceChannelService) HandleBotVoiceStateChange(input BotVoiceStateChang
 		// Bot was disconnected from voice
 		// Publish event to delete the "Now Playing" message before we lose the state
 		nowPlayingMsgID := state.GetNowPlayingMessageID()
-		if nowPlayingMsgID != nil && v.bus != nil {
-			v.bus.Publish(events.PlaybackFinishedEvent{
+		if nowPlayingMsgID != nil && v.publisher != nil {
+			v.publisher.PublishPlaybackFinished(ports.PlaybackFinishedEvent{
 				GuildID:               input.GuildID,
 				NotificationChannelID: state.NotificationChannelID,
 				LastMessageID:         nowPlayingMsgID,
@@ -140,8 +139,8 @@ func (v *VoiceChannelService) Leave(ctx context.Context, input LeaveInput) error
 
 	// Publish event to delete the "Now Playing" message before we lose the state
 	nowPlayingMsgID := state.GetNowPlayingMessageID()
-	if nowPlayingMsgID != nil && v.bus != nil {
-		v.bus.Publish(events.PlaybackFinishedEvent{
+	if nowPlayingMsgID != nil && v.publisher != nil {
+		v.publisher.PublishPlaybackFinished(ports.PlaybackFinishedEvent{
 			GuildID:               input.GuildID,
 			NotificationChannelID: state.NotificationChannelID,
 			LastMessageID:         nowPlayingMsgID,

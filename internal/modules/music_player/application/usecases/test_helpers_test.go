@@ -115,3 +115,26 @@ func (m *mockVoiceStateProvider) GetUserVoiceChannel(
 	}
 	return m.channels[userID], nil
 }
+
+type mockEventPublisher struct {
+	trackEnqueued    []ports.TrackEnqueuedEvent
+	playbackStarted  []ports.PlaybackStartedEvent
+	playbackFinished []ports.PlaybackFinishedEvent
+	trackEnded       []ports.TrackEndedEvent
+}
+
+func (m *mockEventPublisher) PublishTrackEnqueued(event ports.TrackEnqueuedEvent) {
+	m.trackEnqueued = append(m.trackEnqueued, event)
+}
+
+func (m *mockEventPublisher) PublishPlaybackStarted(event ports.PlaybackStartedEvent) {
+	m.playbackStarted = append(m.playbackStarted, event)
+}
+
+func (m *mockEventPublisher) PublishPlaybackFinished(event ports.PlaybackFinishedEvent) {
+	m.playbackFinished = append(m.playbackFinished, event)
+}
+
+func (m *mockEventPublisher) PublishTrackEnded(event ports.TrackEndedEvent) {
+	m.trackEnded = append(m.trackEnded, event)
+}

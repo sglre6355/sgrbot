@@ -4,7 +4,7 @@ import (
 	"context"
 
 	"github.com/disgoorg/snowflake/v2"
-	"github.com/sglre6355/sgrbot/internal/modules/music_player/application/events"
+	"github.com/sglre6355/sgrbot/internal/modules/music_player/application/ports"
 	"github.com/sglre6355/sgrbot/internal/modules/music_player/domain"
 )
 
@@ -64,15 +64,18 @@ type QueueClearOutput struct {
 
 // QueueService handles queue operations.
 type QueueService struct {
-	repo domain.PlayerStateRepository
-	bus  *events.Bus
+	repo      domain.PlayerStateRepository
+	publisher ports.EventPublisher
 }
 
 // NewQueueService creates a new QueueService.
-func NewQueueService(repo domain.PlayerStateRepository, bus *events.Bus) *QueueService {
+func NewQueueService(
+	repo domain.PlayerStateRepository,
+	publisher ports.EventPublisher,
+) *QueueService {
 	return &QueueService{
-		repo: repo,
-		bus:  bus,
+		repo:      repo,
+		publisher: publisher,
 	}
 }
 
@@ -94,8 +97,8 @@ func (q *QueueService) Add(_ context.Context, input QueueAddInput) (*QueueAddOut
 	position := state.Queue.Len() - 1
 
 	// Publish event - PlaybackEventHandler will start playback if wasIdle
-	if q.bus != nil {
-		q.bus.Publish(events.TrackEnqueuedEvent{
+	if q.publisher != nil {
+		q.publisher.PublishTrackEnqueued(ports.TrackEnqueuedEvent{
 			GuildID: input.GuildID,
 			Track:   input.Track,
 			WasIdle: wasIdle,

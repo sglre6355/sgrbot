@@ -106,9 +106,10 @@ func (m *MusicPlayerModule) initWithoutLavalink() error {
 	// Create service with nil dependencies
 	// These will fail at runtime if called, but allows the module to load
 	queue := usecases.NewQueueService(repo, nil)
+	autocomplete := usecases.NewAutocompleteService(repo, nil)
 
 	m.handlers = presentation.NewHandlers(nil, nil, queue, nil)
-	m.autocomplete = presentation.NewAutocompleteHandler(repo, nil)
+	m.autocomplete = presentation.NewAutocompleteHandler(autocomplete)
 
 	return nil
 }
@@ -151,16 +152,17 @@ func (m *MusicPlayerModule) initWithLavalink(deps bot.ModuleDependencies) error 
 	m.playbackHandler.Start(m.ctx)
 	m.notificationHandler.Start(m.ctx)
 
-	// Set event bus on Lavalink adapter for event publishing
-	lavalinkAdapter.SetEventBus(m.eventBus)
+	// Set event publisher on Lavalink adapter for event publishing
+	lavalinkAdapter.SetEventPublisher(m.eventBus)
 
 	// Create presentation handlers
 	botID, err := snowflake.Parse(deps.Session.State.User.ID)
 	if err != nil {
 		return err
 	}
+	autocomplete := usecases.NewAutocompleteService(repo, lavalinkAdapter)
 	m.handlers = presentation.NewHandlers(voiceChannel, playback, queue, trackLoader)
-	m.autocomplete = presentation.NewAutocompleteHandler(repo, trackLoader)
+	m.autocomplete = presentation.NewAutocompleteHandler(autocomplete)
 	m.eventHandlers = presentation.NewEventHandlers(botID, voiceChannel)
 
 	slog.Info("music_player module initialized with Lavalink")

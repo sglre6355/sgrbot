@@ -11,7 +11,6 @@ import (
 	"github.com/disgoorg/disgolink/v3/disgolink"
 	"github.com/disgoorg/disgolink/v3/lavalink"
 	"github.com/disgoorg/snowflake/v2"
-	"github.com/sglre6355/sgrbot/internal/modules/music_player/application/events"
 	"github.com/sglre6355/sgrbot/internal/modules/music_player/application/ports"
 	"github.com/sglre6355/sgrbot/internal/modules/music_player/domain"
 )
@@ -123,7 +122,7 @@ type LavalinkAdapter struct {
 	voiceBufferMu sync.Mutex
 	voiceBuffers  map[snowflake.ID]*voiceEventBuffer
 
-	bus *events.Bus
+	publisher ports.EventPublisher
 }
 
 // LavalinkConfig contains Lavalink connection configuration.
@@ -494,9 +493,9 @@ func (c *LavalinkAdapter) forwardBufferedVoiceEvents(
 	c.link.OnVoiceServerUpdate(context.Background(), guildID, token, endpoint)
 }
 
-// SetEventBus sets the event bus for publishing Lavalink events.
-func (c *LavalinkAdapter) SetEventBus(bus *events.Bus) {
-	c.bus = bus
+// SetEventPublisher sets the event publisher for publishing Lavalink events.
+func (c *LavalinkAdapter) SetEventPublisher(publisher ports.EventPublisher) {
+	c.publisher = publisher
 }
 
 func (c *LavalinkAdapter) onTrackStart(player disgolink.Player, event lavalink.TrackStartEvent) {
@@ -506,9 +505,9 @@ func (c *LavalinkAdapter) onTrackStart(player disgolink.Player, event lavalink.T
 func (c *LavalinkAdapter) onTrackEnd(player disgolink.Player, event lavalink.TrackEndEvent) {
 	slog.Debug("track ended", "guild", player.GuildID(), "reason", event.Reason)
 
-	if c.bus != nil {
+	if c.publisher != nil {
 		reason := convertEndReason(event.Reason)
-		c.bus.Publish(events.TrackEndedEvent{
+		c.publisher.PublishTrackEnded(ports.TrackEndedEvent{
 			GuildID: player.GuildID(),
 			Reason:  reason,
 		})
@@ -526,20 +525,20 @@ func (c *LavalinkAdapter) onTrackStuck(player disgolink.Player, event lavalink.T
 	slog.Warn("track stuck", "guild", player.GuildID(), "threshold", event.Threshold)
 }
 
-func convertEndReason(reason lavalink.TrackEndReason) events.TrackEndReason {
+func convertEndReason(reason lavalink.TrackEndReason) ports.TrackEndReason {
 	switch reason {
 	case lavalink.TrackEndReasonFinished:
-		return events.TrackEndFinished
+		return ports.TrackEndFinished
 	case lavalink.TrackEndReasonLoadFailed:
-		return events.TrackEndLoadFailed
+		return ports.TrackEndLoadFailed
 	case lavalink.TrackEndReasonStopped:
-		return events.TrackEndStopped
+		return ports.TrackEndStopped
 	case lavalink.TrackEndReasonReplaced:
-		return events.TrackEndReplaced
+		return ports.TrackEndReplaced
 	case lavalink.TrackEndReasonCleanup:
-		return events.TrackEndCleanup
+		return ports.TrackEndCleanup
 	default:
-		return events.TrackEndStopped
+		return ports.TrackEndStopped
 	}
 }
 

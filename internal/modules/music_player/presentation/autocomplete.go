@@ -8,23 +8,19 @@ import (
 	"github.com/bwmarrin/discordgo"
 	"github.com/disgoorg/snowflake/v2"
 	"github.com/sglre6355/sgrbot/internal/modules/music_player/application/usecases"
-	"github.com/sglre6355/sgrbot/internal/modules/music_player/domain"
 )
 
 // AutocompleteHandler handles autocomplete requests.
 type AutocompleteHandler struct {
-	repo        domain.PlayerStateRepository
-	trackLoader *usecases.TrackLoaderService
+	autocomplete *usecases.AutocompleteService
 }
 
 // NewAutocompleteHandler creates a new AutocompleteHandler.
 func NewAutocompleteHandler(
-	repo domain.PlayerStateRepository,
-	trackLoader *usecases.TrackLoaderService,
+	autocomplete *usecases.AutocompleteService,
 ) *AutocompleteHandler {
 	return &AutocompleteHandler{
-		repo:        repo,
-		trackLoader: trackLoader,
+		autocomplete: autocomplete,
 	}
 }
 
@@ -39,8 +35,10 @@ func (h *AutocompleteHandler) HandleQueueRemove(
 		return
 	}
 
-	state := h.repo.Get(guildID)
-	if state == nil {
+	output := h.autocomplete.GetQueueTracks(usecases.GetQueueTracksInput{
+		GuildID: guildID,
+	})
+	if output.Tracks == nil {
 		_ = s.InteractionRespond(i.Interaction, &discordgo.InteractionResponse{
 			Type: discordgo.InteractionApplicationCommandAutocompleteResult,
 			Data: &discordgo.InteractionResponseData{
@@ -50,10 +48,8 @@ func (h *AutocompleteHandler) HandleQueueRemove(
 		return
 	}
 
-	tracks := state.Queue.List()
-
-	choices := make([]*discordgo.ApplicationCommandOptionChoice, 0, min(len(tracks), 25))
-	for idx, track := range tracks {
+	choices := make([]*discordgo.ApplicationCommandOptionChoice, 0, min(len(output.Tracks), 25))
+	for idx, track := range output.Tracks {
 		if idx >= 25 {
 			break
 		}
@@ -73,7 +69,7 @@ func (h *AutocompleteHandler) HandleQueueRemove(
 
 // HandlePlay handles autocomplete for play command.
 func (h *AutocompleteHandler) HandlePlay(s *discordgo.Session, i *discordgo.InteractionCreate) {
-	if h.trackLoader == nil {
+	if h.autocomplete == nil {
 		return
 	}
 
@@ -98,7 +94,7 @@ func (h *AutocompleteHandler) HandlePlay(s *discordgo.Session, i *discordgo.Inte
 	}
 
 	// Search for tracks
-	result, err := h.trackLoader.SearchTracks(context.Background(), usecases.SearchTracksInput{
+	result, err := h.autocomplete.SearchTracks(context.Background(), usecases.SearchTracksInput{
 		Query: query,
 		Limit: 10,
 	})
