@@ -58,6 +58,13 @@ func (p *PlayerState) SetVoiceChannel(channelID snowflake.ID) {
 	p.VoiceChannelID = channelID
 }
 
+// GetVoiceChannelID returns the current voice channel ID.
+func (p *PlayerState) GetVoiceChannelID() snowflake.ID {
+	p.mu.RLock()
+	defer p.mu.RUnlock()
+	return p.VoiceChannelID
+}
+
 // SetNotificationChannel updates the notification channel ID.
 func (p *PlayerState) SetNotificationChannel(channelID snowflake.ID) {
 	p.mu.Lock()

@@ -27,6 +27,12 @@ type LeaveInput struct {
 	GuildID snowflake.ID
 }
 
+// BotVoiceStateChangeInput contains the input for handling bot voice state changes.
+type BotVoiceStateChangeInput struct {
+	GuildID      snowflake.ID
+	NewChannelID *snowflake.ID // nil means disconnected
+}
+
 // VoiceChannelService handles voice channel operations.
 type VoiceChannelService struct {
 	repo            domain.PlayerStateRepository
@@ -90,6 +96,39 @@ func (v *VoiceChannelService) Join(ctx context.Context, input JoinInput) (*JoinO
 	}
 
 	return &JoinOutput{VoiceChannelID: voiceChannelID}, nil
+}
+
+// HandleBotVoiceStateChange handles external voice state changes (bot moved or disconnected).
+// This should be called when the bot's voice state changes due to external factors
+// (e.g., being moved by a user or disconnected by Discord).
+func (v *VoiceChannelService) HandleBotVoiceStateChange(input BotVoiceStateChangeInput) {
+	state := v.repo.Get(input.GuildID)
+	if state == nil {
+		// No player state exists, nothing to do
+		return
+	}
+
+	if input.NewChannelID == nil {
+		// Bot was disconnected from voice
+		// Publish event to delete the "Now Playing" message before we lose the state
+		nowPlayingMsgID := state.GetNowPlayingMessageID()
+		if nowPlayingMsgID != nil && v.bus != nil {
+			v.bus.Publish(events.PlaybackFinishedEvent{
+				GuildID:               input.GuildID,
+				NotificationChannelID: state.NotificationChannelID,
+				LastMessageID:         nowPlayingMsgID,
+			})
+		}
+
+		// Delete player state
+		v.repo.Delete(input.GuildID)
+		return
+	}
+
+	// Bot was moved to a different channel
+	if *input.NewChannelID != state.GetVoiceChannelID() {
+		state.SetVoiceChannel(*input.NewChannelID)
+	}
 }
 
 // Leave leaves the voice channel and deletes the player state.
