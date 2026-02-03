@@ -110,12 +110,12 @@ func (v *VoiceChannelService) HandleBotVoiceStateChange(input BotVoiceStateChang
 	if input.NewChannelID == nil {
 		// Bot was disconnected from voice
 		// Publish event to delete the "Now Playing" message before we lose the state
-		nowPlayingMsgID := state.GetNowPlayingMessageID()
-		if nowPlayingMsgID != nil && v.publisher != nil {
+		nowPlayingMsg := state.GetNowPlayingMessage()
+		if nowPlayingMsg != nil && v.publisher != nil {
 			v.publisher.PublishPlaybackFinished(ports.PlaybackFinishedEvent{
 				GuildID:               input.GuildID,
-				NotificationChannelID: state.NotificationChannelID,
-				LastMessageID:         nowPlayingMsgID,
+				NotificationChannelID: nowPlayingMsg.ChannelID,
+				LastMessageID:         &nowPlayingMsg.MessageID,
 			})
 		}
 
@@ -138,12 +138,12 @@ func (v *VoiceChannelService) Leave(ctx context.Context, input LeaveInput) error
 	}
 
 	// Publish event to delete the "Now Playing" message before we lose the state
-	nowPlayingMsgID := state.GetNowPlayingMessageID()
-	if nowPlayingMsgID != nil && v.publisher != nil {
+	nowPlayingMsg := state.GetNowPlayingMessage()
+	if nowPlayingMsg != nil && v.publisher != nil {
 		v.publisher.PublishPlaybackFinished(ports.PlaybackFinishedEvent{
 			GuildID:               input.GuildID,
-			NotificationChannelID: state.NotificationChannelID,
-			LastMessageID:         nowPlayingMsgID,
+			NotificationChannelID: nowPlayingMsg.ChannelID,
+			LastMessageID:         &nowPlayingMsg.MessageID,
 		})
 	}
 

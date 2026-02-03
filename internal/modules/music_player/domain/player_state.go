@@ -6,15 +6,23 @@ import (
 	"github.com/disgoorg/snowflake/v2"
 )
 
+// NowPlayingMessage stores the channel and message ID for a "Now Playing" message.
+// Both values are needed for deletion since the message may be in a different channel
+// than the current notification channel if the user switched channels while playing.
+type NowPlayingMessage struct {
+	ChannelID snowflake.ID
+	MessageID snowflake.ID
+}
+
 // PlayerState represents the state of a music player for a guild.
 type PlayerState struct {
 	mu                    sync.RWMutex
 	GuildID               snowflake.ID
-	VoiceChannelID        snowflake.ID  // Voice channel the bot is connected to
-	NotificationChannelID snowflake.ID  // Text channel for notifications
-	paused                bool          // unexported to prevent direct access
-	Queue                 *Queue        // Queue[0] is the current track
-	NowPlayingMessageID   *snowflake.ID // Discord message ID for "Now Playing" message (for deletion)
+	VoiceChannelID        snowflake.ID       // Voice channel the bot is connected to
+	NotificationChannelID snowflake.ID       // Text channel for notifications
+	paused                bool               // unexported to prevent direct access
+	Queue                 *Queue             // Queue[0] is the current track
+	nowPlayingMessage     *NowPlayingMessage // "Now Playing" message info (for deletion)
 }
 
 // NewPlayerState creates a new PlayerState for the given guild and channels.
@@ -106,29 +114,34 @@ func (p *PlayerState) SetStopped() {
 	p.paused = false
 }
 
-// SetNowPlayingMessageID stores the Discord message ID for the "Now Playing" message.
-func (p *PlayerState) SetNowPlayingMessageID(messageID snowflake.ID) {
+// SetNowPlayingMessage stores the "Now Playing" message info for later deletion.
+func (p *PlayerState) SetNowPlayingMessage(channelID, messageID snowflake.ID) {
 	p.mu.Lock()
 	defer p.mu.Unlock()
-	p.NowPlayingMessageID = &messageID
+	p.nowPlayingMessage = &NowPlayingMessage{
+		ChannelID: channelID,
+		MessageID: messageID,
+	}
 }
 
-// ClearNowPlayingMessageID clears the stored "Now Playing" message ID.
-func (p *PlayerState) ClearNowPlayingMessageID() {
+// ClearNowPlayingMessage clears the stored "Now Playing" message info.
+func (p *PlayerState) ClearNowPlayingMessage() {
 	p.mu.Lock()
 	defer p.mu.Unlock()
-	p.NowPlayingMessageID = nil
+	p.nowPlayingMessage = nil
 }
 
-// GetNowPlayingMessageID returns a copy of the message ID pointer.
-func (p *PlayerState) GetNowPlayingMessageID() *snowflake.ID {
+// GetNowPlayingMessage returns a copy of the "Now Playing" message info.
+func (p *PlayerState) GetNowPlayingMessage() *NowPlayingMessage {
 	p.mu.RLock()
 	defer p.mu.RUnlock()
-	if p.NowPlayingMessageID == nil {
+	if p.nowPlayingMessage == nil {
 		return nil
 	}
-	id := *p.NowPlayingMessageID
-	return &id
+	return &NowPlayingMessage{
+		ChannelID: p.nowPlayingMessage.ChannelID,
+		MessageID: p.nowPlayingMessage.MessageID,
+	}
 }
 
 // HasTrack returns true if there is a current track.
