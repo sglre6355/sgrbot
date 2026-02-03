@@ -364,8 +364,8 @@ func TestNotificationEventHandler_PlaybackStarted_StoresMessageID(t *testing.T) 
 	time.Sleep(100 * time.Millisecond)
 	handler.Stop()
 
-	if state.GetNowPlayingMessageID() == nil {
-		t.Error("expected NowPlayingMessageID to be set")
+	if state.GetNowPlayingMessage() == nil {
+		t.Error("expected NowPlayingMessage to be set")
 	}
 }
 
@@ -375,9 +375,10 @@ func TestNotificationEventHandler_PlaybackFinished_DeletesMessage(t *testing.T) 
 
 	repo := newMockRepository()
 	guildID := snowflake.ID(1)
+	channelID := snowflake.ID(200)
 	messageID := snowflake.ID(999)
-	state := domain.NewPlayerState(guildID, snowflake.ID(100), snowflake.ID(200))
-	state.SetNowPlayingMessageID(messageID)
+	state := domain.NewPlayerState(guildID, snowflake.ID(100), channelID)
+	state.SetNowPlayingMessage(channelID, messageID)
 	repo.Save(state)
 
 	notifier := &mockNotifier{}

@@ -137,12 +137,12 @@ func (h *PlaybackEventHandler) handleTrackEnded(ctx context.Context, event Track
 	}
 
 	// Delete the old "Now Playing" message before playing next
-	nowPlayingMsgID := state.GetNowPlayingMessageID()
-	if nowPlayingMsgID != nil {
+	nowPlayingMsg := state.GetNowPlayingMessage()
+	if nowPlayingMsg != nil {
 		h.bus.PublishPlaybackFinished(PlaybackFinishedEvent{
 			GuildID:               event.GuildID,
-			NotificationChannelID: state.NotificationChannelID,
-			LastMessageID:         nowPlayingMsgID,
+			NotificationChannelID: nowPlayingMsg.ChannelID,
+			LastMessageID:         &nowPlayingMsg.MessageID,
 		})
 	}
 
@@ -157,11 +157,13 @@ func (h *PlaybackEventHandler) handleTrackEnded(ctx context.Context, event Track
 		)
 
 		// Publish error notification if we have a channel
-		h.bus.PublishPlaybackFinished(PlaybackFinishedEvent{
-			GuildID:               event.GuildID,
-			NotificationChannelID: state.NotificationChannelID,
-			LastMessageID:         state.GetNowPlayingMessageID(),
-		})
+		if errNowPlayingMsg := state.GetNowPlayingMessage(); errNowPlayingMsg != nil {
+			h.bus.PublishPlaybackFinished(PlaybackFinishedEvent{
+				GuildID:               event.GuildID,
+				NotificationChannelID: errNowPlayingMsg.ChannelID,
+				LastMessageID:         &errNowPlayingMsg.MessageID,
+			})
+		}
 	}
 }
 
@@ -268,10 +270,10 @@ func (h *NotificationEventHandler) handlePlaybackStarted(event PlaybackStartedEv
 		return
 	}
 
-	// Store the message ID for later deletion
+	// Store the message info for later deletion
 	state := h.repo.Get(event.GuildID)
 	if state != nil {
-		state.SetNowPlayingMessageID(messageID)
+		state.SetNowPlayingMessage(event.NotificationChannelID, messageID)
 	}
 }
 
@@ -296,14 +298,14 @@ func (h *NotificationEventHandler) handlePlaybackFinished(event PlaybackFinished
 		)
 	}
 
-	// Only clear the message ID if it matches the one we just deleted.
-	// This prevents a race condition where a new track's message ID
+	// Only clear the message info if it matches the one we just deleted.
+	// This prevents a race condition where a new track's message info
 	// could be cleared if events are processed out of order.
 	state := h.repo.Get(event.GuildID)
 	if state != nil {
-		currentMsgID := state.GetNowPlayingMessageID()
-		if currentMsgID != nil && *currentMsgID == *event.LastMessageID {
-			state.ClearNowPlayingMessageID()
+		currentMsg := state.GetNowPlayingMessage()
+		if currentMsg != nil && currentMsg.MessageID == *event.LastMessageID {
+			state.ClearNowPlayingMessage()
 		}
 	}
 }

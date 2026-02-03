@@ -329,7 +329,7 @@ func TestVoiceChannelService_Leave_PublishesPlaybackFinishedEvent(t *testing.T) 
 
 	// Create connected state with a now playing message
 	state := repo.createConnectedState(guildID, voiceChannelID, notificationChannelID)
-	state.SetNowPlayingMessageID(nowPlayingMsgID)
+	state.SetNowPlayingMessage(notificationChannelID, nowPlayingMsgID)
 
 	service := NewVoiceChannelService(repo, connection, nil, publisher)
 
@@ -369,7 +369,7 @@ func TestVoiceChannelService_HandleBotVoiceStateChange_Disconnected(t *testing.T
 
 	// Create connected state with a now playing message
 	state := repo.createConnectedState(guildID, voiceChannelID, notificationChannelID)
-	state.SetNowPlayingMessageID(nowPlayingMsgID)
+	state.SetNowPlayingMessage(notificationChannelID, nowPlayingMsgID)
 
 	service := NewVoiceChannelService(repo, nil, nil, publisher)
 
