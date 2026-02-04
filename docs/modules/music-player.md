@@ -28,6 +28,8 @@ Environment variables:
 | `/queue list [page]` | Show queue with sections (Played/Now Playing/Up Next) |
 | `/queue remove <position>` | Remove track from queue (1-indexed position, with autocomplete) |
 | `/queue clear` | Clear queue (keeps current track) |
+| `/queue restart` | Restart queue from the beginning |
+| `/queue seek <position>` | Jump to a specific position in the queue (1-indexed, with autocomplete) |
 
 ## Project Structure
 
@@ -55,7 +57,7 @@ internal/modules/music_player/
 │   ├── usecases/
 │   │   ├── errors.go            # Use case error definitions
 │   │   ├── playback.go          # PlaybackService (pause, resume, skip, play next)
-│   │   ├── queue.go             # QueueService (add, list, remove, clear)
+│   │   ├── queue.go             # QueueService (add, list, remove, clear, restart, seek)
 │   │   ├── track_loader.go      # TrackLoaderService (load, search tracks)
 │   │   ├── voice_channel.go     # VoiceChannelService (join, leave)
 │   │   ├── autocomplete.go      # AutocompleteService (queue tracks, search)
@@ -72,7 +74,7 @@ internal/modules/music_player/
 └── presentation/
     ├── commands.go              # Slash command definitions
     ├── handlers.go              # Command interaction handlers
-    ├── autocomplete.go          # Autocomplete for /play and /queue remove
+    ├── autocomplete.go          # Autocomplete for /play, /queue remove, /queue seek
     └── event_handlers.go        # Discord gateway event handlers (VoiceStateUpdate)
 ```
 
@@ -126,10 +128,11 @@ tasks (playback, notifications) happen asynchronously.
 
 | Event | Published By | Consumed By | Description |
 | ----- | ------------ | ----------- | ----------- |
-| `TrackEnqueuedEvent` | QueueService | PlaybackEventHandler | Track added to queue |
+| `TrackEnqueuedEvent` | QueueService | PlaybackEventHandler | Track added to queue (or seek/restart triggered) |
 | `PlaybackStartedEvent` | PlaybackService | NotificationEventHandler | Track started playing |
-| `PlaybackFinishedEvent` | PlaybackEventHandler, PlaybackService, VoiceChannelService | NotificationEventHandler | Track finished, delete "Now Playing" message |
+| `PlaybackFinishedEvent` | PlaybackEventHandler, PlaybackService, QueueService, VoiceChannelService | NotificationEventHandler | Track finished, delete "Now Playing" message |
 | `TrackEndedEvent` | LavalinkAdapter | PlaybackEventHandler | Track finished (from Lavalink) |
+| `QueueClearedEvent` | QueueService | PlaybackEventHandler | Queue fully cleared, stop playback |
 
 ### Track End Reasons (`application/ports/event_publisher.go`)
 
@@ -147,7 +150,8 @@ queue:
 ### Event Handlers (`application/events/handlers.go`)
 
 - **PlaybackEventHandler**: Listens for `TrackEnqueuedEvent` (auto-start if
-  idle) and `TrackEndedEvent` (advance queue based on loop mode, play next)
+  idle), `TrackEndedEvent` (advance queue based on loop mode, play next), and
+  `QueueClearedEvent` (stop playback)
 - **NotificationEventHandler**: Listens for `PlaybackStartedEvent` (send "Now
   Playing") and `PlaybackFinishedEvent` (delete message)
 
@@ -192,6 +196,7 @@ type EventPublisher interface {
     PublishPlaybackStarted(event PlaybackStartedEvent)
     PublishPlaybackFinished(event PlaybackFinishedEvent)
     PublishTrackEnded(event TrackEndedEvent)
+    PublishQueueCleared(event QueueClearedEvent)
 }
 ```
 
