@@ -234,6 +234,71 @@ func TestPlaybackEventHandler_TrackEnded_Finished_AdvancesQueue(t *testing.T) {
 	}
 }
 
+func TestPlaybackEventHandler_TrackEnded_LoadFailed_WithLoopModeTrack_AdvancesToNextTrack(
+	t *testing.T,
+) {
+	bus := NewBus(10)
+	defer bus.Close()
+
+	repo := newMockRepository()
+	guildID := snowflake.ID(1)
+	state := domain.NewPlayerState(guildID, snowflake.ID(100), snowflake.ID(200))
+	state.SetPlaying(mockTrack("failing"))
+	state.Queue.Add(mockTrack("next"))
+	state.SetLoopMode(domain.LoopModeTrack) // Set loop mode to track
+	repo.Save(state)
+
+	playNextCh := make(chan struct{}, 1)
+
+	handler := NewPlaybackEventHandler(
+		func(_ context.Context, _ snowflake.ID) (*domain.Track, error) {
+			playNextCh <- struct{}{}
+			return mockTrack("next"), nil
+		},
+		func(_ context.Context, _ snowflake.ID) error { return nil },
+		repo,
+		bus,
+	)
+
+	handler.Start(t.Context())
+	defer handler.Stop()
+
+	// Publish track ended with "load_failed" reason
+	bus.PublishTrackEnded(TrackEndedEvent{
+		GuildID: guildID,
+		Reason:  TrackEndLoadFailed,
+	})
+
+	// Wait for event processing
+	select {
+	case <-playNextCh:
+		// Success - playNextFunc was called
+	case <-time.After(100 * time.Millisecond):
+		t.Error("expected playNextFunc to be called when track load failed")
+	}
+
+	// Verify that the queue advanced to the next track (not looped on the failing track)
+	// The current track should now be "next", not "failing"
+	current := state.Queue.Current()
+	if current == nil {
+		t.Fatal("expected current track to exist")
+	}
+	if current.ID != domain.TrackID("next") {
+		t.Errorf("expected current track to be 'next', got %q", current.ID)
+	}
+
+	// Verify that the failing track was removed from the queue
+	tracks := state.Queue.List()
+	if len(tracks) != 1 {
+		t.Errorf("expected 1 track in queue, got %d", len(tracks))
+	}
+	for _, track := range tracks {
+		if track.ID == domain.TrackID("failing") {
+			t.Error("expected failing track to be removed from queue")
+		}
+	}
+}
+
 func TestPlaybackEventHandler_TrackEnded_Stopped_DoesNotAdvanceQueue(t *testing.T) {
 	bus := NewBus(10)
 	defer bus.Close()
