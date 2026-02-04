@@ -436,6 +436,8 @@ func TestNotificationEventHandler_PlaybackStarted_SendsNowPlaying(t *testing.T) 
 	repo := newMockRepository()
 	guildID := snowflake.ID(1)
 	state := domain.NewPlayerState(guildID, snowflake.ID(100), snowflake.ID(200))
+	track := mockTrack("track-1")
+	state.SetPlaying(track) // Set current track to match the event
 	repo.Save(state)
 
 	notifier := &mockNotifier{}
@@ -445,7 +447,6 @@ func TestNotificationEventHandler_PlaybackStarted_SendsNowPlaying(t *testing.T) 
 	handler.Start(t.Context())
 	defer handler.Stop()
 
-	track := mockTrack("track-1")
 	bus.PublishPlaybackStarted(PlaybackStartedEvent{
 		GuildID:               guildID,
 		Track:                 track,
@@ -473,6 +474,8 @@ func TestNotificationEventHandler_PlaybackStarted_StoresMessageID(t *testing.T) 
 	repo := newMockRepository()
 	guildID := snowflake.ID(1)
 	state := domain.NewPlayerState(guildID, snowflake.ID(100), snowflake.ID(200))
+	track := mockTrack("track-1")
+	state.SetPlaying(track) // Set current track to match the event
 	repo.Save(state)
 
 	notifier := &mockNotifier{}
@@ -483,7 +486,7 @@ func TestNotificationEventHandler_PlaybackStarted_StoresMessageID(t *testing.T) 
 
 	bus.PublishPlaybackStarted(PlaybackStartedEvent{
 		GuildID:               guildID,
-		Track:                 mockTrack("track-1"),
+		Track:                 track,
 		NotificationChannelID: snowflake.ID(200),
 	})
 
@@ -493,6 +496,42 @@ func TestNotificationEventHandler_PlaybackStarted_StoresMessageID(t *testing.T) 
 
 	if state.GetNowPlayingMessage() == nil {
 		t.Error("expected NowPlayingMessage to be set")
+	}
+}
+
+func TestNotificationEventHandler_PlaybackStarted_SkipsIfTrackNoLongerCurrent(t *testing.T) {
+	bus := NewBus(10)
+	defer bus.Close()
+
+	repo := newMockRepository()
+	guildID := snowflake.ID(1)
+	state := domain.NewPlayerState(guildID, snowflake.ID(100), snowflake.ID(200))
+	// Set a different track as current (simulating the race condition where
+	// the original track failed and was removed before this handler runs)
+	state.SetPlaying(mockTrack("different-track"))
+	repo.Save(state)
+
+	notifier := &mockNotifier{}
+
+	handler := NewNotificationEventHandler(notifier, repo, bus)
+
+	handler.Start(t.Context())
+
+	// Publish event for a track that is NOT the current track
+	bus.PublishPlaybackStarted(PlaybackStartedEvent{
+		GuildID:               guildID,
+		Track:                 mockTrack("failed-track"),
+		NotificationChannelID: snowflake.ID(200),
+	})
+
+	// Wait for event processing and stop handler
+	time.Sleep(100 * time.Millisecond)
+	handler.Stop()
+
+	// Should NOT have sent a notification since the track is not current
+	sentNowPlaying := notifier.getSentNowPlaying()
+	if len(sentNowPlaying) != 0 {
+		t.Errorf("expected 0 now playing notifications, got %d", len(sentNowPlaying))
 	}
 }
 

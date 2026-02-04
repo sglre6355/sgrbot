@@ -322,6 +322,25 @@ func (h *NotificationEventHandler) Stop() {
 }
 
 func (h *NotificationEventHandler) handlePlaybackStarted(event PlaybackStartedEvent) {
+	// Check if the track is still current before sending notification.
+	// This prevents sending "Now Playing" for tracks that failed to load,
+	// which would leave orphaned messages since handleTrackEnded already ran.
+	state := h.repo.Get(event.GuildID)
+	if state == nil {
+		slog.Debug("skipping now playing notification, state not found",
+			"guild", event.GuildID,
+		)
+		return
+	}
+	currentTrack := state.CurrentTrack()
+	if currentTrack == nil || currentTrack.ID != event.Track.ID {
+		slog.Debug("skipping now playing notification, track no longer current",
+			"guild", event.GuildID,
+			"track", event.Track.Title,
+		)
+		return
+	}
+
 	slog.Debug("sending now playing notification",
 		"guild", event.GuildID,
 		"track", event.Track.Title,
@@ -350,10 +369,7 @@ func (h *NotificationEventHandler) handlePlaybackStarted(event PlaybackStartedEv
 	}
 
 	// Store the message info for later deletion
-	state := h.repo.Get(event.GuildID)
-	if state != nil {
-		state.SetNowPlayingMessage(event.NotificationChannelID, messageID)
-	}
+	state.SetNowPlayingMessage(event.NotificationChannelID, messageID)
 }
 
 func (h *NotificationEventHandler) handlePlaybackFinished(event PlaybackFinishedEvent) {
