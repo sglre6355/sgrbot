@@ -219,10 +219,16 @@ func (h *PlaybackEventHandler) handleTrackEnded(ctx context.Context, event Track
 	}
 
 	// Advance queue based on loop mode
-	// For load_failed, remove the failing track and force advance to prevent infinite retry loops
+	// For TrackEndLoadFailed, remove the failing track and advance to prevent infinite retry loops
 	if event.Reason == TrackEndLoadFailed {
 		failedIndex := state.Queue.CurrentIndex()
-		state.Queue.Advance(domain.LoopModeNone)
+		// Use LoopModeNone for LoopModeTrack to prevent infinite retry on same track,
+		// but preserve LoopModeQueue to allow wrapping to first track
+		advanceMode := loopMode
+		if loopMode == domain.LoopModeTrack {
+			advanceMode = domain.LoopModeNone
+		}
+		state.Queue.Advance(advanceMode)
 		state.Queue.RemoveAt(failedIndex)
 	} else {
 		state.SetStopped()

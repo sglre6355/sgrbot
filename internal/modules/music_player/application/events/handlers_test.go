@@ -263,7 +263,7 @@ func TestPlaybackEventHandler_TrackEnded_LoadFailed_WithLoopModeTrack_AdvancesTo
 	handler.Start(t.Context())
 	defer handler.Stop()
 
-	// Publish track ended with "load_failed" reason
+	// Publish track ended with TrackEndLoadFailed reason
 	bus.PublishTrackEnded(TrackEndedEvent{
 		GuildID: guildID,
 		Reason:  TrackEndLoadFailed,
