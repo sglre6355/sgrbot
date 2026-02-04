@@ -559,6 +559,38 @@ func TestQueueService_Clear(t *testing.T) {
 			wantErr: ErrQueueEmpty,
 		},
 		{
+			name: "KeepCurrentTrack=true - idle state with played tracks clears all",
+			input: QueueClearInput{
+				GuildID:          guildID,
+				KeepCurrentTrack: true,
+			},
+			setupRepo: func(m *mockRepository) {
+				state := m.createConnectedState(guildID, voiceChannelID, notificationChannelID)
+				// Add 3 tracks, start, then advance past all (idle state)
+				for i := range 3 {
+					state.Queue.Add(mockTrack("track-" + string(rune('0'+i))))
+				}
+				state.Queue.Start()
+				state.Queue.Advance(0) // index=1
+				state.Queue.Advance(0) // index=2
+				state.Queue.Advance(0) // index=3 (past end, idle)
+			},
+			wantCount:     3, // all 3 played tracks cleared
+			wantRemaining: 0, // nothing remains
+		},
+		{
+			name: "KeepCurrentTrack=true - idle state with empty queue",
+			input: QueueClearInput{
+				GuildID:          guildID,
+				KeepCurrentTrack: true,
+			},
+			setupRepo: func(m *mockRepository) {
+				m.createConnectedState(guildID, voiceChannelID, notificationChannelID)
+				// No tracks at all
+			},
+			wantErr: ErrQueueEmpty,
+		},
+		{
 			name: "KeepCurrentTrack=false - clears all tracks",
 			input: QueueClearInput{
 				GuildID:          guildID,

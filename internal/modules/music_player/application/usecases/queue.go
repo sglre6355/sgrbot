@@ -235,16 +235,21 @@ func (q *QueueService) Clear(input QueueClearInput) (*QueueClearOutput, error) {
 		// Clear played + upcoming, keep only current track
 		currentTrack := state.Queue.Current()
 		if currentTrack == nil {
-			return nil, ErrQueueEmpty
+			// No current track (idle state) - clear all played tracks
+			if state.Queue.Len() == 0 {
+				return nil, ErrQueueEmpty
+			}
+			count = state.Queue.Clear()
+		} else {
+			count = state.Queue.Len() - 1
+			if count == 0 {
+				return nil, ErrQueueEmpty // Nothing to clear besides current
+			}
+			// Use existing methods: clear all, add back current, start
+			state.Queue.Clear()
+			state.Queue.Add(currentTrack)
+			state.Queue.Start()
 		}
-		count = state.Queue.Len() - 1
-		if count == 0 {
-			return nil, ErrQueueEmpty // Nothing to clear besides current
-		}
-		// Use existing methods: clear all, add back current, start
-		state.Queue.Clear()
-		state.Queue.Add(currentTrack)
-		state.Queue.Start()
 	} else {
 		// Clear all tracks
 		if state.Queue.Len() == 0 {
