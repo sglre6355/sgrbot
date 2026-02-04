@@ -104,11 +104,11 @@ type ConfigurableModule interface {
 3. `Bot.Start()`:
    - Loads module configuration (optional `ConfigurableModule.LoadConfig()`)
    - Creates Discord session
-   - Calls `module.Init()` for each module
-   - Builds handler map
    - Registers interaction handler
-   - Registers event handlers
    - Opens Discord connection
+   - Calls `module.Init()` for each module (after Open so session state is available)
+   - Builds handler map
+   - Registers event handlers
    - Registers slash commands
 4. Wait for SIGINT/SIGTERM
 5. `Bot.Stop()` calls `module.Shutdown()` and closes session
