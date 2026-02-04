@@ -21,7 +21,8 @@ type PlayerState struct {
 	VoiceChannelID        snowflake.ID       // Voice channel the bot is connected to
 	NotificationChannelID snowflake.ID       // Text channel for notifications
 	paused                bool               // unexported to prevent direct access
-	Queue                 *Queue             // Queue[0] is the current track
+	loopMode              LoopMode           // loop mode for playback
+	Queue                 *Queue             // Queue with index-based track management
 	nowPlayingMessage     *NowPlayingMessage // "Now Playing" message info (for deletion)
 }
 
@@ -31,32 +32,33 @@ func NewPlayerState(guildID, voiceChannelID, notificationChannelID snowflake.ID)
 		GuildID:               guildID,
 		VoiceChannelID:        voiceChannelID,
 		NotificationChannelID: notificationChannelID,
+		loopMode:              LoopModeNone,
 		Queue:                 NewQueue(),
 	}
 }
 
-// IsIdle returns true if no track is playing.
+// IsIdle returns true if no track is currently active (queue not started or past end).
 func (p *PlayerState) IsIdle() bool {
-	return p.Queue.IsEmpty()
+	return p.Queue.IsIdle()
 }
 
 // IsPlaying returns true if a track is currently playing (not paused).
 func (p *PlayerState) IsPlaying() bool {
 	p.mu.RLock()
 	defer p.mu.RUnlock()
-	return !p.Queue.IsEmpty() && !p.paused
+	return !p.Queue.IsIdle() && !p.paused
 }
 
 // IsPaused returns true if playback is paused.
 func (p *PlayerState) IsPaused() bool {
 	p.mu.RLock()
 	defer p.mu.RUnlock()
-	return !p.Queue.IsEmpty() && p.paused
+	return !p.Queue.IsIdle() && p.paused
 }
 
-// CurrentTrack returns the currently playing track (head of queue).
+// CurrentTrack returns the currently playing track.
 func (p *PlayerState) CurrentTrack() *Track {
-	return p.Queue.Peek()
+	return p.Queue.Current()
 }
 
 // SetVoiceChannel updates the voice channel ID.
@@ -92,7 +94,7 @@ func (p *PlayerState) SetPlaying(track *Track) {
 func (p *PlayerState) SetPaused() {
 	p.mu.Lock()
 	defer p.mu.Unlock()
-	if !p.Queue.IsEmpty() {
+	if !p.Queue.IsIdle() {
 		p.paused = true
 	}
 }
@@ -101,17 +103,48 @@ func (p *PlayerState) SetPaused() {
 func (p *PlayerState) SetResumed() {
 	p.mu.Lock()
 	defer p.mu.Unlock()
-	if !p.Queue.IsEmpty() {
+	if !p.Queue.IsIdle() {
 		p.paused = false
 	}
 }
 
-// SetStopped removes the current track and clears the paused state.
+// SetStopped advances the queue based on the current loop mode and clears the paused state.
 func (p *PlayerState) SetStopped() {
 	p.mu.Lock()
 	defer p.mu.Unlock()
-	p.Queue.Next()
+	p.Queue.Advance(p.loopMode)
 	p.paused = false
+}
+
+// LoopMode returns the current loop mode.
+func (p *PlayerState) LoopMode() LoopMode {
+	p.mu.RLock()
+	defer p.mu.RUnlock()
+	return p.loopMode
+}
+
+// SetLoopMode sets the loop mode.
+func (p *PlayerState) SetLoopMode(mode LoopMode) {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	p.loopMode = mode
+}
+
+// CycleLoopMode cycles through loop modes: None -> Track -> Queue -> None.
+// Returns the new loop mode.
+func (p *PlayerState) CycleLoopMode() LoopMode {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+
+	switch p.loopMode {
+	case LoopModeNone:
+		p.loopMode = LoopModeTrack
+	case LoopModeTrack:
+		p.loopMode = LoopModeQueue
+	case LoopModeQueue:
+		p.loopMode = LoopModeNone
+	}
+	return p.loopMode
 }
 
 // SetNowPlayingMessage stores the "Now Playing" message info for later deletion.
@@ -146,15 +179,15 @@ func (p *PlayerState) GetNowPlayingMessage() *NowPlayingMessage {
 
 // HasTrack returns true if there is a current track.
 func (p *PlayerState) HasTrack() bool {
-	return !p.Queue.IsEmpty()
+	return !p.Queue.IsIdle()
 }
 
 // HasQueuedTracks returns true if there are tracks after the current one.
 func (p *PlayerState) HasQueuedTracks() bool {
-	return p.Queue.Len() > 1
+	return len(p.Queue.Upcoming()) > 0
 }
 
-// TotalTracks returns the total number of tracks (current + queued).
+// TotalTracks returns the total number of tracks in the queue.
 func (p *PlayerState) TotalTracks() int {
 	return p.Queue.Len()
 }

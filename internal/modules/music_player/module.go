@@ -60,6 +60,7 @@ func (m *MusicPlayerModule) CommandHandlers() map[string]bot.InteractionHandler 
 		"resume": m.handlers.HandleResume,
 		"skip":   m.handlers.HandleSkip,
 		"queue":  m.handlers.HandleQueue,
+		"loop":   m.handlers.HandleLoop,
 	}
 }
 
@@ -145,7 +146,12 @@ func (m *MusicPlayerModule) initWithLavalink(deps bot.ModuleDependencies) error 
 	trackLoader := usecases.NewTrackLoaderService(lavalinkAdapter)
 
 	// Create event handlers
-	m.playbackHandler = events.NewPlaybackEventHandler(playback.PlayNext, repo, m.eventBus)
+	m.playbackHandler = events.NewPlaybackEventHandler(
+		playback.PlayNext,
+		lavalinkAdapter.Stop,
+		repo,
+		m.eventBus,
+	)
 	m.notificationHandler = events.NewNotificationEventHandler(notifier, repo, m.eventBus)
 
 	// Start event handlers with cancellable context

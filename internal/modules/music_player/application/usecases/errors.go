@@ -28,6 +28,10 @@ var (
 	// ErrInvalidPosition is returned when an invalid queue position is specified.
 	ErrInvalidPosition = errors.New("invalid queue position")
 
+	// ErrIsCurrentTrack is returned when trying to remove the currently playing track.
+	// The handler should delegate to Skip instead.
+	ErrIsCurrentTrack = errors.New("cannot remove current track, use skip instead")
+
 	// ErrLoadFailed is returned when loading tracks fails.
 	ErrLoadFailed = errors.New("failed to load track")
 )

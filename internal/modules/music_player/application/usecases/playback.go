@@ -32,6 +32,24 @@ type SkipOutput struct {
 	NextTrack    *domain.Track // nil if queue is empty
 }
 
+// SetLoopModeInput contains the input for the SetLoopMode use case.
+type SetLoopModeInput struct {
+	GuildID               snowflake.ID
+	Mode                  domain.LoopMode
+	NotificationChannelID snowflake.ID // Optional: updates notification channel if non-zero
+}
+
+// CycleLoopModeInput contains the input for the CycleLoopMode use case.
+type CycleLoopModeInput struct {
+	GuildID               snowflake.ID
+	NotificationChannelID snowflake.ID // Optional: updates notification channel if non-zero
+}
+
+// CycleLoopModeOutput contains the result of the CycleLoopMode use case.
+type CycleLoopModeOutput struct {
+	NewMode domain.LoopMode
+}
+
 // PlaybackService handles playback operations.
 type PlaybackService struct {
 	repo        domain.PlayerStateRepository
@@ -112,6 +130,7 @@ func (p *PlaybackService) Resume(ctx context.Context, input ResumeInput) error {
 }
 
 // Skip skips the current track and plays the next one from the queue.
+// Skip always advances to the next track, regardless of loop mode.
 func (p *PlaybackService) Skip(ctx context.Context, input SkipInput) (*SkipOutput, error) {
 	state := p.repo.Get(input.GuildID)
 	if state == nil {
@@ -139,11 +158,12 @@ func (p *PlaybackService) Skip(ctx context.Context, input SkipInput) (*SkipOutpu
 		})
 	}
 
-	// Remove current track from queue
-	state.SetStopped()
+	// Advance to next track, ignoring loop mode (skip always advances)
+	// We use LoopModeNone to ensure we move forward
+	state.Queue.Advance(domain.LoopModeNone)
 
-	// Check if there are more tracks
-	if state.Queue.IsEmpty() {
+	// Check if we've reached the end of the queue
+	if state.Queue.IsIdle() {
 		// Stop playback if no more tracks
 		if err := p.audioPlayer.Stop(ctx, input.GuildID); err != nil {
 			return nil, err
@@ -154,7 +174,7 @@ func (p *PlaybackService) Skip(ctx context.Context, input SkipInput) (*SkipOutpu
 		}, nil
 	}
 
-	// Play next track (which is now at Queue[0])
+	// Play the next track (now the current track after advance)
 	nextTrack, err := p.PlayNext(ctx, input.GuildID)
 	if err != nil {
 		return nil, err
@@ -166,8 +186,8 @@ func (p *PlaybackService) Skip(ctx context.Context, input SkipInput) (*SkipOutpu
 	}, nil
 }
 
-// PlayNext plays the track at Queue[0].
-// Caller is responsible for removing the finished track before calling this.
+// PlayNext plays the current track from the queue.
+// If the queue is idle (not started or past end), it starts from index 0.
 // Returns the track that started playing, or nil if the queue is empty.
 // Returns error if not connected or audio player fails.
 func (p *PlaybackService) PlayNext(
@@ -179,8 +199,16 @@ func (p *PlaybackService) PlayNext(
 		return nil, ErrNotConnected
 	}
 
-	// Get track at Queue[0] (next track to play)
-	nextTrack := state.Queue.Peek()
+	// Get current track, starting playback only if queue hasn't started yet
+	var nextTrack *domain.Track
+	if state.Queue.CurrentIndex() < 0 {
+		// Queue not started - start from beginning
+		nextTrack = state.Queue.Start()
+	} else {
+		// Queue already started - get current track (may be nil if finished)
+		nextTrack = state.Queue.Current()
+	}
+
 	if nextTrack == nil {
 		// No tracks
 		return nil, nil
@@ -191,7 +219,7 @@ func (p *PlaybackService) PlayNext(
 		return nil, err
 	}
 
-	state.SetResumed() // Clear paused flag, track is already at Queue[0]
+	state.SetResumed() // Clear paused flag
 
 	// Publish event for "Now Playing" notification (async)
 	if p.publisher != nil {
@@ -203,4 +231,43 @@ func (p *PlaybackService) PlayNext(
 	}
 
 	return nextTrack, nil
+}
+
+// SetLoopMode sets the loop mode for the guild's player.
+func (p *PlaybackService) SetLoopMode(ctx context.Context, input SetLoopModeInput) error {
+	state := p.repo.Get(input.GuildID)
+	if state == nil {
+		return ErrNotConnected
+	}
+
+	// Update notification channel if provided
+	if input.NotificationChannelID != 0 {
+		state.SetNotificationChannel(input.NotificationChannelID)
+	}
+
+	state.SetLoopMode(input.Mode)
+
+	return nil
+}
+
+// CycleLoopMode cycles through loop modes: None -> Track -> Queue -> None.
+func (p *PlaybackService) CycleLoopMode(
+	ctx context.Context,
+	input CycleLoopModeInput,
+) (*CycleLoopModeOutput, error) {
+	state := p.repo.Get(input.GuildID)
+	if state == nil {
+		return nil, ErrNotConnected
+	}
+
+	// Update notification channel if provided
+	if input.NotificationChannelID != 0 {
+		state.SetNotificationChannel(input.NotificationChannelID)
+	}
+
+	newMode := state.CycleLoopMode()
+
+	return &CycleLoopModeOutput{
+		NewMode: newMode,
+	}, nil
 }

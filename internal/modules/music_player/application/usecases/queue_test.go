@@ -13,14 +13,15 @@ func TestQueueService_List(t *testing.T) {
 	notificationChannelID := snowflake.ID(3)
 
 	tests := []struct {
-		name           string
-		input          QueueListInput
-		setupRepo      func(*mockRepository)
-		wantTotalTrack int // count of QUEUED tracks (excluding current)
-		wantPageTracks int // tracks on current page
-		wantPage       int
-		wantTotalPages int
-		wantCurrent    bool // expect current track to be set
+		name             string
+		input            QueueListInput
+		setupRepo        func(*mockRepository)
+		wantTotalTracks  int // total tracks in queue
+		wantPageTracks   int // tracks on current page
+		wantPage         int
+		wantTotalPages   int
+		wantCurrentIndex int // -1 if idle
+		wantPageStart    int // 0-indexed start position
 	}{
 		{
 			name: "empty queue",
@@ -31,30 +32,53 @@ func TestQueueService_List(t *testing.T) {
 			setupRepo: func(m *mockRepository) {
 				m.createConnectedState(guildID, voiceChannelID, notificationChannelID)
 			},
-			wantTotalTrack: 0,
-			wantPageTracks: 0,
-			wantPage:       1,
-			wantTotalPages: 1,
-			wantCurrent:    false,
+			wantTotalTracks:  0,
+			wantPageTracks:   0,
+			wantPage:         1,
+			wantTotalPages:   1,
+			wantCurrentIndex: -1,
+			wantPageStart:    0,
 		},
 		{
-			name: "single page - only queued tracks (no current)",
+			name: "single page with tracks - idle (not started)",
 			input: QueueListInput{
 				GuildID: guildID,
 				Page:    1,
 			},
 			setupRepo: func(m *mockRepository) {
 				state := m.createConnectedState(guildID, voiceChannelID, notificationChannelID)
-				// Add 5 tracks - first becomes "current", rest are queued
+				// Add 5 tracks without starting playback
 				for i := range 5 {
 					state.Queue.Add(mockTrack("track-" + string(rune('0'+i))))
 				}
 			},
-			wantTotalTrack: 4, // 5 total - 1 current = 4 queued
-			wantPageTracks: 4,
-			wantPage:       1,
-			wantTotalPages: 1,
-			wantCurrent:    true,
+			wantTotalTracks:  5,
+			wantPageTracks:   5,
+			wantPage:         1,
+			wantTotalPages:   1,
+			wantCurrentIndex: -1, // not started
+			wantPageStart:    0,
+		},
+		{
+			name: "single page with tracks - playing (started)",
+			input: QueueListInput{
+				GuildID: guildID,
+				Page:    1,
+			},
+			setupRepo: func(m *mockRepository) {
+				state := m.createConnectedState(guildID, voiceChannelID, notificationChannelID)
+				// Add 5 tracks and start playback
+				for i := range 5 {
+					state.Queue.Add(mockTrack("track-" + string(rune('0'+i))))
+				}
+				state.Queue.Start()
+			},
+			wantTotalTracks:  5,
+			wantPageTracks:   5,
+			wantPage:         1,
+			wantTotalPages:   1,
+			wantCurrentIndex: 0,
+			wantPageStart:    0,
 		},
 		{
 			name: "multiple pages - first page",
@@ -65,16 +89,18 @@ func TestQueueService_List(t *testing.T) {
 			},
 			setupRepo: func(m *mockRepository) {
 				state := m.createConnectedState(guildID, voiceChannelID, notificationChannelID)
-				// Add 8 tracks - first becomes "current", 7 are queued
+				// Add 8 tracks and start playback
 				for i := range 8 {
 					state.Queue.Add(mockTrack("track-" + string(rune('0'+i))))
 				}
+				state.Queue.Start()
 			},
-			wantTotalTrack: 7, // 8 total - 1 current = 7 queued
-			wantPageTracks: 3,
-			wantPage:       1,
-			wantTotalPages: 3,
-			wantCurrent:    true,
+			wantTotalTracks:  8,
+			wantPageTracks:   3,
+			wantPage:         1,
+			wantTotalPages:   3,
+			wantCurrentIndex: 0,
+			wantPageStart:    0,
 		},
 		{
 			name: "multiple pages - last page",
@@ -85,16 +111,18 @@ func TestQueueService_List(t *testing.T) {
 			},
 			setupRepo: func(m *mockRepository) {
 				state := m.createConnectedState(guildID, voiceChannelID, notificationChannelID)
-				// Add 8 tracks - first becomes "current", 7 are queued
+				// Add 8 tracks and start playback
 				for i := range 8 {
 					state.Queue.Add(mockTrack("track-" + string(rune('0'+i))))
 				}
+				state.Queue.Start()
 			},
-			wantTotalTrack: 7,
-			wantPageTracks: 1, // 7 queued, page 3 with size 3 = 1 track
-			wantPage:       3,
-			wantTotalPages: 3,
-			wantCurrent:    true,
+			wantTotalTracks:  8,
+			wantPageTracks:   2, // 8 tracks, page 3 with size 3 = tracks 6-7
+			wantPage:         3,
+			wantTotalPages:   3,
+			wantCurrentIndex: 0,
+			wantPageStart:    6,
 		},
 		{
 			name: "page out of range - clamp to last",
@@ -105,19 +133,45 @@ func TestQueueService_List(t *testing.T) {
 			},
 			setupRepo: func(m *mockRepository) {
 				state := m.createConnectedState(guildID, voiceChannelID, notificationChannelID)
-				// Add 5 tracks - first becomes "current", 4 are queued
+				// Add 5 tracks and start playback
 				for i := range 5 {
 					state.Queue.Add(mockTrack("track-" + string(rune('0'+i))))
 				}
+				state.Queue.Start()
 			},
-			wantTotalTrack: 4,
-			wantPageTracks: 1, // 4 queued, page 2 (clamped) with size 3 = 1 track
-			wantPage:       2,
-			wantTotalPages: 2,
-			wantCurrent:    true,
+			wantTotalTracks:  5,
+			wantPageTracks:   2, // 5 tracks, page 2 (clamped) with size 3 = tracks 3-4
+			wantPage:         2,
+			wantTotalPages:   2,
+			wantCurrentIndex: 0,
+			wantPageStart:    3,
 		},
 		{
-			name: "with current track playing and queue",
+			name: "current track in middle of queue",
+			input: QueueListInput{
+				GuildID:  guildID,
+				Page:     1,
+				PageSize: 5,
+			},
+			setupRepo: func(m *mockRepository) {
+				state := m.createConnectedState(guildID, voiceChannelID, notificationChannelID)
+				// Add 5 tracks and advance to index 2
+				for i := range 5 {
+					state.Queue.Add(mockTrack("track-" + string(rune('0'+i))))
+				}
+				state.Queue.Start()
+				state.Queue.Advance(0)
+				state.Queue.Advance(0)
+			},
+			wantTotalTracks:  5,
+			wantPageTracks:   5,
+			wantPage:         1,
+			wantTotalPages:   1,
+			wantCurrentIndex: 2, // advanced twice from 0
+			wantPageStart:    0,
+		},
+		{
+			name: "with SetPlaying - prepends track",
 			input: QueueListInput{
 				GuildID: guildID,
 				Page:    1,
@@ -127,11 +181,58 @@ func TestQueueService_List(t *testing.T) {
 				state.SetPlaying(mockTrack("current"))
 				state.Queue.Add(mockTrack("queued"))
 			},
-			wantTotalTrack: 1, // 1 queued track
-			wantPageTracks: 1,
-			wantPage:       1,
-			wantTotalPages: 1,
-			wantCurrent:    true,
+			wantTotalTracks:  2, // current + queued
+			wantPageTracks:   2,
+			wantPage:         1,
+			wantTotalPages:   1,
+			wantCurrentIndex: 0,
+			wantPageStart:    0,
+		},
+		{
+			name: "default page - shows page containing current track",
+			input: QueueListInput{
+				GuildID:  guildID,
+				Page:     0, // No page specified
+				PageSize: 3,
+			},
+			setupRepo: func(m *mockRepository) {
+				state := m.createConnectedState(guildID, voiceChannelID, notificationChannelID)
+				// Add 10 tracks and advance to index 7 (page 3 with size 3)
+				for i := range 10 {
+					state.Queue.Add(mockTrack("track-" + string(rune('0'+i))))
+				}
+				state.Queue.Start()
+				for range 7 {
+					state.Queue.Advance(0)
+				}
+			},
+			wantTotalTracks:  10,
+			wantPageTracks:   3, // tracks 6, 7, 8 on page 3
+			wantPage:         3, // index 7 / pageSize 3 + 1 = page 3
+			wantTotalPages:   4,
+			wantCurrentIndex: 7,
+			wantPageStart:    6,
+		},
+		{
+			name: "default page - idle defaults to page 1",
+			input: QueueListInput{
+				GuildID:  guildID,
+				Page:     0, // No page specified
+				PageSize: 3,
+			},
+			setupRepo: func(m *mockRepository) {
+				state := m.createConnectedState(guildID, voiceChannelID, notificationChannelID)
+				// Add 10 tracks but don't start playback
+				for i := range 10 {
+					state.Queue.Add(mockTrack("track-" + string(rune('0'+i))))
+				}
+			},
+			wantTotalTracks:  10,
+			wantPageTracks:   3,
+			wantPage:         1, // idle defaults to page 1
+			wantTotalPages:   4,
+			wantCurrentIndex: -1,
+			wantPageStart:    0,
 		},
 	}
 
@@ -150,8 +251,8 @@ func TestQueueService_List(t *testing.T) {
 				return
 			}
 
-			if output.TotalTracks != tt.wantTotalTrack {
-				t.Errorf("TotalTracks = %d, want %d", output.TotalTracks, tt.wantTotalTrack)
+			if output.TotalTracks != tt.wantTotalTracks {
+				t.Errorf("TotalTracks = %d, want %d", output.TotalTracks, tt.wantTotalTracks)
 			}
 			if len(output.Tracks) != tt.wantPageTracks {
 				t.Errorf("len(Tracks) = %d, want %d", len(output.Tracks), tt.wantPageTracks)
@@ -162,11 +263,11 @@ func TestQueueService_List(t *testing.T) {
 			if output.TotalPages != tt.wantTotalPages {
 				t.Errorf("TotalPages = %d, want %d", output.TotalPages, tt.wantTotalPages)
 			}
-			if tt.wantCurrent && output.CurrentTrack == nil {
-				t.Error("expected CurrentTrack to be set")
+			if output.CurrentIndex != tt.wantCurrentIndex {
+				t.Errorf("CurrentIndex = %d, want %d", output.CurrentIndex, tt.wantCurrentIndex)
 			}
-			if !tt.wantCurrent && output.CurrentTrack != nil {
-				t.Error("expected CurrentTrack to be nil")
+			if output.PageStart != tt.wantPageStart {
+				t.Errorf("PageStart = %d, want %d", output.PageStart, tt.wantPageStart)
 			}
 		})
 	}
@@ -185,56 +286,47 @@ func TestQueueService_Remove(t *testing.T) {
 		wantID    string
 	}{
 		{
-			name: "remove from middle - position 2",
+			name: "remove upcoming track",
 			input: QueueRemoveInput{
 				GuildID:  guildID,
 				Position: 2,
 			},
 			setupRepo: func(m *mockRepository) {
 				state := m.createConnectedState(guildID, voiceChannelID, notificationChannelID)
-				// Queue: [0:current, 1:track-1, 2:track-2, 3:track-3]
+				// Queue: [0:current, 1:track-1, 2:track-2, 3:track-3], currentIndex=0
 				state.SetPlaying(mockTrack("current"))
 				state.Queue.Add(mockTrack("track-1"))
 				state.Queue.Add(mockTrack("track-2"))
 				state.Queue.Add(mockTrack("track-3"))
 			},
-			wantID: "track-2", // position 2
+			wantID: "track-2",
 		},
 		{
-			name: "remove first queued - position 1",
+			name: "remove played track (before current index)",
 			input: QueueRemoveInput{
 				GuildID:  guildID,
-				Position: 1,
+				Position: 0,
 			},
 			setupRepo: func(m *mockRepository) {
 				state := m.createConnectedState(guildID, voiceChannelID, notificationChannelID)
-				// Queue: [0:current, 1:track-1, 2:track-2]
-				state.SetPlaying(mockTrack("current"))
-				state.Queue.Add(mockTrack("track-1"))
-				state.Queue.Add(mockTrack("track-2"))
+				// Add tracks and advance to index 2
+				for i := range 5 {
+					state.Queue.Add(mockTrack("track-" + string(rune('0'+i))))
+				}
+				state.Queue.Start()
+				state.Queue.Advance(0)
+				state.Queue.Advance(0) // currentIndex=2
 			},
-			wantID: "track-1", // position 1
+			wantID: "track-0", // played track at index 0
 		},
 		{
-			name: "empty queue - no queued tracks",
+			name: "empty queue",
 			input: QueueRemoveInput{
 				GuildID:  guildID,
-				Position: 1,
+				Position: 0,
 			},
 			setupRepo: func(m *mockRepository) {
 				m.createConnectedState(guildID, voiceChannelID, notificationChannelID)
-			},
-			wantErr: ErrQueueEmpty,
-		},
-		{
-			name: "only current track - no queued tracks",
-			input: QueueRemoveInput{
-				GuildID:  guildID,
-				Position: 1,
-			},
-			setupRepo: func(m *mockRepository) {
-				state := m.createConnectedState(guildID, voiceChannelID, notificationChannelID)
-				state.SetPlaying(mockTrack("current"))
 			},
 			wantErr: ErrQueueEmpty,
 		},
@@ -252,17 +344,36 @@ func TestQueueService_Remove(t *testing.T) {
 			wantErr: ErrInvalidPosition,
 		},
 		{
-			name: "position zero - should be handled by Skip at handler level",
+			name: "remove current track - returns ErrIsCurrentTrack",
 			input: QueueRemoveInput{
 				GuildID:  guildID,
 				Position: 0,
 			},
 			setupRepo: func(m *mockRepository) {
 				state := m.createConnectedState(guildID, voiceChannelID, notificationChannelID)
+				// currentIndex=0 after SetPlaying
 				state.SetPlaying(mockTrack("current"))
 				state.Queue.Add(mockTrack("track-1"))
 			},
-			wantErr: ErrInvalidPosition,
+			wantErr: ErrIsCurrentTrack,
+		},
+		{
+			name: "remove current track after advancing - returns ErrIsCurrentTrack",
+			input: QueueRemoveInput{
+				GuildID:  guildID,
+				Position: 2,
+			},
+			setupRepo: func(m *mockRepository) {
+				state := m.createConnectedState(guildID, voiceChannelID, notificationChannelID)
+				// Add tracks and advance to index 2
+				for i := range 5 {
+					state.Queue.Add(mockTrack("track-" + string(rune('0'+i))))
+				}
+				state.Queue.Start()
+				state.Queue.Advance(0)
+				state.Queue.Advance(0) // currentIndex=2
+			},
+			wantErr: ErrIsCurrentTrack,
 		},
 		{
 			name: "invalid position - negative",
@@ -413,32 +524,68 @@ func TestQueueService_Clear(t *testing.T) {
 		setupRepo     func(*mockRepository)
 		wantErr       error
 		wantCount     int
-		wantRemaining int // tracks remaining after clear (should be 1 = current)
+		wantRemaining int
 	}{
 		{
-			name: "clear queue - keeps current track",
+			name: "KeepCurrentTrack=true - clears played and upcoming, keeps only current",
 			input: QueueClearInput{
-				GuildID: guildID,
+				GuildID:          guildID,
+				KeepCurrentTrack: true,
 			},
 			setupRepo: func(m *mockRepository) {
 				state := m.createConnectedState(guildID, voiceChannelID, notificationChannelID)
-				state.SetPlaying(mockTrack("current"))
-				state.Queue.Add(mockTrack("track-1"))
-				state.Queue.Add(mockTrack("track-2"))
-				state.Queue.Add(mockTrack("track-3"))
+				// Add 5 tracks and advance to index 2 (track-2 is current)
+				for i := range 5 {
+					state.Queue.Add(mockTrack("track-" + string(rune('0'+i))))
+				}
+				state.Queue.Start()
+				state.Queue.Advance(0)
+				state.Queue.Advance(0) // currentIndex=2
 			},
-			wantCount:     3, // 3 queued tracks cleared
-			wantRemaining: 1, // current track remains
+			wantCount:     4, // 2 played + 2 upcoming cleared
+			wantRemaining: 1, // only current track remains
 		},
 		{
-			name: "empty queue - only current track",
+			name: "KeepCurrentTrack=true - only current track, nothing to clear",
 			input: QueueClearInput{
-				GuildID: guildID,
+				GuildID:          guildID,
+				KeepCurrentTrack: true,
 			},
 			setupRepo: func(m *mockRepository) {
 				state := m.createConnectedState(guildID, voiceChannelID, notificationChannelID)
 				state.SetPlaying(mockTrack("current"))
-				// No queued tracks
+				// No other tracks
+			},
+			wantErr: ErrQueueEmpty,
+		},
+		{
+			name: "KeepCurrentTrack=false - clears all tracks",
+			input: QueueClearInput{
+				GuildID:          guildID,
+				KeepCurrentTrack: false,
+			},
+			setupRepo: func(m *mockRepository) {
+				state := m.createConnectedState(guildID, voiceChannelID, notificationChannelID)
+				// Add 5 tracks and advance to index 2
+				for i := range 5 {
+					state.Queue.Add(mockTrack("track-" + string(rune('0'+i))))
+				}
+				state.Queue.Start()
+				state.Queue.Advance(0)
+				state.Queue.Advance(0)
+			},
+			wantCount:     5, // all 5 tracks cleared
+			wantRemaining: 0, // nothing remains
+		},
+		{
+			name: "KeepCurrentTrack=false - empty queue",
+			input: QueueClearInput{
+				GuildID:          guildID,
+				KeepCurrentTrack: false,
+			},
+			setupRepo: func(m *mockRepository) {
+				m.createConnectedState(guildID, voiceChannelID, notificationChannelID)
+				// No tracks
 			},
 			wantErr: ErrQueueEmpty,
 		},
@@ -489,4 +636,73 @@ func TestQueueService_Clear(t *testing.T) {
 			}
 		})
 	}
+}
+
+func TestQueueService_Clear_PublishesQueueClearedEvent(t *testing.T) {
+	guildID := snowflake.ID(1)
+	voiceChannelID := snowflake.ID(4)
+	notificationChannelID := snowflake.ID(3)
+
+	t.Run("KeepCurrentTrack=false publishes QueueClearedEvent", func(t *testing.T) {
+		repo := newMockRepository()
+		publisher := &mockEventPublisher{}
+
+		state := repo.createConnectedState(guildID, voiceChannelID, notificationChannelID)
+		state.Queue.Add(mockTrack("track-1"))
+		state.Queue.Add(mockTrack("track-2"))
+		state.Queue.Start()
+
+		service := NewQueueService(repo, publisher)
+		_, err := service.Clear(QueueClearInput{
+			GuildID:               guildID,
+			NotificationChannelID: notificationChannelID,
+			KeepCurrentTrack:      false,
+		})
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+
+		// Verify QueueClearedEvent was published
+		if len(publisher.queueCleared) != 1 {
+			t.Fatalf("expected 1 QueueClearedEvent, got %d", len(publisher.queueCleared))
+		}
+
+		event := publisher.queueCleared[0]
+		if event.GuildID != guildID {
+			t.Errorf("event GuildID = %d, want %d", event.GuildID, guildID)
+		}
+		if event.NotificationChannelID != notificationChannelID {
+			t.Errorf(
+				"event NotificationChannelID = %d, want %d",
+				event.NotificationChannelID,
+				notificationChannelID,
+			)
+		}
+	})
+
+	t.Run("KeepCurrentTrack=true does not publish QueueClearedEvent", func(t *testing.T) {
+		repo := newMockRepository()
+		publisher := &mockEventPublisher{}
+
+		state := repo.createConnectedState(guildID, voiceChannelID, notificationChannelID)
+		state.Queue.Add(mockTrack("track-1"))
+		state.Queue.Add(mockTrack("track-2"))
+		state.Queue.Add(mockTrack("track-3"))
+		state.Queue.Start()
+
+		service := NewQueueService(repo, publisher)
+		_, err := service.Clear(QueueClearInput{
+			GuildID:               guildID,
+			NotificationChannelID: notificationChannelID,
+			KeepCurrentTrack:      true,
+		})
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+
+		// Verify QueueClearedEvent was NOT published
+		if len(publisher.queueCleared) != 0 {
+			t.Errorf("expected 0 QueueClearedEvents, got %d", len(publisher.queueCleared))
+		}
+	})
 }

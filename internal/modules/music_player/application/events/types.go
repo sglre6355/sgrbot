@@ -11,6 +11,7 @@ type (
 	PlaybackFinishedEvent = ports.PlaybackFinishedEvent
 	TrackEndedEvent       = ports.TrackEndedEvent
 	TrackEndReason        = ports.TrackEndReason
+	QueueClearedEvent     = ports.QueueClearedEvent
 )
 
 // Re-export TrackEndReason constants.

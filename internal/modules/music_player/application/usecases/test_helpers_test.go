@@ -121,6 +121,7 @@ type mockEventPublisher struct {
 	playbackStarted  []ports.PlaybackStartedEvent
 	playbackFinished []ports.PlaybackFinishedEvent
 	trackEnded       []ports.TrackEndedEvent
+	queueCleared     []ports.QueueClearedEvent
 }
 
 func (m *mockEventPublisher) PublishTrackEnqueued(event ports.TrackEnqueuedEvent) {
@@ -137,4 +138,8 @@ func (m *mockEventPublisher) PublishPlaybackFinished(event ports.PlaybackFinishe
 
 func (m *mockEventPublisher) PublishTrackEnded(event ports.TrackEndedEvent) {
 	m.trackEnded = append(m.trackEnded, event)
+}
+
+func (m *mockEventPublisher) PublishQueueCleared(event ports.QueueClearedEvent) {
+	m.queueCleared = append(m.queueCleared, event)
 }

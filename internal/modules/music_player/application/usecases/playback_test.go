@@ -7,6 +7,7 @@ import (
 
 	"github.com/disgoorg/snowflake/v2"
 	"github.com/sglre6355/sgrbot/internal/modules/music_player/application/ports"
+	"github.com/sglre6355/sgrbot/internal/modules/music_player/domain"
 )
 
 func TestPlaybackService_Pause(t *testing.T) {
@@ -474,6 +475,193 @@ func TestPlaybackService_PlayNext(t *testing.T) {
 				if track != nil {
 					t.Error("expected track to be nil")
 				}
+			}
+		})
+	}
+}
+
+func TestPlaybackService_SetLoopMode(t *testing.T) {
+	guildID := snowflake.ID(1)
+	voiceChannelID := snowflake.ID(4)
+	textChannelID := snowflake.ID(3)
+
+	tests := []struct {
+		name      string
+		input     SetLoopModeInput
+		setupRepo func(*mockRepository)
+		wantErr   error
+		wantMode  domain.LoopMode
+	}{
+		{
+			name: "set loop mode to track",
+			input: SetLoopModeInput{
+				GuildID: guildID,
+				Mode:    domain.LoopModeTrack,
+			},
+			setupRepo: func(m *mockRepository) {
+				m.createConnectedState(guildID, voiceChannelID, textChannelID)
+			},
+			wantMode: domain.LoopModeTrack,
+		},
+		{
+			name: "set loop mode to queue",
+			input: SetLoopModeInput{
+				GuildID: guildID,
+				Mode:    domain.LoopModeQueue,
+			},
+			setupRepo: func(m *mockRepository) {
+				m.createConnectedState(guildID, voiceChannelID, textChannelID)
+			},
+			wantMode: domain.LoopModeQueue,
+		},
+		{
+			name: "set loop mode to none",
+			input: SetLoopModeInput{
+				GuildID: guildID,
+				Mode:    domain.LoopModeNone,
+			},
+			setupRepo: func(m *mockRepository) {
+				state := m.createConnectedState(guildID, voiceChannelID, textChannelID)
+				state.SetLoopMode(domain.LoopModeTrack) // Start with track mode
+			},
+			wantMode: domain.LoopModeNone,
+		},
+		{
+			name: "not connected",
+			input: SetLoopModeInput{
+				GuildID: guildID,
+				Mode:    domain.LoopModeTrack,
+			},
+			wantErr: ErrNotConnected,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			repo := newMockRepository()
+
+			if tt.setupRepo != nil {
+				tt.setupRepo(repo)
+			}
+
+			service := NewPlaybackService(repo, &mockAudioPlayer{}, nil, nil)
+			err := service.SetLoopMode(context.Background(), tt.input)
+
+			if tt.wantErr != nil {
+				if err == nil {
+					t.Errorf("expected error %v, got nil", tt.wantErr)
+					return
+				}
+				if err.Error() != tt.wantErr.Error() {
+					t.Errorf("expected error %v, got %v", tt.wantErr, err)
+				}
+				return
+			}
+
+			if err != nil {
+				t.Errorf("unexpected error: %v", err)
+				return
+			}
+
+			state := repo.Get(guildID)
+			if state.LoopMode() != tt.wantMode {
+				t.Errorf("expected loop mode %v, got %v", tt.wantMode, state.LoopMode())
+			}
+		})
+	}
+}
+
+func TestPlaybackService_CycleLoopMode(t *testing.T) {
+	guildID := snowflake.ID(1)
+	voiceChannelID := snowflake.ID(4)
+	textChannelID := snowflake.ID(3)
+
+	tests := []struct {
+		name        string
+		input       CycleLoopModeInput
+		setupRepo   func(*mockRepository)
+		wantErr     error
+		wantMode    domain.LoopMode
+		initialMode domain.LoopMode
+	}{
+		{
+			name: "cycle from none to track",
+			input: CycleLoopModeInput{
+				GuildID: guildID,
+			},
+			setupRepo: func(m *mockRepository) {
+				m.createConnectedState(guildID, voiceChannelID, textChannelID)
+			},
+			initialMode: domain.LoopModeNone,
+			wantMode:    domain.LoopModeTrack,
+		},
+		{
+			name: "cycle from track to queue",
+			input: CycleLoopModeInput{
+				GuildID: guildID,
+			},
+			setupRepo: func(m *mockRepository) {
+				state := m.createConnectedState(guildID, voiceChannelID, textChannelID)
+				state.SetLoopMode(domain.LoopModeTrack)
+			},
+			initialMode: domain.LoopModeTrack,
+			wantMode:    domain.LoopModeQueue,
+		},
+		{
+			name: "cycle from queue to none",
+			input: CycleLoopModeInput{
+				GuildID: guildID,
+			},
+			setupRepo: func(m *mockRepository) {
+				state := m.createConnectedState(guildID, voiceChannelID, textChannelID)
+				state.SetLoopMode(domain.LoopModeQueue)
+			},
+			initialMode: domain.LoopModeQueue,
+			wantMode:    domain.LoopModeNone,
+		},
+		{
+			name: "not connected",
+			input: CycleLoopModeInput{
+				GuildID: guildID,
+			},
+			wantErr: ErrNotConnected,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			repo := newMockRepository()
+
+			if tt.setupRepo != nil {
+				tt.setupRepo(repo)
+			}
+
+			service := NewPlaybackService(repo, &mockAudioPlayer{}, nil, nil)
+			output, err := service.CycleLoopMode(context.Background(), tt.input)
+
+			if tt.wantErr != nil {
+				if err == nil {
+					t.Errorf("expected error %v, got nil", tt.wantErr)
+					return
+				}
+				if err.Error() != tt.wantErr.Error() {
+					t.Errorf("expected error %v, got %v", tt.wantErr, err)
+				}
+				return
+			}
+
+			if err != nil {
+				t.Errorf("unexpected error: %v", err)
+				return
+			}
+
+			if output.NewMode != tt.wantMode {
+				t.Errorf("expected output mode %v, got %v", tt.wantMode, output.NewMode)
+			}
+
+			state := repo.Get(guildID)
+			if state.LoopMode() != tt.wantMode {
+				t.Errorf("expected state loop mode %v, got %v", tt.wantMode, state.LoopMode())
 			}
 		})
 	}

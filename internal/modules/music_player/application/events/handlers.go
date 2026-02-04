@@ -13,10 +13,14 @@ import (
 // PlayNextFunc is the function signature for playing the next track.
 type PlayNextFunc func(ctx context.Context, guildID snowflake.ID) (*domain.Track, error)
 
+// StopFunc is the function signature for stopping playback.
+type StopFunc func(ctx context.Context, guildID snowflake.ID) error
+
 // PlaybackEventHandler handles events related to playback control.
-// It listens for TrackEnqueued and TrackEnded events to manage playback flow.
+// It listens for TrackEnqueued, TrackEnded, and QueueCleared events to manage playback flow.
 type PlaybackEventHandler struct {
 	playNextFunc PlayNextFunc
+	stopFunc     StopFunc
 	repo         domain.PlayerStateRepository
 	bus          *Bus
 
@@ -27,11 +31,13 @@ type PlaybackEventHandler struct {
 // NewPlaybackEventHandler creates a new PlaybackEventHandler.
 func NewPlaybackEventHandler(
 	playNextFunc PlayNextFunc,
+	stopFunc StopFunc,
 	repo domain.PlayerStateRepository,
 	bus *Bus,
 ) *PlaybackEventHandler {
 	return &PlaybackEventHandler{
 		playNextFunc: playNextFunc,
+		stopFunc:     stopFunc,
 		repo:         repo,
 		bus:          bus,
 		done:         make(chan struct{}),
@@ -40,7 +46,7 @@ func NewPlaybackEventHandler(
 
 // Start begins listening for events in background goroutines.
 func (h *PlaybackEventHandler) Start(ctx context.Context) {
-	h.wg.Add(2)
+	h.wg.Add(3)
 
 	// Handle TrackEnqueued events
 	go func() {
@@ -74,6 +80,24 @@ func (h *PlaybackEventHandler) Start(ctx context.Context) {
 					return
 				}
 				h.handleTrackEnded(ctx, event)
+			}
+		}
+	}()
+
+	// Handle QueueCleared events
+	go func() {
+		defer h.wg.Done()
+		for {
+			select {
+			case <-ctx.Done():
+				return
+			case <-h.done:
+				return
+			case event, ok := <-h.bus.QueueCleared():
+				if !ok {
+					return
+				}
+				h.handleQueueCleared(ctx, event)
 			}
 		}
 	}()
@@ -130,6 +154,33 @@ func (h *PlaybackEventHandler) handleTrackEnqueued(ctx context.Context, event Tr
 	}
 }
 
+func (h *PlaybackEventHandler) handleQueueCleared(ctx context.Context, event QueueClearedEvent) {
+	slog.Debug("queue cleared, stopping playback",
+		"guild", event.GuildID,
+	)
+
+	// Stop playback via audio player
+	if err := h.stopFunc(ctx, event.GuildID); err != nil {
+		slog.Error("failed to stop playback after queue cleared",
+			"guild", event.GuildID,
+			"error", err,
+		)
+	}
+
+	// Delete the "Now Playing" message
+	state := h.repo.Get(event.GuildID)
+	if state != nil {
+		nowPlayingMsg := state.GetNowPlayingMessage()
+		if nowPlayingMsg != nil {
+			h.bus.PublishPlaybackFinished(PlaybackFinishedEvent{
+				GuildID:               event.GuildID,
+				NotificationChannelID: nowPlayingMsg.ChannelID,
+				LastMessageID:         &nowPlayingMsg.MessageID,
+			})
+		}
+	}
+}
+
 func (h *PlaybackEventHandler) handleTrackEnded(ctx context.Context, event TrackEndedEvent) {
 	// Only advance queue for certain end reasons
 	if !event.Reason.ShouldAdvanceQueue() {
@@ -140,12 +191,7 @@ func (h *PlaybackEventHandler) handleTrackEnded(ctx context.Context, event Track
 		return
 	}
 
-	slog.Debug("track ended, advancing queue",
-		"guild", event.GuildID,
-		"reason", event.Reason,
-	)
-
-	// Get state to check notification channel for error reporting
+	// Get state to check loop mode and notification channel
 	state := h.repo.Get(event.GuildID)
 	if state == nil {
 		slog.Debug("track ended but no player state",
@@ -153,6 +199,14 @@ func (h *PlaybackEventHandler) handleTrackEnded(ctx context.Context, event Track
 		)
 		return
 	}
+
+	loopMode := state.LoopMode()
+
+	slog.Debug("track ended, advancing queue",
+		"guild", event.GuildID,
+		"reason", event.Reason,
+		"loop_mode", loopMode.String(),
+	)
 
 	// Delete the old "Now Playing" message before playing next
 	nowPlayingMsg := state.GetNowPlayingMessage()
@@ -164,7 +218,7 @@ func (h *PlaybackEventHandler) handleTrackEnded(ctx context.Context, event Track
 		})
 	}
 
-	// Remove finished track from queue before playing next
+	// Advance queue based on loop mode
 	state.SetStopped()
 
 	_, err := h.playNextFunc(ctx, event.GuildID)

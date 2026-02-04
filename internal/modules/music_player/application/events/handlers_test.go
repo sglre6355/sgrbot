@@ -131,6 +131,7 @@ func TestPlaybackEventHandler_TrackEnqueued_WhenIdle_StartsPlayback(t *testing.T
 			playNextCh <- calledGuildID
 			return mockTrack("track-1"), nil
 		},
+		func(_ context.Context, _ snowflake.ID) error { return nil },
 		repo,
 		bus,
 	)
@@ -168,6 +169,7 @@ func TestPlaybackEventHandler_TrackEnqueued_WhenNotIdle_DoesNotStartPlayback(t *
 			playNextCh <- struct{}{}
 			return mockTrack("track-1"), nil
 		},
+		func(_ context.Context, _ snowflake.ID) error { return nil },
 		repo,
 		bus,
 	)
@@ -209,6 +211,7 @@ func TestPlaybackEventHandler_TrackEnded_Finished_AdvancesQueue(t *testing.T) {
 			playNextCh <- struct{}{}
 			return mockTrack("next"), nil
 		},
+		func(_ context.Context, _ snowflake.ID) error { return nil },
 		repo,
 		bus,
 	)
@@ -249,6 +252,7 @@ func TestPlaybackEventHandler_TrackEnded_Stopped_DoesNotAdvanceQueue(t *testing.
 			playNextCh <- struct{}{}
 			return mockTrack("next"), nil
 		},
+		func(_ context.Context, _ snowflake.ID) error { return nil },
 		repo,
 		bus,
 	)
@@ -280,6 +284,7 @@ func TestPlaybackEventHandler_StopsOnContextCancellation(t *testing.T) {
 		func(_ context.Context, _ snowflake.ID) (*domain.Track, error) {
 			return nil, nil
 		},
+		func(_ context.Context, _ snowflake.ID) error { return nil },
 		repo,
 		bus,
 	)
@@ -303,6 +308,58 @@ func TestPlaybackEventHandler_StopsOnContextCancellation(t *testing.T) {
 	case <-time.After(500 * time.Millisecond):
 		t.Error("handler did not stop after context cancellation")
 	}
+}
+
+func TestPlaybackEventHandler_QueueCleared_StopsPlayback(t *testing.T) {
+	bus := NewBus(10)
+	defer bus.Close()
+
+	repo := newMockRepository()
+	guildID := snowflake.ID(1)
+	channelID := snowflake.ID(200)
+	messageID := snowflake.ID(999)
+
+	state := domain.NewPlayerState(guildID, snowflake.ID(100), channelID)
+	state.SetNowPlayingMessage(channelID, messageID)
+	repo.Save(state)
+
+	stopCh := make(chan snowflake.ID, 1)
+
+	handler := NewPlaybackEventHandler(
+		func(_ context.Context, _ snowflake.ID) (*domain.Track, error) {
+			return nil, nil
+		},
+		func(_ context.Context, guildID snowflake.ID) error {
+			stopCh <- guildID
+			return nil
+		},
+		repo,
+		bus,
+	)
+
+	handler.Start(t.Context())
+	defer handler.Stop()
+
+	// Publish QueueCleared event
+	bus.PublishQueueCleared(QueueClearedEvent{
+		GuildID:               guildID,
+		NotificationChannelID: channelID,
+	})
+
+	// Wait for event processing
+	select {
+	case stoppedGuildID := <-stopCh:
+		if stoppedGuildID != guildID {
+			t.Errorf("expected guildID %d, got %d", guildID, stoppedGuildID)
+		}
+	case <-time.After(100 * time.Millisecond):
+		t.Error("expected stopFunc to be called when queue cleared")
+	}
+
+	// Also verify that PlaybackFinished was published (for message deletion)
+	time.Sleep(50 * time.Millisecond)
+	// Note: We can't directly verify PlaybackFinished from here as it goes to the bus,
+	// but we've verified the stopFunc was called which is the critical part.
 }
 
 // --- NotificationEventHandler Tests ---

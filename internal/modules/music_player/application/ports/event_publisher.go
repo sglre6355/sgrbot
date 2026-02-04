@@ -18,6 +18,9 @@ type EventPublisher interface {
 
 	// PublishTrackEnded publishes an event when a track ends (from audio player).
 	PublishTrackEnded(event TrackEndedEvent)
+
+	// PublishQueueCleared publishes an event when the queue is fully cleared.
+	PublishQueueCleared(event QueueClearedEvent)
 }
 
 // TrackEnqueuedEvent is published when a track is added to the queue.
@@ -46,6 +49,13 @@ type PlaybackFinishedEvent struct {
 type TrackEndedEvent struct {
 	GuildID snowflake.ID
 	Reason  TrackEndReason
+}
+
+// QueueClearedEvent is published when the queue is fully cleared (including current track).
+// This triggers playback to stop.
+type QueueClearedEvent struct {
+	GuildID               snowflake.ID
+	NotificationChannelID snowflake.ID
 }
 
 // TrackEndReason represents why a track ended.
