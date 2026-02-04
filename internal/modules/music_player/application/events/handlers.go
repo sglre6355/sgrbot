@@ -132,8 +132,16 @@ func (h *PlaybackEventHandler) handleTrackEnqueued(ctx context.Context, event Tr
 		)
 		return
 	}
-	if !state.IsIdle() {
-		slog.Debug("track enqueued but player no longer idle, skipping auto-play",
+
+	// Check if a different track is now current (another enqueue won the race).
+	// We compare track IDs instead of checking IsIdle() because:
+	// - When a queue naturally ends and a new track is added, IsIdle() returns false
+	//   (valid index now), but we still want to auto-play the new track.
+	// - If the new track IS the current track, we should start playback.
+	// - If a DIFFERENT track is current, another event already started playback.
+	currentTrack := state.CurrentTrack()
+	if currentTrack != nil && currentTrack.ID != event.Track.ID {
+		slog.Debug("track enqueued but different track is current, skipping auto-play",
 			"guild", event.GuildID,
 			"track", event.Track.Title,
 		)

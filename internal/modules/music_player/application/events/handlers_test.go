@@ -193,6 +193,106 @@ func TestPlaybackEventHandler_TrackEnqueued_WhenNotIdle_DoesNotStartPlayback(t *
 	}
 }
 
+func TestPlaybackEventHandler_TrackEnqueued_AfterQueueEnds_StartsPlayback(t *testing.T) {
+	bus := NewBus(10)
+	defer bus.Close()
+
+	repo := newMockRepository()
+	guildID := snowflake.ID(1)
+	// Create state where queue has finished (currentIndex past end)
+	state := domain.NewPlayerState(guildID, snowflake.ID(100), snowflake.ID(200))
+	state.Queue.Add(mockTrack("old-track"))
+	state.Queue.Start()
+	state.Queue.Advance(domain.LoopModeNone) // past end, now idle
+	repo.Save(state)
+
+	// Verify the state is idle (past end)
+	if !state.IsIdle() {
+		t.Fatal("expected state to be idle after queue ended")
+	}
+
+	playNextCh := make(chan snowflake.ID, 1)
+	newTrack := mockTrack("new-track")
+
+	handler := NewPlaybackEventHandler(
+		func(_ context.Context, calledGuildID snowflake.ID) (*domain.Track, error) {
+			playNextCh <- calledGuildID
+			return newTrack, nil
+		},
+		func(_ context.Context, _ snowflake.ID) error { return nil },
+		repo,
+		bus,
+	)
+
+	handler.Start(t.Context())
+	defer handler.Stop()
+
+	// Add new track to queue (this is what Add() does)
+	state.Queue.Add(newTrack)
+
+	// Publish event with wasIdle=true (because Add() returned wasIdle=true)
+	bus.PublishTrackEnqueued(TrackEnqueuedEvent{
+		GuildID: guildID,
+		Track:   newTrack,
+		WasIdle: true,
+	})
+
+	// Wait for event processing - should be called because track ID matches
+	select {
+	case calledGuildID := <-playNextCh:
+		if calledGuildID != guildID {
+			t.Errorf("expected guildID %d, got %d", guildID, calledGuildID)
+		}
+	case <-time.After(100 * time.Millisecond):
+		t.Error("expected playNextFunc to be called when track enqueued after queue ended")
+	}
+}
+
+func TestPlaybackEventHandler_TrackEnqueued_DifferentTrackCurrent_DoesNotStartPlayback(
+	t *testing.T,
+) {
+	bus := NewBus(10)
+	defer bus.Close()
+
+	repo := newMockRepository()
+	guildID := snowflake.ID(1)
+	// Create state where a different track is already current
+	state := domain.NewPlayerState(guildID, snowflake.ID(100), snowflake.ID(200))
+	state.SetPlaying(mockTrack("current-track"))
+	repo.Save(state)
+
+	playNextCh := make(chan struct{}, 1)
+
+	handler := NewPlaybackEventHandler(
+		func(_ context.Context, _ snowflake.ID) (*domain.Track, error) {
+			playNextCh <- struct{}{}
+			return mockTrack("track-1"), nil
+		},
+		func(_ context.Context, _ snowflake.ID) error { return nil },
+		repo,
+		bus,
+	)
+
+	handler.Start(t.Context())
+	defer handler.Stop()
+
+	// Publish event with wasIdle=true but for a different track
+	// (simulates concurrent enqueue where another track won the race)
+	bus.PublishTrackEnqueued(TrackEnqueuedEvent{
+		GuildID: guildID,
+		Track:   mockTrack("second-track"),
+		WasIdle: true,
+	})
+
+	// Wait for event processing - should NOT be called
+	select {
+	case <-playNextCh:
+		t.Error("expected playNextFunc NOT to be called when different track is current")
+	case <-time.After(100 * time.Millisecond):
+		// Success - playNextFunc was not called
+	}
+}
+
 func TestPlaybackEventHandler_TrackEnded_Finished_AdvancesQueue(t *testing.T) {
 	bus := NewBus(10)
 	defer bus.Close()
