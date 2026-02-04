@@ -246,3 +246,11 @@ func (q *Queue) ClearAfterCurrent() int {
 	q.tracks = q.tracks[:q.currentIndex+1]
 	return count
 }
+
+// ResetToIdle resets the queue to idle state (before first track).
+// Used when playback fails to start or when restarting the queue.
+func (q *Queue) ResetToIdle() {
+	q.mu.Lock()
+	defer q.mu.Unlock()
+	q.currentIndex = -1
+}

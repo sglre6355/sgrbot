@@ -179,7 +179,7 @@ func TestQueue_Advance_LoopModeTrack(t *testing.T) {
 	}
 
 	// Multiple advances should keep returning same track
-	for i := 0; i < 5; i++ {
+	for i := range 5 {
 		got = q.Advance(LoopModeTrack)
 		if got != track1 {
 			t.Errorf("iteration %d: expected track1, got %v", i, got)
@@ -224,7 +224,7 @@ func TestQueue_Advance_LoopModeQueue_SingleTrack(t *testing.T) {
 	q.Start()
 
 	// Single track with LoopModeQueue should keep returning same track
-	for i := 0; i < 5; i++ {
+	for i := range 5 {
 		got := q.Advance(LoopModeQueue)
 		if got != track {
 			t.Errorf("iteration %d: expected track, got %v", i, got)
@@ -622,5 +622,87 @@ func TestQueue_ConcurrentAdvance(t *testing.T) {
 	idx := q.CurrentIndex()
 	if idx < 0 || idx > 100 {
 		t.Errorf("unexpected currentIndex %d after concurrent operations", idx)
+	}
+}
+
+func TestQueue_ResetToIdle(t *testing.T) {
+	q := NewQueue()
+	track1 := &Track{ID: "track-1", Title: "Song 1"}
+	track2 := &Track{ID: "track-2", Title: "Song 2"}
+
+	q.Add(track1)
+	q.Add(track2)
+	q.Start()
+
+	// Verify we're not idle
+	if q.IsIdle() {
+		t.Error("queue should not be idle after Start")
+	}
+	if q.CurrentIndex() != 0 {
+		t.Errorf("expected currentIndex 0, got %d", q.CurrentIndex())
+	}
+
+	// Reset to idle
+	q.ResetToIdle()
+
+	// Verify idle state
+	if !q.IsIdle() {
+		t.Error("queue should be idle after ResetToIdle")
+	}
+	if q.CurrentIndex() != -1 {
+		t.Errorf("expected currentIndex -1, got %d", q.CurrentIndex())
+	}
+
+	// Tracks should still be in queue
+	if q.Len() != 2 {
+		t.Errorf("expected 2 tracks, got %d", q.Len())
+	}
+
+	// Can start again from beginning
+	q.Start()
+	if q.Current() != track1 {
+		t.Error("expected to start from first track")
+	}
+}
+
+func TestQueue_ResetToIdle_FromMiddleOfQueue(t *testing.T) {
+	q := NewQueue()
+	for i := range 5 {
+		q.Add(&Track{ID: TrackID(strconv.Itoa(i))})
+	}
+	q.Start()
+	q.Advance(LoopModeNone) // index=1
+	q.Advance(LoopModeNone) // index=2
+
+	if q.CurrentIndex() != 2 {
+		t.Errorf("expected currentIndex 2, got %d", q.CurrentIndex())
+	}
+
+	q.ResetToIdle()
+
+	if q.CurrentIndex() != -1 {
+		t.Errorf("expected currentIndex -1, got %d", q.CurrentIndex())
+	}
+	if !q.IsIdle() {
+		t.Error("queue should be idle after ResetToIdle")
+	}
+}
+
+func TestQueue_ResetToIdle_AfterQueueEnds(t *testing.T) {
+	q := NewQueue()
+	q.Add(&Track{ID: "track-1"})
+	q.Start()
+	q.Advance(LoopModeNone) // past end
+
+	// Queue is already idle (past end)
+	if !q.IsIdle() {
+		t.Error("queue should be idle when past end")
+	}
+
+	// Reset to idle should still work
+	q.ResetToIdle()
+
+	if q.CurrentIndex() != -1 {
+		t.Errorf("expected currentIndex -1, got %d", q.CurrentIndex())
 	}
 }
