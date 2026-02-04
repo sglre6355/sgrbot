@@ -102,13 +102,14 @@ func (q *Queue) HasNext(mode LoopMode) bool {
 	q.mu.RLock()
 	defer q.mu.RUnlock()
 
-	if len(q.tracks) == 0 || q.currentIndex < 0 {
+	// No next if queue is empty or idle (not started or past end)
+	if len(q.tracks) == 0 || q.currentIndex < 0 || q.currentIndex >= len(q.tracks) {
 		return false
 	}
 
 	switch mode {
 	case LoopModeTrack, LoopModeQueue:
-		// Always has next when looping (as long as queue isn't empty)
+		// Always has next when looping (as long as queue isn't empty and not idle)
 		return true
 	default: // LoopModeNone
 		return q.currentIndex+1 < len(q.tracks)
