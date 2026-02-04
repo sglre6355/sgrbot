@@ -26,7 +26,7 @@ Environment variables:
 | `/skip` | Skip to next track |
 | `/loop [mode]` | Set loop mode (none/track/queue) or cycle through modes |
 | `/queue list [page]` | Show queue with sections (Played/Now Playing/Up Next) |
-| `/queue remove <position>` | Remove track from queue (0 = current track, with autocomplete) |
+| `/queue remove <position>` | Remove track from queue (1-indexed position, with autocomplete) |
 | `/queue clear` | Clear queue (keeps current track) |
 
 ## Project Structure

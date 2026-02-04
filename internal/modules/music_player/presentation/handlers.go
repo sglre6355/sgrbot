@@ -378,7 +378,8 @@ func (h *Handlers) handleQueueRemove(
 	var position int
 	for _, opt := range options {
 		if opt.Name == "position" {
-			position = int(opt.IntValue())
+			// Convert from 1-indexed (user input) to 0-indexed (internal)
+			position = int(opt.IntValue()) - 1
 		}
 	}
 
@@ -390,7 +391,7 @@ func (h *Handlers) handleQueueRemove(
 
 	output, err := h.queue.Remove(input)
 	if err != nil {
-		// If trying to remove current track, delegate to Skip
+		// If trying to remove current track, skip first then remove
 		if errors.Is(err, usecases.ErrIsCurrentTrack) {
 			skipOutput, skipErr := h.playback.Skip(context.Background(), usecases.SkipInput{
 				GuildID:               guildID,
@@ -399,7 +400,14 @@ func (h *Handlers) handleQueueRemove(
 			if skipErr != nil {
 				return respondError(r, skipErr.Error())
 			}
-			return respondSkipped(r, skipOutput.SkippedTrack)
+			// After skip, currentIndex has advanced, so we can now remove the track
+			// at the original position (which is now in the "played" section)
+			_, _ = h.queue.Remove(usecases.QueueRemoveInput{
+				GuildID:               guildID,
+				Position:              position,
+				NotificationChannelID: notificationChannelID,
+			})
+			return respondQueueRemoved(r, skipOutput.SkippedTrack)
 		}
 		return respondError(r, err.Error())
 	}

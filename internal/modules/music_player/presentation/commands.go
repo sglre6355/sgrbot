@@ -80,9 +80,9 @@ func Commands() []*discordgo.ApplicationCommand {
 						{
 							Type:         discordgo.ApplicationCommandOptionInteger,
 							Name:         "position",
-							Description:  "Position of the track to remove (0 = current track)",
+							Description:  "Position of the track to remove (1-indexed, as shown in queue list)",
 							Required:     true,
-							MinValue:     floatPtr(0),
+							MinValue:     floatPtr(1),
 							Autocomplete: true,
 						},
 					},

@@ -53,9 +53,11 @@ func (h *AutocompleteHandler) HandleQueueRemove(
 		if idx >= 25 {
 			break
 		}
+		// Use 1-indexed positions to match queue list display
+		displayPos := idx + 1
 		choices = append(choices, &discordgo.ApplicationCommandOptionChoice{
-			Name:  fmt.Sprintf("%d. %s", idx, truncate(track.Title, 90)),
-			Value: idx,
+			Name:  fmt.Sprintf("%d. %s", displayPos, truncate(track.Title, 90)),
+			Value: displayPos,
 		})
 	}
 
