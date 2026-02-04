@@ -24,7 +24,8 @@ Environment variables:
 | `/pause` | Pause playback |
 | `/resume` | Resume playback |
 | `/skip` | Skip to next track |
-| `/queue list [page]` | Show queue (paginated) |
+| `/loop [mode]` | Set loop mode (none/track/queue) or cycle through modes |
+| `/queue list [page]` | Show queue with sections (Played/Now Playing/Up Next) |
 | `/queue remove <position>` | Remove track from queue (0 = current track, with autocomplete) |
 | `/queue clear` | Clear queue (keeps current track) |
 
@@ -36,7 +37,8 @@ internal/modules/music_player/
 ├── config.go                    # Environment configuration loading
 ├── domain/
 │   ├── track.go                 # Track entity
-│   ├── queue.go                 # Queue entity
+│   ├── queue.go                 # Queue entity (index-based with loop support)
+│   ├── loop_mode.go             # LoopMode value object (none/track/queue)
 │   ├── player_state.go          # PlayerState aggregate root
 │   ├── search_query.go          # SearchQuery value object
 │   ├── source.go                # TrackSource value object
@@ -75,6 +77,26 @@ internal/modules/music_player/
 ```
 
 ## Architecture
+
+### Index-Based Queue Model
+
+The music player uses an index-based queue instead of a traditional pop-based
+queue. This design enables loop functionality while maintaining track history:
+
+- **currentIndex**: Tracks position in the queue (-1 before start, 0+ during playback)
+- **Tracks are never removed** when finished—the index advances instead
+- **Loop modes** determine advancement behavior when a track ends
+
+| Loop Mode | Behavior |
+| --------- | -------- |
+| `none` | Advance to next track; stop when queue ends |
+| `track` | Repeat current track indefinitely |
+| `queue` | Advance with wrap-around (restart from beginning after last track) |
+
+Queue sections displayed in `/queue list`:
+- **Played**: Tracks before currentIndex (previously played)
+- **Now Playing**: Track at currentIndex
+- **Up Next**: Tracks after currentIndex
 
 ### Event-Driven Design
 
@@ -125,7 +147,7 @@ queue:
 ### Event Handlers (`application/events/handlers.go`)
 
 - **PlaybackEventHandler**: Listens for `TrackEnqueuedEvent` (auto-start if
-  idle) and `TrackEndedEvent` (play next track if reason allows)
+  idle) and `TrackEndedEvent` (advance queue based on loop mode, play next)
 - **NotificationEventHandler**: Listens for `PlaybackStartedEvent` (send "Now
   Playing") and `PlaybackFinishedEvent` (delete message)
 
