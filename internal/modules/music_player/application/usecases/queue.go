@@ -65,6 +65,17 @@ type QueueClearOutput struct {
 	ClearedCount int
 }
 
+// QueueRestartInput contains the input for the QueueRestart use case.
+type QueueRestartInput struct {
+	GuildID               snowflake.ID
+	NotificationChannelID snowflake.ID // Optional: updates notification channel if non-zero
+}
+
+// QueueRestartOutput contains the result of the QueueRestart use case.
+type QueueRestartOutput struct {
+	Track *domain.Track
+}
+
 // QueueService handles queue operations.
 type QueueService struct {
 	repo      domain.PlayerStateRepository
@@ -269,4 +280,40 @@ func (q *QueueService) Clear(input QueueClearInput) (*QueueClearOutput, error) {
 	return &QueueClearOutput{
 		ClearedCount: count,
 	}, nil
+}
+
+// Restart restarts the queue from the beginning.
+// Used to replay tracks after the queue has naturally ended.
+func (q *QueueService) Restart(
+	ctx context.Context,
+	input QueueRestartInput,
+) (*QueueRestartOutput, error) {
+	state := q.repo.Get(input.GuildID)
+	if state == nil {
+		return nil, ErrNotConnected
+	}
+
+	// Update notification channel if provided
+	if input.NotificationChannelID != 0 {
+		state.SetNotificationChannel(input.NotificationChannelID)
+	}
+
+	if state.Queue.Len() == 0 {
+		return nil, ErrQueueEmpty
+	}
+
+	// Reset to idle so PlayNext will start from beginning
+	state.Queue.ResetToIdle()
+
+	// Get the first track and trigger playback via event
+	track := state.Queue.GetAt(0)
+	if q.publisher != nil {
+		q.publisher.PublishTrackEnqueued(ports.TrackEnqueuedEvent{
+			GuildID: input.GuildID,
+			Track:   track,
+			WasIdle: true,
+		})
+	}
+
+	return &QueueRestartOutput{Track: track}, nil
 }

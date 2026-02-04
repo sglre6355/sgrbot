@@ -316,6 +316,8 @@ func (h *Handlers) HandleQueue(
 		return h.handleQueueRemove(s, i, r, subCmd.Options)
 	case "clear":
 		return h.handleQueueClear(s, i, r)
+	case "restart":
+		return h.handleQueueRestart(s, i, r)
 	default:
 		return respondError(r, "Unknown subcommand")
 	}
@@ -441,6 +443,32 @@ func (h *Handlers) handleQueueClear(
 	}
 
 	return respondQueueCleared(r)
+}
+
+func (h *Handlers) handleQueueRestart(
+	_ *discordgo.Session,
+	i *discordgo.InteractionCreate,
+	r bot.Responder,
+) error {
+	guildID, err := snowflake.Parse(i.GuildID)
+	if err != nil {
+		return respondError(r, "Invalid guild")
+	}
+
+	notificationChannelID, err := snowflake.Parse(i.ChannelID)
+	if err != nil {
+		return respondError(r, "Invalid channel")
+	}
+
+	_, err = h.queue.Restart(context.Background(), usecases.QueueRestartInput{
+		GuildID:               guildID,
+		NotificationChannelID: notificationChannelID,
+	})
+	if err != nil {
+		return respondError(r, err.Error())
+	}
+
+	return respondQueueRestarted(r)
 }
 
 // HandleLoop handles the /loop command.
@@ -633,6 +661,20 @@ func respondQueueCleared(r bot.Responder) error {
 			Embeds: []*discordgo.MessageEmbed{
 				{
 					Description: "Cleared the queue.",
+					Color:       colorSuccess,
+				},
+			},
+		},
+	})
+}
+
+func respondQueueRestarted(r bot.Responder) error {
+	return r.Respond(&discordgo.InteractionResponse{
+		Type: discordgo.InteractionResponseChannelMessageWithSource,
+		Data: &discordgo.InteractionResponseData{
+			Embeds: []*discordgo.MessageEmbed{
+				{
+					Description: "Restarted the queue from the beginning.",
 					Color:       colorSuccess,
 				},
 			},

@@ -670,6 +670,135 @@ func TestQueueService_Clear(t *testing.T) {
 	}
 }
 
+func TestQueueService_Restart(t *testing.T) {
+	guildID := snowflake.ID(1)
+	voiceChannelID := snowflake.ID(4)
+	notificationChannelID := snowflake.ID(3)
+
+	tests := []struct {
+		name        string
+		input       QueueRestartInput
+		setupRepo   func(*mockRepository)
+		wantErr     error
+		wantTrackID string
+		wantWasIdle bool
+	}{
+		{
+			name: "restart idle queue after it ended",
+			input: QueueRestartInput{
+				GuildID:               guildID,
+				NotificationChannelID: notificationChannelID,
+			},
+			setupRepo: func(m *mockRepository) {
+				state := m.createConnectedState(guildID, voiceChannelID, notificationChannelID)
+				// Add 3 tracks and advance past end
+				state.Queue.Add(mockTrack("track-0"))
+				state.Queue.Add(mockTrack("track-1"))
+				state.Queue.Add(mockTrack("track-2"))
+				state.Queue.Start()
+				state.Queue.Advance(0) // index=1
+				state.Queue.Advance(0) // index=2
+				state.Queue.Advance(0) // index=3 (past end, idle)
+			},
+			wantTrackID: "track-0",
+			wantWasIdle: true,
+		},
+		{
+			name: "restart while playing (in middle of queue)",
+			input: QueueRestartInput{
+				GuildID:               guildID,
+				NotificationChannelID: notificationChannelID,
+			},
+			setupRepo: func(m *mockRepository) {
+				state := m.createConnectedState(guildID, voiceChannelID, notificationChannelID)
+				// Add 3 tracks and advance to middle
+				state.Queue.Add(mockTrack("track-0"))
+				state.Queue.Add(mockTrack("track-1"))
+				state.Queue.Add(mockTrack("track-2"))
+				state.Queue.Start()
+				state.Queue.Advance(0) // index=1
+			},
+			wantTrackID: "track-0",
+			wantWasIdle: true,
+		},
+		{
+			name: "empty queue",
+			input: QueueRestartInput{
+				GuildID:               guildID,
+				NotificationChannelID: notificationChannelID,
+			},
+			setupRepo: func(m *mockRepository) {
+				m.createConnectedState(guildID, voiceChannelID, notificationChannelID)
+				// No tracks
+			},
+			wantErr: ErrQueueEmpty,
+		},
+		{
+			name: "not connected",
+			input: QueueRestartInput{
+				GuildID:               guildID,
+				NotificationChannelID: notificationChannelID,
+			},
+			wantErr: ErrNotConnected,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			repo := newMockRepository()
+			publisher := &mockEventPublisher{}
+
+			if tt.setupRepo != nil {
+				tt.setupRepo(repo)
+			}
+
+			service := NewQueueService(repo, publisher)
+			output, err := service.Restart(context.Background(), tt.input)
+
+			if tt.wantErr != nil {
+				if err == nil {
+					t.Errorf("expected error %v, got nil", tt.wantErr)
+					return
+				}
+				if err != tt.wantErr {
+					t.Errorf("expected error %v, got %v", tt.wantErr, err)
+				}
+				return
+			}
+
+			if err != nil {
+				t.Errorf("unexpected error: %v", err)
+				return
+			}
+
+			if string(output.Track.ID) != tt.wantTrackID {
+				t.Errorf("expected track ID %q, got %q", tt.wantTrackID, output.Track.ID)
+			}
+
+			// Verify event was published
+			if len(publisher.trackEnqueued) != 1 {
+				t.Fatalf("expected 1 TrackEnqueuedEvent, got %d", len(publisher.trackEnqueued))
+			}
+			event := publisher.trackEnqueued[0]
+			if event.GuildID != tt.input.GuildID {
+				t.Errorf("event GuildID = %d, want %d", event.GuildID, tt.input.GuildID)
+			}
+			if event.WasIdle != tt.wantWasIdle {
+				t.Errorf("event WasIdle = %v, want %v", event.WasIdle, tt.wantWasIdle)
+			}
+
+			// Verify queue was reset to idle
+			state := repo.Get(guildID)
+			if state.Queue.CurrentIndex() != -1 {
+				t.Errorf(
+					"expected currentIndex -1 after Restart, got %d",
+					state.Queue.CurrentIndex(),
+				)
+			}
+		})
+	}
+}
+
 func TestQueueService_Clear_PublishesQueueClearedEvent(t *testing.T) {
 	guildID := snowflake.ID(1)
 	voiceChannelID := snowflake.ID(4)

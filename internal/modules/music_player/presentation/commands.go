@@ -92,6 +92,11 @@ func Commands() []*discordgo.ApplicationCommand {
 					Name:        "clear",
 					Description: "Clear the queue",
 				},
+				{
+					Type:        discordgo.ApplicationCommandOptionSubCommand,
+					Name:        "restart",
+					Description: "Restart the queue from the beginning",
+				},
 			},
 		},
 		{
