@@ -216,6 +216,9 @@ func (p *PlaybackService) PlayNext(
 
 	// Play via audio player
 	if err := p.audioPlayer.Play(ctx, guildID, nextTrack); err != nil {
+		// Reset to idle since playback failed to start.
+		// This prevents IsIdle() from returning false when nothing is actually playing.
+		state.Queue.ResetToIdle()
 		return nil, err
 	}
 

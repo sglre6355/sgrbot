@@ -480,6 +480,42 @@ func TestPlaybackService_PlayNext(t *testing.T) {
 	}
 }
 
+func TestPlaybackService_PlayNext_ResetsQueueOnPlayFailure(t *testing.T) {
+	guildID := snowflake.ID(1)
+	voiceChannelID := snowflake.ID(4)
+	textChannelID := snowflake.ID(3)
+
+	repo := newMockRepository()
+	player := &mockAudioPlayer{
+		playErr: errors.New("play failed"),
+	}
+
+	state := repo.createConnectedState(guildID, voiceChannelID, textChannelID)
+	state.Queue.Add(mockTrack("track-1"))
+
+	service := NewPlaybackService(repo, player, nil, nil)
+
+	// Verify queue is idle before PlayNext
+	if !state.Queue.IsIdle() {
+		t.Error("expected queue to be idle before PlayNext")
+	}
+
+	// Call PlayNext - this will call Start() internally, setting index to 0
+	_, err := service.PlayNext(context.Background(), guildID)
+	if err == nil {
+		t.Error("expected error from PlayNext")
+		return
+	}
+
+	// Verify queue is reset to idle after Play failure
+	if !state.Queue.IsIdle() {
+		t.Error("expected queue to be reset to idle after Play failure")
+	}
+	if state.Queue.CurrentIndex() != -1 {
+		t.Errorf("expected currentIndex -1, got %d", state.Queue.CurrentIndex())
+	}
+}
+
 func TestPlaybackService_SetLoopMode(t *testing.T) {
 	guildID := snowflake.ID(1)
 	voiceChannelID := snowflake.ID(4)
