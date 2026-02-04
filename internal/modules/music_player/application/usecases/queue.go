@@ -331,8 +331,9 @@ func (q *QueueService) Seek(
 		return nil, ErrQueueEmpty
 	}
 
-	// Validate position
-	if input.Position < 0 || input.Position >= state.Queue.Len() {
+	// Seek to target position (atomic operation with bounds checking)
+	track := state.Queue.Seek(input.Position)
+	if track == nil {
 		return nil, ErrInvalidPosition
 	}
 
@@ -347,9 +348,6 @@ func (q *QueueService) Seek(
 			})
 		}
 	}
-
-	// Seek to target position (sets currentIndex to position)
-	track := state.Queue.Seek(input.Position)
 
 	// Publish event to trigger playback.
 	// PlayNext will see currentIndex >= 0 (not idle) and play Current() directly,
