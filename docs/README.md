@@ -104,11 +104,11 @@ type ConfigurableModule interface {
 3. `Bot.Start()`:
    - Loads module configuration (optional `ConfigurableModule.LoadConfig()`)
    - Creates Discord session
-   - Calls `module.Init()` for each module
-   - Builds handler map
    - Registers interaction handler
-   - Registers event handlers
    - Opens Discord connection
+   - Calls `module.Init()` for each module (after Open so session state is available)
+   - Builds handler map
+   - Registers event handlers
    - Registers slash commands
 4. Wait for SIGINT/SIGTERM
 5. `Bot.Stop()` calls `module.Shutdown()` and closes session
@@ -133,11 +133,11 @@ go build -ldflags "-X main.version=1.0.0" ./cmd/sgrbot
 
 ```sh
 # Run all tests
-go test ./...
+go test -race ./...
 
 # Run with coverage
-go test -cover ./...
+go test -race -cover ./...
 
 # Run specific module tests
-go test ./internal/modules/example/...
+go test -race ./internal/modules/example/...
 ```

@@ -48,15 +48,18 @@ internal/modules/music_player/
 │   │   ├── voice_connection.go  # VoiceConnection interface
 │   │   ├── voice_state.go       # VoiceStateProvider interface
 │   │   ├── track_resolver.go    # TrackResolver interface
-│   │   └── notification.go      # NotificationSender interface
+│   │   ├── notification.go      # NotificationSender interface
+│   │   └── event_publisher.go   # EventPublisher interface and event types
 │   ├── usecases/
 │   │   ├── errors.go            # Use case error definitions
 │   │   ├── playback.go          # PlaybackService (pause, resume, skip, play next)
 │   │   ├── queue.go             # QueueService (add, list, remove, clear)
 │   │   ├── track_loader.go      # TrackLoaderService (load, search tracks)
-│   │   └── voice_channel.go     # VoiceChannelService (join, leave)
+│   │   ├── voice_channel.go     # VoiceChannelService (join, leave)
+│   │   ├── autocomplete.go      # AutocompleteService (queue tracks, search)
+│   │   └── types.go             # Type re-exports for presentation layer
 │   └── events/
-│       ├── types.go             # Event type definitions
+│       ├── types.go             # Re-exports event types from ports
 │       ├── bus.go               # Event bus implementation
 │       └── handlers.go          # PlaybackEventHandler, NotificationEventHandler
 ├── infrastructure/
@@ -67,7 +70,8 @@ internal/modules/music_player/
 └── presentation/
     ├── commands.go              # Slash command definitions
     ├── handlers.go              # Command interaction handlers
-    └── autocomplete.go          # Autocomplete for /play and /queue remove
+    ├── autocomplete.go          # Autocomplete for /play and /queue remove
+    └── event_handlers.go        # Discord gateway event handlers (VoiceStateUpdate)
 ```
 
 ## Architecture
@@ -96,16 +100,16 @@ tasks (playback, notifications) happen asynchronously.
                     └─► send "Now Playing" message (async)
 ```
 
-### Event Types (`application/events/types.go`)
+### Event Types (`application/ports/event_publisher.go`)
 
 | Event | Published By | Consumed By | Description |
 | ----- | ------------ | ----------- | ----------- |
 | `TrackEnqueuedEvent` | QueueService | PlaybackEventHandler | Track added to queue |
 | `PlaybackStartedEvent` | PlaybackService | NotificationEventHandler | Track started playing |
-| `PlaybackFinishedEvent` | PlaybackEventHandler, PlaybackService | NotificationEventHandler | Track finished, delete "Now Playing" message |
+| `PlaybackFinishedEvent` | PlaybackEventHandler, PlaybackService, VoiceChannelService | NotificationEventHandler | Track finished, delete "Now Playing" message |
 | `TrackEndedEvent` | LavalinkAdapter | PlaybackEventHandler | Track finished (from Lavalink) |
 
-### Track End Reasons (`application/events/types.go`)
+### Track End Reasons (`application/ports/event_publisher.go`)
 
 When a track ends, Lavalink provides a reason. Only certain reasons advance the
 queue:
@@ -158,6 +162,14 @@ type NotificationSender interface {
     DeleteMessage(channelID, messageID snowflake.ID) error
     SendQueueAdded(channelID snowflake.ID, info *QueueAddedInfo) error
     SendError(channelID snowflake.ID, message string) error
+}
+
+// event_publisher.go
+type EventPublisher interface {
+    PublishTrackEnqueued(event TrackEnqueuedEvent)
+    PublishPlaybackStarted(event PlaybackStartedEvent)
+    PublishPlaybackFinished(event PlaybackFinishedEvent)
+    PublishTrackEnded(event TrackEndedEvent)
 }
 ```
 
