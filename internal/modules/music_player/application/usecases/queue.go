@@ -336,6 +336,18 @@ func (q *QueueService) Seek(
 		return nil, ErrInvalidPosition
 	}
 
+	// Delete the old "Now Playing" message before starting the new track
+	if q.publisher != nil {
+		nowPlayingMsg := state.GetNowPlayingMessage()
+		if nowPlayingMsg != nil {
+			q.publisher.PublishPlaybackFinished(ports.PlaybackFinishedEvent{
+				GuildID:               input.GuildID,
+				NotificationChannelID: nowPlayingMsg.ChannelID,
+				LastMessageID:         &nowPlayingMsg.MessageID,
+			})
+		}
+	}
+
 	// Seek to target position (sets currentIndex to position)
 	track := state.Queue.Seek(input.Position)
 
