@@ -706,3 +706,201 @@ func TestQueue_ResetToIdle_AfterQueueEnds(t *testing.T) {
 		t.Errorf("expected currentIndex -1, got %d", q.CurrentIndex())
 	}
 }
+
+func TestQueue_Seek(t *testing.T) {
+	t.Run("seek to valid middle position", func(t *testing.T) {
+		q := NewQueue()
+		track0 := &Track{ID: "track-0", Title: "Song 0"}
+		track1 := &Track{ID: "track-1", Title: "Song 1"}
+		track2 := &Track{ID: "track-2", Title: "Song 2"}
+
+		q.Add(track0)
+		q.Add(track1)
+		q.Add(track2)
+		q.Start()
+
+		// Seek to middle position
+		got := q.Seek(1)
+		if got != track1 {
+			t.Errorf("expected track1, got %v", got)
+		}
+		if q.CurrentIndex() != 1 {
+			t.Errorf("expected currentIndex 1, got %d", q.CurrentIndex())
+		}
+		if q.Current() != track1 {
+			t.Error("Current() should return track1 after seek")
+		}
+	})
+
+	t.Run("seek to first position", func(t *testing.T) {
+		q := NewQueue()
+		track0 := &Track{ID: "track-0", Title: "Song 0"}
+		track1 := &Track{ID: "track-1", Title: "Song 1"}
+
+		q.Add(track0)
+		q.Add(track1)
+		q.Start()
+		q.Advance(LoopModeNone) // now at index 1
+
+		// Seek back to first position
+		got := q.Seek(0)
+		if got != track0 {
+			t.Errorf("expected track0, got %v", got)
+		}
+		if q.CurrentIndex() != 0 {
+			t.Errorf("expected currentIndex 0, got %d", q.CurrentIndex())
+		}
+	})
+
+	t.Run("seek to last position", func(t *testing.T) {
+		q := NewQueue()
+		track0 := &Track{ID: "track-0", Title: "Song 0"}
+		track1 := &Track{ID: "track-1", Title: "Song 1"}
+		track2 := &Track{ID: "track-2", Title: "Song 2"}
+
+		q.Add(track0)
+		q.Add(track1)
+		q.Add(track2)
+		q.Start()
+
+		// Seek to last position
+		got := q.Seek(2)
+		if got != track2 {
+			t.Errorf("expected track2, got %v", got)
+		}
+		if q.CurrentIndex() != 2 {
+			t.Errorf("expected currentIndex 2, got %d", q.CurrentIndex())
+		}
+	})
+
+	t.Run("seek to invalid negative position", func(t *testing.T) {
+		q := NewQueue()
+		q.Add(&Track{ID: "track-0"})
+		q.Start()
+
+		got := q.Seek(-1)
+		if got != nil {
+			t.Errorf("expected nil for negative position, got %v", got)
+		}
+		// currentIndex should remain unchanged
+		if q.CurrentIndex() != 0 {
+			t.Errorf("expected currentIndex 0 (unchanged), got %d", q.CurrentIndex())
+		}
+	})
+
+	t.Run("seek to out of bounds position", func(t *testing.T) {
+		q := NewQueue()
+		q.Add(&Track{ID: "track-0"})
+		q.Add(&Track{ID: "track-1"})
+		q.Start()
+
+		got := q.Seek(10)
+		if got != nil {
+			t.Errorf("expected nil for out of bounds position, got %v", got)
+		}
+		// currentIndex should remain unchanged
+		if q.CurrentIndex() != 0 {
+			t.Errorf("expected currentIndex 0 (unchanged), got %d", q.CurrentIndex())
+		}
+	})
+
+	t.Run("seek on empty queue", func(t *testing.T) {
+		q := NewQueue()
+
+		got := q.Seek(0)
+		if got != nil {
+			t.Errorf("expected nil for empty queue, got %v", got)
+		}
+		if q.CurrentIndex() != -1 {
+			t.Errorf("expected currentIndex -1, got %d", q.CurrentIndex())
+		}
+	})
+
+	t.Run("seek from idle state (not started)", func(t *testing.T) {
+		q := NewQueue()
+		track0 := &Track{ID: "track-0", Title: "Song 0"}
+		track1 := &Track{ID: "track-1", Title: "Song 1"}
+
+		q.Add(track0)
+		q.Add(track1)
+		// Don't call Start() - queue is idle
+
+		// Seek should still work from idle state
+		got := q.Seek(1)
+		if got != track1 {
+			t.Errorf("expected track1, got %v", got)
+		}
+		if q.CurrentIndex() != 1 {
+			t.Errorf("expected currentIndex 1, got %d", q.CurrentIndex())
+		}
+		if q.IsIdle() {
+			t.Error("queue should not be idle after seek")
+		}
+	})
+
+	t.Run("seek from past-end idle state", func(t *testing.T) {
+		q := NewQueue()
+		track0 := &Track{ID: "track-0", Title: "Song 0"}
+		track1 := &Track{ID: "track-1", Title: "Song 1"}
+
+		q.Add(track0)
+		q.Add(track1)
+		q.Start()
+		q.Advance(LoopModeNone) // index=1
+		q.Advance(LoopModeNone) // past end, idle
+
+		if !q.IsIdle() {
+			t.Error("queue should be idle after advancing past end")
+		}
+
+		// Seek should bring us back to a valid position
+		got := q.Seek(0)
+		if got != track0 {
+			t.Errorf("expected track0, got %v", got)
+		}
+		if q.CurrentIndex() != 0 {
+			t.Errorf("expected currentIndex 0, got %d", q.CurrentIndex())
+		}
+		if q.IsIdle() {
+			t.Error("queue should not be idle after seek")
+		}
+	})
+}
+
+func TestQueue_Seek_Concurrent(t *testing.T) {
+	q := NewQueue()
+
+	// Add tracks
+	for i := range 100 {
+		q.Add(&Track{ID: TrackID(strconv.Itoa(i))})
+	}
+	q.Start()
+
+	var wg sync.WaitGroup
+
+	// Concurrent seeks
+	for i := range 50 {
+		wg.Add(1)
+		go func(pos int) {
+			defer wg.Done()
+			q.Seek(pos % 100)
+		}(i)
+	}
+
+	// Concurrent reads while seeking
+	for range 50 {
+		wg.Go(func() {
+			q.Current()
+			q.CurrentIndex()
+			q.IsIdle()
+		})
+	}
+
+	wg.Wait()
+
+	// Should not panic and index should be valid
+	idx := q.CurrentIndex()
+	if idx < 0 || idx >= 100 {
+		t.Errorf("unexpected currentIndex %d after concurrent operations", idx)
+	}
+}

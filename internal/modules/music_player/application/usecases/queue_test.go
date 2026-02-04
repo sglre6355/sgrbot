@@ -867,3 +867,221 @@ func TestQueueService_Clear_PublishesQueueClearedEvent(t *testing.T) {
 		}
 	})
 }
+
+func TestQueueService_Seek(t *testing.T) {
+	guildID := snowflake.ID(1)
+	voiceChannelID := snowflake.ID(4)
+	notificationChannelID := snowflake.ID(3)
+
+	tests := []struct {
+		name        string
+		input       QueueSeekInput
+		setupRepo   func(*mockRepository)
+		wantErr     error
+		wantTrackID string
+		wantWasIdle bool
+	}{
+		{
+			name: "seek to middle of queue",
+			input: QueueSeekInput{
+				GuildID:               guildID,
+				Position:              2,
+				NotificationChannelID: notificationChannelID,
+			},
+			setupRepo: func(m *mockRepository) {
+				state := m.createConnectedState(guildID, voiceChannelID, notificationChannelID)
+				// Add 5 tracks and start at index 0
+				for i := range 5 {
+					state.Queue.Add(mockTrack("track-" + string(rune('0'+i))))
+				}
+				state.Queue.Start()
+			},
+			wantTrackID: "track-2",
+			wantWasIdle: true,
+		},
+		{
+			name: "seek to played track (before current)",
+			input: QueueSeekInput{
+				GuildID:               guildID,
+				Position:              0,
+				NotificationChannelID: notificationChannelID,
+			},
+			setupRepo: func(m *mockRepository) {
+				state := m.createConnectedState(guildID, voiceChannelID, notificationChannelID)
+				// Add 5 tracks and advance to index 2
+				for i := range 5 {
+					state.Queue.Add(mockTrack("track-" + string(rune('0'+i))))
+				}
+				state.Queue.Start()
+				state.Queue.Advance(0)
+				state.Queue.Advance(0) // currentIndex=2
+			},
+			wantTrackID: "track-0",
+			wantWasIdle: true,
+		},
+		{
+			name: "seek to upcoming track (after current)",
+			input: QueueSeekInput{
+				GuildID:               guildID,
+				Position:              4,
+				NotificationChannelID: notificationChannelID,
+			},
+			setupRepo: func(m *mockRepository) {
+				state := m.createConnectedState(guildID, voiceChannelID, notificationChannelID)
+				// Add 5 tracks and start at index 0
+				for i := range 5 {
+					state.Queue.Add(mockTrack("track-" + string(rune('0'+i))))
+				}
+				state.Queue.Start()
+			},
+			wantTrackID: "track-4",
+			wantWasIdle: true,
+		},
+		{
+			name: "seek to current position (restarts current)",
+			input: QueueSeekInput{
+				GuildID:               guildID,
+				Position:              1,
+				NotificationChannelID: notificationChannelID,
+			},
+			setupRepo: func(m *mockRepository) {
+				state := m.createConnectedState(guildID, voiceChannelID, notificationChannelID)
+				// Add 3 tracks and advance to index 1
+				for i := range 3 {
+					state.Queue.Add(mockTrack("track-" + string(rune('0'+i))))
+				}
+				state.Queue.Start()
+				state.Queue.Advance(0) // currentIndex=1
+			},
+			wantTrackID: "track-1",
+			wantWasIdle: true,
+		},
+		{
+			name: "seek from idle state (queue ended)",
+			input: QueueSeekInput{
+				GuildID:               guildID,
+				Position:              1,
+				NotificationChannelID: notificationChannelID,
+			},
+			setupRepo: func(m *mockRepository) {
+				state := m.createConnectedState(guildID, voiceChannelID, notificationChannelID)
+				// Add 2 tracks and advance past end
+				state.Queue.Add(mockTrack("track-0"))
+				state.Queue.Add(mockTrack("track-1"))
+				state.Queue.Start()
+				state.Queue.Advance(0) // index=1
+				state.Queue.Advance(0) // past end, idle
+			},
+			wantTrackID: "track-1",
+			wantWasIdle: true,
+		},
+		{
+			name: "empty queue error",
+			input: QueueSeekInput{
+				GuildID:               guildID,
+				Position:              0,
+				NotificationChannelID: notificationChannelID,
+			},
+			setupRepo: func(m *mockRepository) {
+				m.createConnectedState(guildID, voiceChannelID, notificationChannelID)
+				// No tracks
+			},
+			wantErr: ErrQueueEmpty,
+		},
+		{
+			name: "invalid position error - too high",
+			input: QueueSeekInput{
+				GuildID:               guildID,
+				Position:              10,
+				NotificationChannelID: notificationChannelID,
+			},
+			setupRepo: func(m *mockRepository) {
+				state := m.createConnectedState(guildID, voiceChannelID, notificationChannelID)
+				state.Queue.Add(mockTrack("track-0"))
+				state.Queue.Add(mockTrack("track-1"))
+				state.Queue.Start()
+			},
+			wantErr: ErrInvalidPosition,
+		},
+		{
+			name: "invalid position error - negative",
+			input: QueueSeekInput{
+				GuildID:               guildID,
+				Position:              -1,
+				NotificationChannelID: notificationChannelID,
+			},
+			setupRepo: func(m *mockRepository) {
+				state := m.createConnectedState(guildID, voiceChannelID, notificationChannelID)
+				state.Queue.Add(mockTrack("track-0"))
+				state.Queue.Start()
+			},
+			wantErr: ErrInvalidPosition,
+		},
+		{
+			name: "not connected error",
+			input: QueueSeekInput{
+				GuildID:               guildID,
+				Position:              0,
+				NotificationChannelID: notificationChannelID,
+			},
+			wantErr: ErrNotConnected,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			repo := newMockRepository()
+			publisher := &mockEventPublisher{}
+
+			if tt.setupRepo != nil {
+				tt.setupRepo(repo)
+			}
+
+			service := NewQueueService(repo, publisher)
+			output, err := service.Seek(context.Background(), tt.input)
+
+			if tt.wantErr != nil {
+				if err == nil {
+					t.Errorf("expected error %v, got nil", tt.wantErr)
+					return
+				}
+				if err != tt.wantErr {
+					t.Errorf("expected error %v, got %v", tt.wantErr, err)
+				}
+				return
+			}
+
+			if err != nil {
+				t.Errorf("unexpected error: %v", err)
+				return
+			}
+
+			if string(output.Track.ID) != tt.wantTrackID {
+				t.Errorf("expected track ID %q, got %q", tt.wantTrackID, output.Track.ID)
+			}
+
+			// Verify event was published
+			if len(publisher.trackEnqueued) != 1 {
+				t.Fatalf("expected 1 TrackEnqueuedEvent, got %d", len(publisher.trackEnqueued))
+			}
+			event := publisher.trackEnqueued[0]
+			if event.GuildID != tt.input.GuildID {
+				t.Errorf("event GuildID = %d, want %d", event.GuildID, tt.input.GuildID)
+			}
+			if event.WasIdle != tt.wantWasIdle {
+				t.Errorf("event WasIdle = %v, want %v", event.WasIdle, tt.wantWasIdle)
+			}
+
+			// Verify queue is at the seeked position (not idle)
+			// PlayNext will see this and play Current() instead of calling Start()
+			state := repo.Get(guildID)
+			if state.Queue.CurrentIndex() != tt.input.Position {
+				t.Errorf(
+					"expected currentIndex %d after Seek, got %d",
+					tt.input.Position,
+					state.Queue.CurrentIndex(),
+				)
+			}
+		})
+	}
+}

@@ -254,3 +254,18 @@ func (q *Queue) ResetToIdle() {
 	defer q.mu.Unlock()
 	q.currentIndex = -1
 }
+
+// Seek sets the currentIndex to the specified position (0-indexed).
+// Returns the track at that position, or nil if position is out of bounds.
+// Does not change currentIndex if position is invalid.
+func (q *Queue) Seek(position int) *Track {
+	q.mu.Lock()
+	defer q.mu.Unlock()
+
+	if position < 0 || position >= len(q.tracks) {
+		return nil
+	}
+
+	q.currentIndex = position
+	return q.tracks[position]
+}

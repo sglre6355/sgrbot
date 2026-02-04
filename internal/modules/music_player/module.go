@@ -241,8 +241,13 @@ func (m *MusicPlayerModule) handleInteractionCreate(
 	case "play":
 		m.autocomplete.HandlePlay(s, i)
 	case "queue":
-		if len(data.Options) > 0 && data.Options[0].Name == "remove" {
-			m.autocomplete.HandleQueueRemove(s, i)
+		if len(data.Options) > 0 {
+			switch data.Options[0].Name {
+			case "remove":
+				m.autocomplete.HandleQueueRemove(s, i)
+			case "seek":
+				m.autocomplete.HandleQueueSeek(s, i)
+			}
 		}
 	}
 }

@@ -76,6 +76,18 @@ type QueueRestartOutput struct {
 	Track *domain.Track
 }
 
+// QueueSeekInput contains the input for the QueueSeek use case.
+type QueueSeekInput struct {
+	GuildID               snowflake.ID
+	Position              int          // 0-indexed position in the queue
+	NotificationChannelID snowflake.ID // Optional: updates notification channel if non-zero
+}
+
+// QueueSeekOutput contains the result of the QueueSeek use case.
+type QueueSeekOutput struct {
+	Track *domain.Track
+}
+
 // QueueService handles queue operations.
 type QueueService struct {
 	repo      domain.PlayerStateRepository
@@ -316,4 +328,46 @@ func (q *QueueService) Restart(
 	}
 
 	return &QueueRestartOutput{Track: track}, nil
+}
+
+// Seek jumps to a specific position in the queue and triggers playback.
+// Used to immediately play a track at any position (played or upcoming).
+func (q *QueueService) Seek(
+	_ context.Context,
+	input QueueSeekInput,
+) (*QueueSeekOutput, error) {
+	state := q.repo.Get(input.GuildID)
+	if state == nil {
+		return nil, ErrNotConnected
+	}
+
+	// Update notification channel if provided
+	if input.NotificationChannelID != 0 {
+		state.SetNotificationChannel(input.NotificationChannelID)
+	}
+
+	if state.Queue.Len() == 0 {
+		return nil, ErrQueueEmpty
+	}
+
+	// Validate position
+	if input.Position < 0 || input.Position >= state.Queue.Len() {
+		return nil, ErrInvalidPosition
+	}
+
+	// Seek to target position (sets currentIndex to position)
+	track := state.Queue.Seek(input.Position)
+
+	// Publish event to trigger playback.
+	// PlayNext will see currentIndex >= 0 (not idle) and play Current() directly,
+	// which is the track we just seeked to.
+	if q.publisher != nil {
+		q.publisher.PublishTrackEnqueued(ports.TrackEnqueuedEvent{
+			GuildID: input.GuildID,
+			Track:   track,
+			WasIdle: true,
+		})
+	}
+
+	return &QueueSeekOutput{Track: track}, nil
 }

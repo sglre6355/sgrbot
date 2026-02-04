@@ -318,6 +318,8 @@ func (h *Handlers) HandleQueue(
 		return h.handleQueueClear(s, i, r)
 	case "restart":
 		return h.handleQueueRestart(s, i, r)
+	case "seek":
+		return h.handleQueueSeek(s, i, r, subCmd.Options)
 	default:
 		return respondError(r, "Unknown subcommand")
 	}
@@ -469,6 +471,43 @@ func (h *Handlers) handleQueueRestart(
 	}
 
 	return respondQueueRestarted(r)
+}
+
+func (h *Handlers) handleQueueSeek(
+	_ *discordgo.Session,
+	i *discordgo.InteractionCreate,
+	r bot.Responder,
+	options []*discordgo.ApplicationCommandInteractionDataOption,
+) error {
+	guildID, err := snowflake.Parse(i.GuildID)
+	if err != nil {
+		return respondError(r, "Invalid guild")
+	}
+
+	notificationChannelID, err := snowflake.Parse(i.ChannelID)
+	if err != nil {
+		return respondError(r, "Invalid channel")
+	}
+
+	var position int
+	for _, opt := range options {
+		if opt.Name == "position" {
+			// Convert from 1-indexed (user input) to 0-indexed (internal)
+			position = int(opt.IntValue()) - 1
+		}
+	}
+
+	output, err := h.queue.Seek(context.Background(), usecases.QueueSeekInput{
+		GuildID:               guildID,
+		Position:              position,
+		NotificationChannelID: notificationChannelID,
+	})
+	if err != nil {
+		return respondError(r, err.Error())
+	}
+
+	// Convert back to 1-indexed for display
+	return respondQueueSeeked(r, position+1, output.Track)
 }
 
 // HandleLoop handles the /loop command.
@@ -675,6 +714,32 @@ func respondQueueRestarted(r bot.Responder) error {
 			Embeds: []*discordgo.MessageEmbed{
 				{
 					Description: "Restarted the queue from the beginning.",
+					Color:       colorSuccess,
+				},
+			},
+		},
+	})
+}
+
+func respondQueueSeeked(r bot.Responder, position int, track *usecases.Track) error {
+	var description string
+	if track.URI != "" {
+		description = fmt.Sprintf(
+			"Jumped to position %d: [%s](%s).",
+			position,
+			track.Title,
+			track.URI,
+		)
+	} else {
+		description = fmt.Sprintf("Jumped to position %d: **%s**.", position, track.Title)
+	}
+
+	return r.Respond(&discordgo.InteractionResponse{
+		Type: discordgo.InteractionResponseChannelMessageWithSource,
+		Data: &discordgo.InteractionResponseData{
+			Embeds: []*discordgo.MessageEmbed{
+				{
+					Description: description,
 					Color:       colorSuccess,
 				},
 			},

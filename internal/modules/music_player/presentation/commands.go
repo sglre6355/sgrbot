@@ -97,6 +97,21 @@ func Commands() []*discordgo.ApplicationCommand {
 					Name:        "restart",
 					Description: "Restart the queue from the beginning",
 				},
+				{
+					Type:        discordgo.ApplicationCommandOptionSubCommand,
+					Name:        "seek",
+					Description: "Jump to a specific position in the queue",
+					Options: []*discordgo.ApplicationCommandOption{
+						{
+							Type:         discordgo.ApplicationCommandOptionInteger,
+							Name:         "position",
+							Description:  "Position to jump to (1-indexed, as shown in queue list)",
+							Required:     true,
+							MinValue:     floatPtr(1),
+							Autocomplete: true,
+						},
+					},
+				},
 			},
 		},
 		{
