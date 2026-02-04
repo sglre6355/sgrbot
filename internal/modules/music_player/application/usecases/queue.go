@@ -243,7 +243,7 @@ func (q *QueueService) Clear(input QueueClearInput) (*QueueClearOutput, error) {
 		} else {
 			count = state.Queue.Len() - 1
 			if count == 0 {
-				return nil, ErrQueueEmpty // Nothing to clear besides current
+				return nil, ErrNothingToClear
 			}
 			// Use existing methods: clear all, add back current, start
 			state.Queue.Clear()

@@ -25,6 +25,9 @@ var (
 	// ErrQueueEmpty is returned when the queue is empty.
 	ErrQueueEmpty = errors.New("the queue is empty")
 
+	// ErrNothingToClear is returned when there are no tracks to clear (only current track exists).
+	ErrNothingToClear = errors.New("nothing to clear")
+
 	// ErrInvalidPosition is returned when an invalid queue position is specified.
 	ErrInvalidPosition = errors.New("invalid queue position")
 

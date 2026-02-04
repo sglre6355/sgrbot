@@ -556,7 +556,7 @@ func TestQueueService_Clear(t *testing.T) {
 				state.SetPlaying(mockTrack("current"))
 				// No other tracks
 			},
-			wantErr: ErrQueueEmpty,
+			wantErr: ErrNothingToClear,
 		},
 		{
 			name: "KeepCurrentTrack=true - idle state with played tracks clears all",
