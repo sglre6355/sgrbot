@@ -37,8 +37,8 @@ type QueueListOutput struct {
 	TotalTracks  int             // Total tracks in queue
 	CurrentPage  int
 	TotalPages   int
-	PageStart    int             // 0-indexed start position of this page
-	LoopMode     domain.LoopMode // For display indicator
+	PageStart    int    // 0-indexed start position of this page
+	LoopMode     string // "none", "track", "queue"
 }
 
 // QueueRemoveInput contains the input for the QueueRemove use case.
@@ -175,7 +175,7 @@ func (q *QueueService) List(input QueueListInput) (*QueueListOutput, error) {
 		CurrentPage:  page,
 		TotalPages:   totalPages,
 		PageStart:    start,
-		LoopMode:     loopMode,
+		LoopMode:     loopMode.String(),
 	}, nil
 }
 

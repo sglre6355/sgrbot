@@ -10,7 +10,6 @@ import (
 	"github.com/disgoorg/snowflake/v2"
 	"github.com/sglre6355/sgrbot/internal/bot"
 	"github.com/sglre6355/sgrbot/internal/modules/music_player/application/usecases"
-	"github.com/sglre6355/sgrbot/internal/modules/music_player/domain"
 )
 
 // Embed colors.
@@ -471,19 +470,18 @@ func (h *Handlers) HandleLoop(
 		}
 	}
 
-	var newMode domain.LoopMode
+	var newMode string
 	if modeStr != "" {
 		// Set specific mode
-		mode := parseLoopMode(modeStr)
 		err := h.playback.SetLoopMode(ctx, usecases.SetLoopModeInput{
 			GuildID:               guildID,
-			Mode:                  mode,
+			Mode:                  modeStr,
 			NotificationChannelID: notificationChannelID,
 		})
 		if err != nil {
 			return respondError(r, err.Error())
 		}
-		newMode = mode
+		newMode = modeStr
 	} else {
 		// Cycle through modes
 		output, err := h.playback.CycleLoopMode(ctx, usecases.CycleLoopModeInput{
@@ -497,17 +495,6 @@ func (h *Handlers) HandleLoop(
 	}
 
 	return respondLoopModeChanged(r, newMode)
-}
-
-func parseLoopMode(s string) domain.LoopMode {
-	switch s {
-	case "track":
-		return domain.LoopModeTrack
-	case "queue":
-		return domain.LoopModeQueue
-	default:
-		return domain.LoopModeNone
-	}
 }
 
 // Response helpers.
@@ -653,12 +640,12 @@ func respondQueueCleared(r bot.Responder) error {
 	})
 }
 
-func respondLoopModeChanged(r bot.Responder, mode domain.LoopMode) error {
+func respondLoopModeChanged(r bot.Responder, mode string) error {
 	var description string
 	switch mode {
-	case domain.LoopModeTrack:
+	case "track":
 		description = "Now looping the current track."
-	case domain.LoopModeQueue:
+	case "queue":
 		description = "Now looping the queue."
 	default:
 		description = "Loop disabled."
@@ -702,9 +689,9 @@ func respondQueueList(r bot.Responder, output *usecases.QueueListOutput) error {
 	// Build title with loop mode indicator
 	title := "Queue"
 	switch output.LoopMode {
-	case domain.LoopModeTrack:
+	case "track":
 		title = "Queue \U0001F502" // 🔂
-	case domain.LoopModeQueue:
+	case "queue":
 		title = "Queue \U0001F501" // 🔁
 	}
 

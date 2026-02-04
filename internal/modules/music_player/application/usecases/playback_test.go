@@ -496,7 +496,7 @@ func TestPlaybackService_SetLoopMode(t *testing.T) {
 			name: "set loop mode to track",
 			input: SetLoopModeInput{
 				GuildID: guildID,
-				Mode:    domain.LoopModeTrack,
+				Mode:    "track",
 			},
 			setupRepo: func(m *mockRepository) {
 				m.createConnectedState(guildID, voiceChannelID, textChannelID)
@@ -507,7 +507,7 @@ func TestPlaybackService_SetLoopMode(t *testing.T) {
 			name: "set loop mode to queue",
 			input: SetLoopModeInput{
 				GuildID: guildID,
-				Mode:    domain.LoopModeQueue,
+				Mode:    "queue",
 			},
 			setupRepo: func(m *mockRepository) {
 				m.createConnectedState(guildID, voiceChannelID, textChannelID)
@@ -518,7 +518,7 @@ func TestPlaybackService_SetLoopMode(t *testing.T) {
 			name: "set loop mode to none",
 			input: SetLoopModeInput{
 				GuildID: guildID,
-				Mode:    domain.LoopModeNone,
+				Mode:    "none",
 			},
 			setupRepo: func(m *mockRepository) {
 				state := m.createConnectedState(guildID, voiceChannelID, textChannelID)
@@ -530,7 +530,7 @@ func TestPlaybackService_SetLoopMode(t *testing.T) {
 			name: "not connected",
 			input: SetLoopModeInput{
 				GuildID: guildID,
-				Mode:    domain.LoopModeTrack,
+				Mode:    "track",
 			},
 			wantErr: ErrNotConnected,
 		},
@@ -577,12 +577,12 @@ func TestPlaybackService_CycleLoopMode(t *testing.T) {
 	textChannelID := snowflake.ID(3)
 
 	tests := []struct {
-		name        string
-		input       CycleLoopModeInput
-		setupRepo   func(*mockRepository)
-		wantErr     error
-		wantMode    domain.LoopMode
-		initialMode domain.LoopMode
+		name           string
+		input          CycleLoopModeInput
+		setupRepo      func(*mockRepository)
+		wantErr        error
+		wantModeStr    string          // expected output string
+		wantStateDMode domain.LoopMode // expected domain mode in state
 	}{
 		{
 			name: "cycle from none to track",
@@ -592,8 +592,8 @@ func TestPlaybackService_CycleLoopMode(t *testing.T) {
 			setupRepo: func(m *mockRepository) {
 				m.createConnectedState(guildID, voiceChannelID, textChannelID)
 			},
-			initialMode: domain.LoopModeNone,
-			wantMode:    domain.LoopModeTrack,
+			wantModeStr:    "track",
+			wantStateDMode: domain.LoopModeTrack,
 		},
 		{
 			name: "cycle from track to queue",
@@ -604,8 +604,8 @@ func TestPlaybackService_CycleLoopMode(t *testing.T) {
 				state := m.createConnectedState(guildID, voiceChannelID, textChannelID)
 				state.SetLoopMode(domain.LoopModeTrack)
 			},
-			initialMode: domain.LoopModeTrack,
-			wantMode:    domain.LoopModeQueue,
+			wantModeStr:    "queue",
+			wantStateDMode: domain.LoopModeQueue,
 		},
 		{
 			name: "cycle from queue to none",
@@ -616,8 +616,8 @@ func TestPlaybackService_CycleLoopMode(t *testing.T) {
 				state := m.createConnectedState(guildID, voiceChannelID, textChannelID)
 				state.SetLoopMode(domain.LoopModeQueue)
 			},
-			initialMode: domain.LoopModeQueue,
-			wantMode:    domain.LoopModeNone,
+			wantModeStr:    "none",
+			wantStateDMode: domain.LoopModeNone,
 		},
 		{
 			name: "not connected",
@@ -655,13 +655,13 @@ func TestPlaybackService_CycleLoopMode(t *testing.T) {
 				return
 			}
 
-			if output.NewMode != tt.wantMode {
-				t.Errorf("expected output mode %v, got %v", tt.wantMode, output.NewMode)
+			if output.NewMode != tt.wantModeStr {
+				t.Errorf("expected output mode %v, got %v", tt.wantModeStr, output.NewMode)
 			}
 
 			state := repo.Get(guildID)
-			if state.LoopMode() != tt.wantMode {
-				t.Errorf("expected state loop mode %v, got %v", tt.wantMode, state.LoopMode())
+			if state.LoopMode() != tt.wantStateDMode {
+				t.Errorf("expected state loop mode %v, got %v", tt.wantStateDMode, state.LoopMode())
 			}
 		})
 	}

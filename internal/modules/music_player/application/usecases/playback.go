@@ -35,7 +35,7 @@ type SkipOutput struct {
 // SetLoopModeInput contains the input for the SetLoopMode use case.
 type SetLoopModeInput struct {
 	GuildID               snowflake.ID
-	Mode                  domain.LoopMode
+	Mode                  string       // "none", "track", "queue"
 	NotificationChannelID snowflake.ID // Optional: updates notification channel if non-zero
 }
 
@@ -47,7 +47,7 @@ type CycleLoopModeInput struct {
 
 // CycleLoopModeOutput contains the result of the CycleLoopMode use case.
 type CycleLoopModeOutput struct {
-	NewMode domain.LoopMode
+	NewMode string // "none", "track", "queue"
 }
 
 // PlaybackService handles playback operations.
@@ -245,9 +245,21 @@ func (p *PlaybackService) SetLoopMode(ctx context.Context, input SetLoopModeInpu
 		state.SetNotificationChannel(input.NotificationChannelID)
 	}
 
-	state.SetLoopMode(input.Mode)
+	state.SetLoopMode(parseLoopMode(input.Mode))
 
 	return nil
+}
+
+// parseLoopMode converts a string to domain.LoopMode.
+func parseLoopMode(s string) domain.LoopMode {
+	switch s {
+	case "track":
+		return domain.LoopModeTrack
+	case "queue":
+		return domain.LoopModeQueue
+	default:
+		return domain.LoopModeNone
+	}
 }
 
 // CycleLoopMode cycles through loop modes: None -> Track -> Queue -> None.
@@ -268,6 +280,6 @@ func (p *PlaybackService) CycleLoopMode(
 	newMode := state.CycleLoopMode()
 
 	return &CycleLoopModeOutput{
-		NewMode: newMode,
+		NewMode: newMode.String(),
 	}, nil
 }
