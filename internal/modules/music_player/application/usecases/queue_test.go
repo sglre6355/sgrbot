@@ -787,11 +787,11 @@ func TestQueueService_Restart(t *testing.T) {
 				t.Errorf("event WasIdle = %v, want %v", event.WasIdle, tt.wantWasIdle)
 			}
 
-			// Verify queue was reset to idle
+			// Verify queue is at position 0 (Restart uses Seek(0))
 			state := repo.Get(guildID)
-			if state.Queue.CurrentIndex() != -1 {
+			if state.Queue.CurrentIndex() != 0 {
 				t.Errorf(
-					"expected currentIndex -1 after Restart, got %d",
+					"expected currentIndex 0 after Restart, got %d",
 					state.Queue.CurrentIndex(),
 				)
 			}
