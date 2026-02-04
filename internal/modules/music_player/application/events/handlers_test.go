@@ -119,11 +119,16 @@ func TestPlaybackEventHandler_TrackEnqueued_WhenIdle_StartsPlayback(t *testing.T
 	defer bus.Close()
 
 	repo := newMockRepository()
+	guildID := snowflake.ID(1)
+	// Create state that is idle (no current track)
+	state := domain.NewPlayerState(guildID, snowflake.ID(100), snowflake.ID(200))
+	repo.Save(state)
+
 	playNextCh := make(chan snowflake.ID, 1)
 
 	handler := NewPlaybackEventHandler(
-		func(_ context.Context, guildID snowflake.ID) (*domain.Track, error) {
-			playNextCh <- guildID
+		func(_ context.Context, calledGuildID snowflake.ID) (*domain.Track, error) {
+			playNextCh <- calledGuildID
 			return mockTrack("track-1"), nil
 		},
 		repo,
@@ -135,16 +140,16 @@ func TestPlaybackEventHandler_TrackEnqueued_WhenIdle_StartsPlayback(t *testing.T
 
 	// Publish event with wasIdle=true
 	bus.PublishTrackEnqueued(TrackEnqueuedEvent{
-		GuildID: snowflake.ID(1),
+		GuildID: guildID,
 		Track:   mockTrack("track-1"),
 		WasIdle: true,
 	})
 
 	// Wait for event processing
 	select {
-	case guildID := <-playNextCh:
-		if guildID != snowflake.ID(1) {
-			t.Errorf("expected guildID 1, got %d", guildID)
+	case calledGuildID := <-playNextCh:
+		if calledGuildID != guildID {
+			t.Errorf("expected guildID %d, got %d", guildID, calledGuildID)
 		}
 	case <-time.After(100 * time.Millisecond):
 		t.Error("expected playNextFunc to be called when track enqueued and idle")

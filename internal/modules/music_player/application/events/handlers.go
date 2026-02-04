@@ -89,9 +89,27 @@ func (h *PlaybackEventHandler) Stop() {
 }
 
 func (h *PlaybackEventHandler) handleTrackEnqueued(ctx context.Context, event TrackEnqueuedEvent) {
-	// Only start playback if the player was idle
+	// Only start playback if the player was idle at enqueue time
 	if !event.WasIdle {
 		slog.Debug("track enqueued but player not idle, skipping auto-play",
+			"guild", event.GuildID,
+			"track", event.Track.Title,
+		)
+		return
+	}
+
+	// Re-check current state to avoid race with concurrent enqueues.
+	// Multiple tracks enqueued while idle will all have WasIdle=true,
+	// but only the first should trigger playback.
+	state := h.repo.Get(event.GuildID)
+	if state == nil {
+		slog.Debug("track enqueued but state not found, skipping auto-play",
+			"guild", event.GuildID,
+		)
+		return
+	}
+	if !state.IsIdle() {
+		slog.Debug("track enqueued but player no longer idle, skipping auto-play",
 			"guild", event.GuildID,
 			"track", event.Track.Title,
 		)
