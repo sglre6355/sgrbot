@@ -29,6 +29,22 @@ func (h *AutocompleteHandler) HandleQueueRemove(
 	s *discordgo.Session,
 	i *discordgo.InteractionCreate,
 ) {
+	h.handleQueuePositionAutocomplete(s, i)
+}
+
+// HandleQueueSeek handles autocomplete for queue seek command.
+func (h *AutocompleteHandler) HandleQueueSeek(
+	s *discordgo.Session,
+	i *discordgo.InteractionCreate,
+) {
+	h.handleQueuePositionAutocomplete(s, i)
+}
+
+// handleQueuePositionAutocomplete is a shared helper for queue position autocomplete.
+func (h *AutocompleteHandler) handleQueuePositionAutocomplete(
+	s *discordgo.Session,
+	i *discordgo.InteractionCreate,
+) {
 	guildID, err := snowflake.Parse(i.GuildID)
 	if err != nil {
 		slog.Warn("failed to parse guild ID in autocomplete", "error", err, "guildID", i.GuildID)
@@ -53,9 +69,11 @@ func (h *AutocompleteHandler) HandleQueueRemove(
 		if idx >= 25 {
 			break
 		}
+		// Use 1-indexed positions to match queue list display
+		displayPos := idx + 1
 		choices = append(choices, &discordgo.ApplicationCommandOptionChoice{
-			Name:  fmt.Sprintf("%d. %s", idx, truncate(track.Title, 90)),
-			Value: idx,
+			Name:  fmt.Sprintf("%d. %s", displayPos, truncate(track.Title, 90)),
+			Value: displayPos,
 		})
 	}
 

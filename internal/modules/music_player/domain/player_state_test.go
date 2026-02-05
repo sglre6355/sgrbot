@@ -47,36 +47,27 @@ func TestNewPlayerState(t *testing.T) {
 func TestPlayerState_StatusMethods(t *testing.T) {
 	state := newTestPlayerState()
 
-	// Initial state is idle
+	// Initial state is idle (playbackActive=false)
 	if !state.IsIdle() {
 		t.Error("new state should be idle")
-	}
-	if state.IsPlaying() {
-		t.Error("new state should not be playing")
 	}
 	if state.IsPaused() {
 		t.Error("new state should not be paused")
 	}
 
-	// Set playing
+	// Set playing (playbackActive=true, paused=false)
 	state.SetPlaying(&Track{ID: "track-1"})
 	if state.IsIdle() {
 		t.Error("playing state should not be idle")
-	}
-	if !state.IsPlaying() {
-		t.Error("playing state should be playing")
 	}
 	if state.IsPaused() {
 		t.Error("playing state should not be paused")
 	}
 
-	// Set paused
+	// Set paused (playbackActive=true, paused=true)
 	state.SetPaused()
 	if state.IsIdle() {
 		t.Error("paused state should not be idle")
-	}
-	if state.IsPlaying() {
-		t.Error("paused state should not be playing")
 	}
 	if !state.IsPaused() {
 		t.Error("paused state should be paused")
@@ -121,8 +112,8 @@ func TestPlayerState_SetPlaying(t *testing.T) {
 	if state.IsPaused() {
 		t.Error("expected not to be paused")
 	}
-	if !state.IsPlaying() {
-		t.Error("expected IsPlaying to return true")
+	if state.IsIdle() {
+		t.Error("expected playback to be active")
 	}
 }
 
@@ -161,8 +152,8 @@ func TestPlayerState_SetResumed(t *testing.T) {
 	if state.IsPaused() {
 		t.Error("expected not to be paused")
 	}
-	if !state.IsPlaying() {
-		t.Error("expected IsPlaying to return true")
+	if state.IsIdle() {
+		t.Error("expected playback to be active")
 	}
 }
 
@@ -178,6 +169,25 @@ func TestPlayerState_SetStopped(t *testing.T) {
 	}
 	if state.IsPaused() {
 		t.Error("expected not to be paused")
+	}
+	if !state.IsIdle() {
+		t.Error("expected IsIdle to return true")
+	}
+}
+
+func TestPlayerState_StopPlayback_ResetsLoopMode(t *testing.T) {
+	state := newTestPlayerState()
+	state.SetPlaying(&Track{ID: "track-1"})
+	state.SetLoopMode(LoopModeQueue)
+
+	if state.LoopMode() != LoopModeQueue {
+		t.Error("expected loop mode to be queue")
+	}
+
+	state.StopPlayback()
+
+	if state.LoopMode() != LoopModeNone {
+		t.Error("expected loop mode to be reset to none after StopPlayback")
 	}
 	if !state.IsIdle() {
 		t.Error("expected IsIdle to return true")
@@ -237,11 +247,114 @@ func TestPlayerState_TotalTracks(t *testing.T) {
 		t.Errorf("expected 3, got %d", got)
 	}
 
-	// Stop (remove current track)
+	// Stop advances to next track but keeps all tracks (index-based model)
 	state.SetStopped()
-	if got := state.TotalTracks(); got != 2 {
-		t.Errorf("expected 2, got %d", got)
+	if got := state.TotalTracks(); got != 3 {
+		t.Errorf("expected 3 (tracks kept in queue), got %d", got)
 	}
+}
+
+func TestPlayerState_LoopMode(t *testing.T) {
+	state := newTestPlayerState()
+
+	// Default loop mode is None
+	if got := state.LoopMode(); got != LoopModeNone {
+		t.Errorf("expected LoopModeNone, got %v", got)
+	}
+
+	// Set loop mode
+	state.SetLoopMode(LoopModeTrack)
+	if got := state.LoopMode(); got != LoopModeTrack {
+		t.Errorf("expected LoopModeTrack, got %v", got)
+	}
+
+	state.SetLoopMode(LoopModeQueue)
+	if got := state.LoopMode(); got != LoopModeQueue {
+		t.Errorf("expected LoopModeQueue, got %v", got)
+	}
+}
+
+func TestPlayerState_CycleLoopMode(t *testing.T) {
+	state := newTestPlayerState()
+
+	// None -> Track
+	got := state.CycleLoopMode()
+	if got != LoopModeTrack {
+		t.Errorf("expected LoopModeTrack, got %v", got)
+	}
+	if state.LoopMode() != LoopModeTrack {
+		t.Error("state loop mode should be updated")
+	}
+
+	// Track -> Queue
+	got = state.CycleLoopMode()
+	if got != LoopModeQueue {
+		t.Errorf("expected LoopModeQueue, got %v", got)
+	}
+
+	// Queue -> None
+	got = state.CycleLoopMode()
+	if got != LoopModeNone {
+		t.Errorf("expected LoopModeNone, got %v", got)
+	}
+}
+
+func TestPlayerState_SetStopped_WithLoopModes(t *testing.T) {
+	t.Run("LoopModeNone advances to next track", func(t *testing.T) {
+		state := newTestPlayerState()
+		track1 := &Track{ID: "track-1"}
+		track2 := &Track{ID: "track-2"}
+
+		state.Queue.Add(track1)
+		state.Queue.Add(track2)
+		state.Queue.Start()
+
+		state.SetStopped()
+
+		if state.CurrentTrack() != track2 {
+			t.Error("expected current track to be track2")
+		}
+	})
+
+	t.Run("LoopModeTrack replays same track", func(t *testing.T) {
+		state := newTestPlayerState()
+		track1 := &Track{ID: "track-1"}
+		track2 := &Track{ID: "track-2"}
+
+		state.Queue.Add(track1)
+		state.Queue.Add(track2)
+		state.Queue.Start()
+		state.SetLoopMode(LoopModeTrack)
+
+		state.SetStopped()
+
+		if state.CurrentTrack() != track1 {
+			t.Error("expected current track to still be track1")
+		}
+	})
+
+	t.Run("LoopModeQueue wraps to start", func(t *testing.T) {
+		state := newTestPlayerState()
+		track1 := &Track{ID: "track-1"}
+		track2 := &Track{ID: "track-2"}
+
+		state.Queue.Add(track1)
+		state.Queue.Add(track2)
+		state.Queue.Start()
+		state.SetLoopMode(LoopModeQueue)
+
+		// Advance to track2
+		state.SetStopped()
+		if state.CurrentTrack() != track2 {
+			t.Error("expected current track to be track2")
+		}
+
+		// Should wrap to track1
+		state.SetStopped()
+		if state.CurrentTrack() != track1 {
+			t.Error("expected current track to wrap to track1")
+		}
+	})
 }
 
 func TestPlayerState_ConcurrentAccess(t *testing.T) {
@@ -257,7 +370,7 @@ func TestPlayerState_ConcurrentAccess(t *testing.T) {
 
 		go func() {
 			defer wg.Done()
-			_ = state.IsPlaying()
+			_ = state.IsIdle()
 		}()
 
 		go func() {

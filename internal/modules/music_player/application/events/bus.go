@@ -19,6 +19,7 @@ type Bus struct {
 	playbackStarted  chan PlaybackStartedEvent
 	playbackFinished chan PlaybackFinishedEvent
 	trackEnded       chan TrackEndedEvent
+	queueCleared     chan QueueClearedEvent
 
 	closed bool
 	mu     sync.RWMutex
@@ -35,6 +36,7 @@ func NewBus(bufferSize int) *Bus {
 		playbackStarted:  make(chan PlaybackStartedEvent, bufferSize),
 		playbackFinished: make(chan PlaybackFinishedEvent, bufferSize),
 		trackEnded:       make(chan TrackEndedEvent, bufferSize),
+		queueCleared:     make(chan QueueClearedEvent, bufferSize),
 	}
 }
 
@@ -114,6 +116,25 @@ func (b *Bus) PublishTrackEnded(event TrackEndedEvent) {
 	}
 }
 
+// PublishQueueCleared publishes a QueueClearedEvent.
+// Non-blocking: if the channel buffer is full, the event is dropped with a warning.
+func (b *Bus) PublishQueueCleared(event QueueClearedEvent) {
+	b.mu.RLock()
+	defer b.mu.RUnlock()
+
+	if b.closed {
+		slog.Warn("attempted to publish to closed event bus", "type", "QueueCleared")
+		return
+	}
+
+	select {
+	case b.queueCleared <- event:
+		slog.Debug("published event", "type", "QueueCleared", "guild", event.GuildID)
+	default:
+		slog.Warn("event buffer full, dropping event", "type", "QueueCleared")
+	}
+}
+
 // TrackEnqueued returns the channel for TrackEnqueuedEvent.
 func (b *Bus) TrackEnqueued() <-chan TrackEnqueuedEvent {
 	return b.trackEnqueued
@@ -134,6 +155,11 @@ func (b *Bus) TrackEnded() <-chan TrackEndedEvent {
 	return b.trackEnded
 }
 
+// QueueCleared returns the channel for QueueClearedEvent.
+func (b *Bus) QueueCleared() <-chan QueueClearedEvent {
+	return b.queueCleared
+}
+
 // Close closes all event channels.
 // After calling Close, publishing will no longer send events.
 func (b *Bus) Close() {
@@ -149,6 +175,7 @@ func (b *Bus) Close() {
 	close(b.playbackStarted)
 	close(b.playbackFinished)
 	close(b.trackEnded)
+	close(b.queueCleared)
 
 	slog.Debug("event bus closed")
 }

@@ -131,6 +131,7 @@ func TestPlaybackEventHandler_TrackEnqueued_WhenIdle_StartsPlayback(t *testing.T
 			playNextCh <- calledGuildID
 			return mockTrack("track-1"), nil
 		},
+		func(_ context.Context, _ snowflake.ID) error { return nil },
 		repo,
 		bus,
 	)
@@ -168,6 +169,7 @@ func TestPlaybackEventHandler_TrackEnqueued_WhenNotIdle_DoesNotStartPlayback(t *
 			playNextCh <- struct{}{}
 			return mockTrack("track-1"), nil
 		},
+		func(_ context.Context, _ snowflake.ID) error { return nil },
 		repo,
 		bus,
 	)
@@ -191,6 +193,106 @@ func TestPlaybackEventHandler_TrackEnqueued_WhenNotIdle_DoesNotStartPlayback(t *
 	}
 }
 
+func TestPlaybackEventHandler_TrackEnqueued_AfterQueueEnds_StartsPlayback(t *testing.T) {
+	bus := NewBus(10)
+	defer bus.Close()
+
+	repo := newMockRepository()
+	guildID := snowflake.ID(1)
+	// Create state where queue has finished (currentIndex past end)
+	state := domain.NewPlayerState(guildID, snowflake.ID(100), snowflake.ID(200))
+	state.Queue.Add(mockTrack("old-track"))
+	state.Queue.Start()
+	state.Queue.Advance(domain.LoopModeNone) // past end, now idle
+	repo.Save(state)
+
+	// Verify the state is idle (past end)
+	if !state.IsIdle() {
+		t.Fatal("expected state to be idle after queue ended")
+	}
+
+	playNextCh := make(chan snowflake.ID, 1)
+	newTrack := mockTrack("new-track")
+
+	handler := NewPlaybackEventHandler(
+		func(_ context.Context, calledGuildID snowflake.ID) (*domain.Track, error) {
+			playNextCh <- calledGuildID
+			return newTrack, nil
+		},
+		func(_ context.Context, _ snowflake.ID) error { return nil },
+		repo,
+		bus,
+	)
+
+	handler.Start(t.Context())
+	defer handler.Stop()
+
+	// Add new track to queue (this is what Add() does)
+	state.Queue.Add(newTrack)
+
+	// Publish event with wasIdle=true (because Add() returned wasIdle=true)
+	bus.PublishTrackEnqueued(TrackEnqueuedEvent{
+		GuildID: guildID,
+		Track:   newTrack,
+		WasIdle: true,
+	})
+
+	// Wait for event processing - should be called because track ID matches
+	select {
+	case calledGuildID := <-playNextCh:
+		if calledGuildID != guildID {
+			t.Errorf("expected guildID %d, got %d", guildID, calledGuildID)
+		}
+	case <-time.After(100 * time.Millisecond):
+		t.Error("expected playNextFunc to be called when track enqueued after queue ended")
+	}
+}
+
+func TestPlaybackEventHandler_TrackEnqueued_DifferentTrackCurrent_DoesNotStartPlayback(
+	t *testing.T,
+) {
+	bus := NewBus(10)
+	defer bus.Close()
+
+	repo := newMockRepository()
+	guildID := snowflake.ID(1)
+	// Create state where a different track is already current
+	state := domain.NewPlayerState(guildID, snowflake.ID(100), snowflake.ID(200))
+	state.SetPlaying(mockTrack("current-track"))
+	repo.Save(state)
+
+	playNextCh := make(chan struct{}, 1)
+
+	handler := NewPlaybackEventHandler(
+		func(_ context.Context, _ snowflake.ID) (*domain.Track, error) {
+			playNextCh <- struct{}{}
+			return mockTrack("track-1"), nil
+		},
+		func(_ context.Context, _ snowflake.ID) error { return nil },
+		repo,
+		bus,
+	)
+
+	handler.Start(t.Context())
+	defer handler.Stop()
+
+	// Publish event with wasIdle=true but for a different track
+	// (simulates concurrent enqueue where another track won the race)
+	bus.PublishTrackEnqueued(TrackEnqueuedEvent{
+		GuildID: guildID,
+		Track:   mockTrack("second-track"),
+		WasIdle: true,
+	})
+
+	// Wait for event processing - should NOT be called
+	select {
+	case <-playNextCh:
+		t.Error("expected playNextFunc NOT to be called when different track is current")
+	case <-time.After(100 * time.Millisecond):
+		// Success - playNextFunc was not called
+	}
+}
+
 func TestPlaybackEventHandler_TrackEnded_Finished_AdvancesQueue(t *testing.T) {
 	bus := NewBus(10)
 	defer bus.Close()
@@ -209,6 +311,7 @@ func TestPlaybackEventHandler_TrackEnded_Finished_AdvancesQueue(t *testing.T) {
 			playNextCh <- struct{}{}
 			return mockTrack("next"), nil
 		},
+		func(_ context.Context, _ snowflake.ID) error { return nil },
 		repo,
 		bus,
 	)
@@ -231,6 +334,71 @@ func TestPlaybackEventHandler_TrackEnded_Finished_AdvancesQueue(t *testing.T) {
 	}
 }
 
+func TestPlaybackEventHandler_TrackEnded_LoadFailed_WithLoopModeTrack_AdvancesToNextTrack(
+	t *testing.T,
+) {
+	bus := NewBus(10)
+	defer bus.Close()
+
+	repo := newMockRepository()
+	guildID := snowflake.ID(1)
+	state := domain.NewPlayerState(guildID, snowflake.ID(100), snowflake.ID(200))
+	state.SetPlaying(mockTrack("failing"))
+	state.Queue.Add(mockTrack("next"))
+	state.SetLoopMode(domain.LoopModeTrack) // Set loop mode to track
+	repo.Save(state)
+
+	playNextCh := make(chan struct{}, 1)
+
+	handler := NewPlaybackEventHandler(
+		func(_ context.Context, _ snowflake.ID) (*domain.Track, error) {
+			playNextCh <- struct{}{}
+			return mockTrack("next"), nil
+		},
+		func(_ context.Context, _ snowflake.ID) error { return nil },
+		repo,
+		bus,
+	)
+
+	handler.Start(t.Context())
+	defer handler.Stop()
+
+	// Publish track ended with TrackEndLoadFailed reason
+	bus.PublishTrackEnded(TrackEndedEvent{
+		GuildID: guildID,
+		Reason:  TrackEndLoadFailed,
+	})
+
+	// Wait for event processing
+	select {
+	case <-playNextCh:
+		// Success - playNextFunc was called
+	case <-time.After(100 * time.Millisecond):
+		t.Error("expected playNextFunc to be called when track load failed")
+	}
+
+	// Verify that the queue advanced to the next track (not looped on the failing track)
+	// The current track should now be "next", not "failing"
+	current := state.Queue.Current()
+	if current == nil {
+		t.Fatal("expected current track to exist")
+	}
+	if current.ID != domain.TrackID("next") {
+		t.Errorf("expected current track to be 'next', got %q", current.ID)
+	}
+
+	// Verify that the failing track was removed from the queue
+	tracks := state.Queue.List()
+	if len(tracks) != 1 {
+		t.Errorf("expected 1 track in queue, got %d", len(tracks))
+	}
+	for _, track := range tracks {
+		if track.ID == domain.TrackID("failing") {
+			t.Error("expected failing track to be removed from queue")
+		}
+	}
+}
+
 func TestPlaybackEventHandler_TrackEnded_Stopped_DoesNotAdvanceQueue(t *testing.T) {
 	bus := NewBus(10)
 	defer bus.Close()
@@ -249,6 +417,7 @@ func TestPlaybackEventHandler_TrackEnded_Stopped_DoesNotAdvanceQueue(t *testing.
 			playNextCh <- struct{}{}
 			return mockTrack("next"), nil
 		},
+		func(_ context.Context, _ snowflake.ID) error { return nil },
 		repo,
 		bus,
 	)
@@ -280,6 +449,7 @@ func TestPlaybackEventHandler_StopsOnContextCancellation(t *testing.T) {
 		func(_ context.Context, _ snowflake.ID) (*domain.Track, error) {
 			return nil, nil
 		},
+		func(_ context.Context, _ snowflake.ID) error { return nil },
 		repo,
 		bus,
 	)
@@ -305,6 +475,58 @@ func TestPlaybackEventHandler_StopsOnContextCancellation(t *testing.T) {
 	}
 }
 
+func TestPlaybackEventHandler_QueueCleared_StopsPlayback(t *testing.T) {
+	bus := NewBus(10)
+	defer bus.Close()
+
+	repo := newMockRepository()
+	guildID := snowflake.ID(1)
+	channelID := snowflake.ID(200)
+	messageID := snowflake.ID(999)
+
+	state := domain.NewPlayerState(guildID, snowflake.ID(100), channelID)
+	state.SetNowPlayingMessage(channelID, messageID)
+	repo.Save(state)
+
+	stopCh := make(chan snowflake.ID, 1)
+
+	handler := NewPlaybackEventHandler(
+		func(_ context.Context, _ snowflake.ID) (*domain.Track, error) {
+			return nil, nil
+		},
+		func(_ context.Context, guildID snowflake.ID) error {
+			stopCh <- guildID
+			return nil
+		},
+		repo,
+		bus,
+	)
+
+	handler.Start(t.Context())
+	defer handler.Stop()
+
+	// Publish QueueCleared event
+	bus.PublishQueueCleared(QueueClearedEvent{
+		GuildID:               guildID,
+		NotificationChannelID: channelID,
+	})
+
+	// Wait for event processing
+	select {
+	case stoppedGuildID := <-stopCh:
+		if stoppedGuildID != guildID {
+			t.Errorf("expected guildID %d, got %d", guildID, stoppedGuildID)
+		}
+	case <-time.After(100 * time.Millisecond):
+		t.Error("expected stopFunc to be called when queue cleared")
+	}
+
+	// Also verify that PlaybackFinished was published (for message deletion)
+	time.Sleep(50 * time.Millisecond)
+	// Note: We can't directly verify PlaybackFinished from here as it goes to the bus,
+	// but we've verified the stopFunc was called which is the critical part.
+}
+
 // --- NotificationEventHandler Tests ---
 
 func TestNotificationEventHandler_PlaybackStarted_SendsNowPlaying(t *testing.T) {
@@ -314,6 +536,8 @@ func TestNotificationEventHandler_PlaybackStarted_SendsNowPlaying(t *testing.T) 
 	repo := newMockRepository()
 	guildID := snowflake.ID(1)
 	state := domain.NewPlayerState(guildID, snowflake.ID(100), snowflake.ID(200))
+	track := mockTrack("track-1")
+	state.SetPlaying(track) // Set current track to match the event
 	repo.Save(state)
 
 	notifier := &mockNotifier{}
@@ -323,7 +547,6 @@ func TestNotificationEventHandler_PlaybackStarted_SendsNowPlaying(t *testing.T) 
 	handler.Start(t.Context())
 	defer handler.Stop()
 
-	track := mockTrack("track-1")
 	bus.PublishPlaybackStarted(PlaybackStartedEvent{
 		GuildID:               guildID,
 		Track:                 track,
@@ -351,6 +574,8 @@ func TestNotificationEventHandler_PlaybackStarted_StoresMessageID(t *testing.T) 
 	repo := newMockRepository()
 	guildID := snowflake.ID(1)
 	state := domain.NewPlayerState(guildID, snowflake.ID(100), snowflake.ID(200))
+	track := mockTrack("track-1")
+	state.SetPlaying(track) // Set current track to match the event
 	repo.Save(state)
 
 	notifier := &mockNotifier{}
@@ -361,7 +586,7 @@ func TestNotificationEventHandler_PlaybackStarted_StoresMessageID(t *testing.T) 
 
 	bus.PublishPlaybackStarted(PlaybackStartedEvent{
 		GuildID:               guildID,
-		Track:                 mockTrack("track-1"),
+		Track:                 track,
 		NotificationChannelID: snowflake.ID(200),
 	})
 
@@ -371,6 +596,42 @@ func TestNotificationEventHandler_PlaybackStarted_StoresMessageID(t *testing.T) 
 
 	if state.GetNowPlayingMessage() == nil {
 		t.Error("expected NowPlayingMessage to be set")
+	}
+}
+
+func TestNotificationEventHandler_PlaybackStarted_SkipsIfTrackNoLongerCurrent(t *testing.T) {
+	bus := NewBus(10)
+	defer bus.Close()
+
+	repo := newMockRepository()
+	guildID := snowflake.ID(1)
+	state := domain.NewPlayerState(guildID, snowflake.ID(100), snowflake.ID(200))
+	// Set a different track as current (simulating the race condition where
+	// the original track failed and was removed before this handler runs)
+	state.SetPlaying(mockTrack("different-track"))
+	repo.Save(state)
+
+	notifier := &mockNotifier{}
+
+	handler := NewNotificationEventHandler(notifier, repo, bus)
+
+	handler.Start(t.Context())
+
+	// Publish event for a track that is NOT the current track
+	bus.PublishPlaybackStarted(PlaybackStartedEvent{
+		GuildID:               guildID,
+		Track:                 mockTrack("failed-track"),
+		NotificationChannelID: snowflake.ID(200),
+	})
+
+	// Wait for event processing and stop handler
+	time.Sleep(100 * time.Millisecond)
+	handler.Stop()
+
+	// Should NOT have sent a notification since the track is not current
+	sentNowPlaying := notifier.getSentNowPlaying()
+	if len(sentNowPlaying) != 0 {
+		t.Errorf("expected 0 now playing notifications, got %d", len(sentNowPlaying))
 	}
 }
 

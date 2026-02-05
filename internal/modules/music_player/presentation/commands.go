@@ -80,9 +80,9 @@ func Commands() []*discordgo.ApplicationCommand {
 						{
 							Type:         discordgo.ApplicationCommandOptionInteger,
 							Name:         "position",
-							Description:  "Position of the track to remove (0 = current track)",
+							Description:  "Position of the track to remove (1-indexed, as shown in queue list)",
 							Required:     true,
-							MinValue:     floatPtr(0),
+							MinValue:     floatPtr(1),
 							Autocomplete: true,
 						},
 					},
@@ -91,6 +91,43 @@ func Commands() []*discordgo.ApplicationCommand {
 					Type:        discordgo.ApplicationCommandOptionSubCommand,
 					Name:        "clear",
 					Description: "Clear the queue",
+				},
+				{
+					Type:        discordgo.ApplicationCommandOptionSubCommand,
+					Name:        "restart",
+					Description: "Restart the queue from the beginning",
+				},
+				{
+					Type:        discordgo.ApplicationCommandOptionSubCommand,
+					Name:        "seek",
+					Description: "Jump to a specific position in the queue",
+					Options: []*discordgo.ApplicationCommandOption{
+						{
+							Type:         discordgo.ApplicationCommandOptionInteger,
+							Name:         "position",
+							Description:  "Position to jump to (1-indexed, as shown in queue list)",
+							Required:     true,
+							MinValue:     floatPtr(1),
+							Autocomplete: true,
+						},
+					},
+				},
+			},
+		},
+		{
+			Name:        "loop",
+			Description: "Set the loop mode (or cycle through modes if no option provided)",
+			Options: []*discordgo.ApplicationCommandOption{
+				{
+					Type:        discordgo.ApplicationCommandOptionString,
+					Name:        "mode",
+					Description: "Loop mode to set (omit to cycle through modes)",
+					Required:    false,
+					Choices: []*discordgo.ApplicationCommandOptionChoice{
+						{Name: "Off", Value: "none"},
+						{Name: "Track", Value: "track"},
+						{Name: "Queue", Value: "queue"},
+					},
 				},
 			},
 		},

@@ -19,7 +19,7 @@ type QueueAddInput struct {
 
 // QueueAddOutput contains the result of the QueueAdd use case.
 type QueueAddOutput struct {
-	Position int // 0-indexed position in queue (0 = now playing)
+	Position int // 0-indexed position in queue where track was added
 }
 
 // QueueListInput contains the input for the QueueList use case.
@@ -32,17 +32,19 @@ type QueueListInput struct {
 
 // QueueListOutput contains the result of the QueueList use case.
 type QueueListOutput struct {
-	CurrentTrack *domain.Track
-	Tracks       []*domain.Track
-	TotalTracks  int
+	Tracks       []*domain.Track // Paginated slice of all tracks
+	CurrentIndex int             // 0-indexed position of current track (-1 if idle)
+	TotalTracks  int             // Total tracks in queue
 	CurrentPage  int
 	TotalPages   int
+	PageStart    int    // 0-indexed start position of this page
+	LoopMode     string // "none", "track", "queue"
 }
 
 // QueueRemoveInput contains the input for the QueueRemove use case.
 type QueueRemoveInput struct {
 	GuildID               snowflake.ID
-	Position              int          // 0-indexed position in queue (position 0 should be handled by Skip)
+	Position              int          // 0-indexed position in queue (cannot remove current track directly)
 	NotificationChannelID snowflake.ID // Optional: updates notification channel if non-zero
 }
 
@@ -55,11 +57,35 @@ type QueueRemoveOutput struct {
 type QueueClearInput struct {
 	GuildID               snowflake.ID
 	NotificationChannelID snowflake.ID // Optional: updates notification channel if non-zero
+	KeepCurrentTrack      bool         // true = clear played+upcoming (keep current), false = clear all
 }
 
 // QueueClearOutput contains the result of the QueueClear use case.
 type QueueClearOutput struct {
 	ClearedCount int
+}
+
+// QueueRestartInput contains the input for the QueueRestart use case.
+type QueueRestartInput struct {
+	GuildID               snowflake.ID
+	NotificationChannelID snowflake.ID // Optional: updates notification channel if non-zero
+}
+
+// QueueRestartOutput contains the result of the QueueRestart use case.
+type QueueRestartOutput struct {
+	Track *domain.Track
+}
+
+// QueueSeekInput contains the input for the QueueSeek use case.
+type QueueSeekInput struct {
+	GuildID               snowflake.ID
+	Position              int          // 0-indexed position in the queue
+	NotificationChannelID snowflake.ID // Optional: updates notification channel if non-zero
+}
+
+// QueueSeekOutput contains the result of the QueueSeek use case.
+type QueueSeekOutput struct {
+	Track *domain.Track
 }
 
 // QueueService handles queue operations.
@@ -128,24 +154,23 @@ func (q *QueueService) List(input QueueListInput) (*QueueListOutput, error) {
 		pageSize = DefaultPageSize
 	}
 
+	// Get all tracks and current index
+	allTracks := state.Queue.List()
+	currentIndex := state.Queue.CurrentIndex()
+	loopMode := state.LoopMode()
+
+	// Default to page containing the current track (or page 1 if idle)
 	page := input.Page
 	if page <= 0 {
-		page = 1
+		if currentIndex >= 0 {
+			page = (currentIndex / pageSize) + 1
+		} else {
+			page = 1
+		}
 	}
 
-	// Get all tracks from queue
-	allTracks := state.Queue.List()
-
-	// Separate current track (Queue[0]) from queued tracks (Queue[1:])
-	var currentTrack *domain.Track
-	var queuedTracks []*domain.Track
-	if len(allTracks) > 0 {
-		currentTrack = allTracks[0]
-		queuedTracks = allTracks[1:]
-	}
-
-	// Pagination applies to queued tracks only
-	totalTracks := len(queuedTracks)
+	// Pagination applies to entire queue
+	totalTracks := len(allTracks)
 	totalPages := (totalTracks + pageSize - 1) / pageSize
 	if totalPages == 0 {
 		totalPages = 1
@@ -163,21 +188,22 @@ func (q *QueueService) List(input QueueListInput) (*QueueListOutput, error) {
 
 	var pageTracks []*domain.Track
 	if start < totalTracks {
-		pageTracks = queuedTracks[start:end]
+		pageTracks = allTracks[start:end]
 	}
 
 	return &QueueListOutput{
-		CurrentTrack: currentTrack,
 		Tracks:       pageTracks,
+		CurrentIndex: currentIndex,
 		TotalTracks:  totalTracks,
 		CurrentPage:  page,
 		TotalPages:   totalPages,
+		PageStart:    start,
+		LoopMode:     loopMode.String(),
 	}, nil
 }
 
-// Remove removes a track from the queue at the given position.
-// Position 0 should be handled by Skip (current track requires playback control).
-// Position 1+ = queued tracks (Queue[1], Queue[2], etc.).
+// Remove removes a track from the queue at the given position (0-indexed).
+// Returns ErrIsCurrentTrack if position is the current track (should use Skip instead).
 func (q *QueueService) Remove(input QueueRemoveInput) (*QueueRemoveOutput, error) {
 	state := q.repo.Get(input.GuildID)
 	if state == nil {
@@ -189,17 +215,18 @@ func (q *QueueService) Remove(input QueueRemoveInput) (*QueueRemoveOutput, error
 		state.SetNotificationChannel(input.NotificationChannelID)
 	}
 
-	// Queue[0] is current track, Queue[1:] are queued tracks
-	// If only current track or less, no queued tracks to remove
-	if state.Queue.Len() <= 1 {
+	if state.Queue.Len() == 0 {
 		return nil, ErrQueueEmpty
 	}
 
-	// Position 0 is current track - should be handled by Skip at the handler level
-	// Position 1+ maps directly to Queue index
 	index := input.Position
-	if index < 1 {
+	if index < 0 || index >= state.Queue.Len() {
 		return nil, ErrInvalidPosition
+	}
+
+	// Cannot remove current track directly - must use Skip
+	if index == state.Queue.CurrentIndex() {
+		return nil, ErrIsCurrentTrack
 	}
 
 	track := state.Queue.RemoveAt(index)
@@ -212,7 +239,9 @@ func (q *QueueService) Remove(input QueueRemoveInput) (*QueueRemoveOutput, error
 	}, nil
 }
 
-// Clear clears all queued tracks (keeps current track at Queue[0]).
+// Clear clears the queue.
+// If KeepCurrentTrack is true, clears played + upcoming tracks, keeps only current track.
+// If KeepCurrentTrack is false, clears all tracks.
 func (q *QueueService) Clear(input QueueClearInput) (*QueueClearOutput, error) {
 	state := q.repo.Get(input.GuildID)
 	if state == nil {
@@ -224,15 +253,115 @@ func (q *QueueService) Clear(input QueueClearInput) (*QueueClearOutput, error) {
 		state.SetNotificationChannel(input.NotificationChannelID)
 	}
 
-	// Queue[0] is current track, Queue[1:] are queued tracks
-	// If only current track or less, no queued tracks to clear
-	if state.Queue.Len() <= 1 {
-		return nil, ErrQueueEmpty
-	}
+	var count int
+	if input.KeepCurrentTrack {
+		// Clear played + upcoming, keep only current track
+		currentTrack := state.Queue.Current()
+		if currentTrack == nil {
+			// No current track (idle state) - clear all played tracks
+			if state.Queue.Len() == 0 {
+				return nil, ErrQueueEmpty
+			}
+			count = state.Queue.Clear()
+		} else {
+			count = state.Queue.Len() - 1
+			if count == 0 {
+				return nil, ErrNothingToClear
+			}
+			// Use existing methods: clear all, add back current, start
+			state.Queue.Clear()
+			state.Queue.Add(currentTrack)
+			state.Queue.Start()
+		}
+	} else {
+		// Clear all tracks
+		if state.Queue.Len() == 0 {
+			return nil, ErrQueueEmpty
+		}
+		count = state.Queue.Clear()
 
-	count := state.Queue.ClearAfterCurrent()
+		// Publish event to stop playback
+		if q.publisher != nil {
+			q.publisher.PublishQueueCleared(ports.QueueClearedEvent{
+				GuildID:               input.GuildID,
+				NotificationChannelID: input.NotificationChannelID,
+			})
+		}
+	}
 
 	return &QueueClearOutput{
 		ClearedCount: count,
 	}, nil
+}
+
+// Restart restarts the queue from the beginning.
+// Used to replay tracks after the queue has naturally ended.
+func (q *QueueService) Restart(
+	ctx context.Context,
+	input QueueRestartInput,
+) (*QueueRestartOutput, error) {
+	output, err := q.Seek(ctx, QueueSeekInput{
+		GuildID:               input.GuildID,
+		Position:              0,
+		NotificationChannelID: input.NotificationChannelID,
+	})
+	if err != nil {
+		return nil, err
+	}
+	return &QueueRestartOutput{Track: output.Track}, nil
+}
+
+// Seek jumps to a specific position in the queue and triggers playback.
+// Used to immediately play a track at any position (played or upcoming).
+func (q *QueueService) Seek(
+	_ context.Context,
+	input QueueSeekInput,
+) (*QueueSeekOutput, error) {
+	state := q.repo.Get(input.GuildID)
+	if state == nil {
+		return nil, ErrNotConnected
+	}
+
+	// Update notification channel if provided
+	if input.NotificationChannelID != 0 {
+		state.SetNotificationChannel(input.NotificationChannelID)
+	}
+
+	if state.Queue.Len() == 0 {
+		return nil, ErrQueueEmpty
+	}
+
+	// Seek to target position (atomic operation with bounds checking)
+	track := state.Queue.Seek(input.Position)
+	if track == nil {
+		return nil, ErrInvalidPosition
+	}
+
+	// Delete the old "Now Playing" message before starting the new track
+	if q.publisher != nil {
+		nowPlayingMsg := state.GetNowPlayingMessage()
+		if nowPlayingMsg != nil {
+			q.publisher.PublishPlaybackFinished(ports.PlaybackFinishedEvent{
+				GuildID:               input.GuildID,
+				NotificationChannelID: nowPlayingMsg.ChannelID,
+				LastMessageID:         &nowPlayingMsg.MessageID,
+			})
+		}
+	}
+
+	// Mark playback as inactive so the event handler will trigger new playback
+	state.StopPlayback()
+
+	// Publish event to trigger playback.
+	// PlayNext will see currentIndex >= 0 (not idle) and play Current() directly,
+	// which is the track we just seeked to.
+	if q.publisher != nil {
+		q.publisher.PublishTrackEnqueued(ports.TrackEnqueuedEvent{
+			GuildID: input.GuildID,
+			Track:   track,
+			WasIdle: true,
+		})
+	}
+
+	return &QueueSeekOutput{Track: track}, nil
 }
