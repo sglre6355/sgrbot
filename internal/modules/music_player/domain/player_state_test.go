@@ -47,36 +47,27 @@ func TestNewPlayerState(t *testing.T) {
 func TestPlayerState_StatusMethods(t *testing.T) {
 	state := newTestPlayerState()
 
-	// Initial state is idle
+	// Initial state is idle (playbackActive=false)
 	if !state.IsIdle() {
 		t.Error("new state should be idle")
-	}
-	if state.IsPlaying() {
-		t.Error("new state should not be playing")
 	}
 	if state.IsPaused() {
 		t.Error("new state should not be paused")
 	}
 
-	// Set playing
+	// Set playing (playbackActive=true, paused=false)
 	state.SetPlaying(&Track{ID: "track-1"})
 	if state.IsIdle() {
 		t.Error("playing state should not be idle")
-	}
-	if !state.IsPlaying() {
-		t.Error("playing state should be playing")
 	}
 	if state.IsPaused() {
 		t.Error("playing state should not be paused")
 	}
 
-	// Set paused
+	// Set paused (playbackActive=true, paused=true)
 	state.SetPaused()
 	if state.IsIdle() {
 		t.Error("paused state should not be idle")
-	}
-	if state.IsPlaying() {
-		t.Error("paused state should not be playing")
 	}
 	if !state.IsPaused() {
 		t.Error("paused state should be paused")
@@ -121,8 +112,8 @@ func TestPlayerState_SetPlaying(t *testing.T) {
 	if state.IsPaused() {
 		t.Error("expected not to be paused")
 	}
-	if !state.IsPlaying() {
-		t.Error("expected IsPlaying to return true")
+	if state.IsIdle() {
+		t.Error("expected playback to be active")
 	}
 }
 
@@ -161,8 +152,8 @@ func TestPlayerState_SetResumed(t *testing.T) {
 	if state.IsPaused() {
 		t.Error("expected not to be paused")
 	}
-	if !state.IsPlaying() {
-		t.Error("expected IsPlaying to return true")
+	if state.IsIdle() {
+		t.Error("expected playback to be active")
 	}
 }
 
@@ -360,7 +351,7 @@ func TestPlayerState_ConcurrentAccess(t *testing.T) {
 
 		go func() {
 			defer wg.Done()
-			_ = state.IsPlaying()
+			_ = state.IsIdle()
 		}()
 
 		go func() {

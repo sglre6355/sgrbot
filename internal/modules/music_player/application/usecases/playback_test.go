@@ -218,8 +218,8 @@ func TestPlaybackService_Resume(t *testing.T) {
 
 			// Verify state was updated
 			state := repo.Get(guildID)
-			if !state.IsPlaying() {
-				t.Error("expected status to be playing")
+			if state.IsIdle() {
+				t.Error("expected playback to be active")
 			}
 		})
 	}
@@ -350,8 +350,8 @@ func TestPlaybackService_Skip(t *testing.T) {
 					t.Error("expected NextTrack to be set")
 				}
 				state := repo.Get(guildID)
-				if !state.IsPlaying() {
-					t.Error("expected status to be playing")
+				if state.IsIdle() {
+					t.Error("expected playback to be active")
 				}
 			} else {
 				if output.NextTrack != nil {
@@ -468,8 +468,8 @@ func TestPlaybackService_PlayNext(t *testing.T) {
 					t.Error("expected track to be set")
 				}
 				state := repo.Get(guildID)
-				if !state.IsPlaying() {
-					t.Error("expected status to be playing")
+				if state.IsIdle() {
+					t.Error("expected playback to be active")
 				}
 			} else {
 				if track != nil {
@@ -480,7 +480,7 @@ func TestPlaybackService_PlayNext(t *testing.T) {
 	}
 }
 
-func TestPlaybackService_PlayNext_ResetsQueueOnPlayFailure(t *testing.T) {
+func TestPlaybackService_PlayNext_PreservesQueuePositionOnPlayFailure(t *testing.T) {
 	guildID := snowflake.ID(1)
 	voiceChannelID := snowflake.ID(4)
 	textChannelID := snowflake.ID(3)
@@ -507,12 +507,13 @@ func TestPlaybackService_PlayNext_ResetsQueueOnPlayFailure(t *testing.T) {
 		return
 	}
 
-	// Verify queue is reset to idle after Play failure
-	if !state.Queue.IsIdle() {
-		t.Error("expected queue to be reset to idle after Play failure")
+	// Verify playback is marked as inactive but queue position is preserved
+	if !state.IsIdle() {
+		t.Error("expected playback to be inactive after Play failure")
 	}
-	if state.Queue.CurrentIndex() != -1 {
-		t.Errorf("expected currentIndex -1, got %d", state.Queue.CurrentIndex())
+	// Queue position should be preserved (index 0, not -1)
+	if state.Queue.CurrentIndex() != 0 {
+		t.Errorf("expected currentIndex 0 (preserved), got %d", state.Queue.CurrentIndex())
 	}
 }
 

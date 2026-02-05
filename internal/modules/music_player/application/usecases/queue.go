@@ -349,6 +349,9 @@ func (q *QueueService) Seek(
 		}
 	}
 
+	// Mark playback as inactive so the event handler will trigger new playback
+	state.StopPlayback()
+
 	// Publish event to trigger playback.
 	// PlayNext will see currentIndex >= 0 (not idle) and play Current() directly,
 	// which is the track we just seeked to.

@@ -20,7 +20,8 @@ type PlayerState struct {
 	GuildID               snowflake.ID
 	VoiceChannelID        snowflake.ID       // Voice channel the bot is connected to
 	NotificationChannelID snowflake.ID       // Text channel for notifications
-	paused                bool               // unexported to prevent direct access
+	playbackActive        bool               // true when audio player is engaged (playing or paused)
+	paused                bool               // true when playback is paused
 	loopMode              LoopMode           // loop mode for playback
 	Queue                 *Queue             // Queue with index-based track management
 	nowPlayingMessage     *NowPlayingMessage // "Now Playing" message info (for deletion)
@@ -37,23 +38,19 @@ func NewPlayerState(guildID, voiceChannelID, notificationChannelID snowflake.ID)
 	}
 }
 
-// IsIdle returns true if no track is currently active (queue not started or past end).
+// IsIdle returns true if playback is not active (audio player not engaged).
+// This is independent of queue position - a track can be selected but not playing.
 func (p *PlayerState) IsIdle() bool {
-	return p.Queue.IsIdle()
-}
-
-// IsPlaying returns true if a track is currently playing (not paused).
-func (p *PlayerState) IsPlaying() bool {
 	p.mu.RLock()
 	defer p.mu.RUnlock()
-	return !p.Queue.IsIdle() && !p.paused
+	return !p.playbackActive
 }
 
 // IsPaused returns true if playback is paused.
 func (p *PlayerState) IsPaused() bool {
 	p.mu.RLock()
 	defer p.mu.RUnlock()
-	return !p.Queue.IsIdle() && p.paused
+	return p.playbackActive && p.paused
 }
 
 // CurrentTrack returns the currently playing track.
@@ -82,11 +79,29 @@ func (p *PlayerState) SetNotificationChannel(channelID snowflake.ID) {
 	p.NotificationChannelID = channelID
 }
 
-// SetPlaying sets the current track (prepends to queue) and clears the paused state.
+// SetPlaying sets the current track (prepends to queue) and starts playback.
 func (p *PlayerState) SetPlaying(track *Track) {
 	p.mu.Lock()
 	defer p.mu.Unlock()
 	p.Queue.Prepend(track)
+	p.playbackActive = true
+	p.paused = false
+}
+
+// StartPlayback marks playback as active. Called when Play() succeeds.
+func (p *PlayerState) StartPlayback() {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	p.playbackActive = true
+	p.paused = false
+}
+
+// StopPlayback marks playback as inactive without changing queue position.
+// Called when Play() fails or playback ends.
+func (p *PlayerState) StopPlayback() {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	p.playbackActive = false
 	p.paused = false
 }
 
@@ -94,7 +109,7 @@ func (p *PlayerState) SetPlaying(track *Track) {
 func (p *PlayerState) SetPaused() {
 	p.mu.Lock()
 	defer p.mu.Unlock()
-	if !p.Queue.IsIdle() {
+	if p.playbackActive {
 		p.paused = true
 	}
 }
@@ -103,16 +118,17 @@ func (p *PlayerState) SetPaused() {
 func (p *PlayerState) SetResumed() {
 	p.mu.Lock()
 	defer p.mu.Unlock()
-	if !p.Queue.IsIdle() {
+	if p.playbackActive {
 		p.paused = false
 	}
 }
 
-// SetStopped advances the queue based on the current loop mode and clears the paused state.
+// SetStopped advances the queue based on the current loop mode and stops playback.
 func (p *PlayerState) SetStopped() {
 	p.mu.Lock()
 	defer p.mu.Unlock()
 	p.Queue.Advance(p.loopMode)
+	p.playbackActive = false
 	p.paused = false
 }
 

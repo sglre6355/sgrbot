@@ -85,11 +85,11 @@ func (p *PlaybackService) Pause(ctx context.Context, input PauseInput) error {
 		state.SetNotificationChannel(input.NotificationChannelID)
 	}
 
-	if !state.IsPlaying() {
-		if state.IsPaused() {
-			return ErrAlreadyPaused
-		}
+	if state.IsIdle() {
 		return ErrNotPlaying
+	}
+	if state.IsPaused() {
+		return ErrAlreadyPaused
 	}
 
 	if err := p.audioPlayer.Pause(ctx, input.GuildID); err != nil {
@@ -113,11 +113,11 @@ func (p *PlaybackService) Resume(ctx context.Context, input ResumeInput) error {
 		state.SetNotificationChannel(input.NotificationChannelID)
 	}
 
-	if !state.IsPaused() {
-		if state.IsPlaying() {
-			return ErrNotPaused
-		}
+	if state.IsIdle() {
 		return ErrNotPlaying
+	}
+	if !state.IsPaused() {
+		return ErrNotPaused
 	}
 
 	if err := p.audioPlayer.Resume(ctx, input.GuildID); err != nil {
@@ -168,6 +168,7 @@ func (p *PlaybackService) Skip(ctx context.Context, input SkipInput) (*SkipOutpu
 		if err := p.audioPlayer.Stop(ctx, input.GuildID); err != nil {
 			return nil, err
 		}
+		state.StopPlayback()
 		return &SkipOutput{
 			SkippedTrack: skippedTrack,
 			NextTrack:    nil,
@@ -216,13 +217,12 @@ func (p *PlaybackService) PlayNext(
 
 	// Play via audio player
 	if err := p.audioPlayer.Play(ctx, guildID, nextTrack); err != nil {
-		// Reset to idle since playback failed to start.
-		// This prevents IsIdle() from returning false when nothing is actually playing.
-		state.Queue.ResetToIdle()
+		// Mark playback as inactive but preserve queue position
+		state.StopPlayback()
 		return nil, err
 	}
 
-	state.SetResumed() // Clear paused flag
+	state.StartPlayback()
 
 	// Publish event for "Now Playing" notification (async)
 	if p.publisher != nil {
