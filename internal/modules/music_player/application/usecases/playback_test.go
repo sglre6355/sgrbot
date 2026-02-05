@@ -308,6 +308,22 @@ func TestPlaybackService_Skip(t *testing.T) {
 			},
 			wantErr: errors.New("stop failed"),
 		},
+		{
+			name: "skip at last track with queue loop wraps to first",
+			input: SkipInput{
+				GuildID: guildID,
+			},
+			setupRepo: func(m *mockRepository) {
+				state := m.createConnectedState(guildID, voiceChannelID, textChannelID)
+				state.Queue.Add(mockTrack("first"))
+				state.Queue.Add(mockTrack("last"))
+				state.Queue.Start()                      // Start at first
+				state.Queue.Advance(domain.LoopModeNone) // Move to last
+				state.StartPlayback()
+				state.SetLoopMode(domain.LoopModeQueue)
+			},
+			wantNextTrack: true,
+		},
 	}
 
 	for _, tt := range tests {

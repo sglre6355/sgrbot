@@ -158,21 +158,26 @@ func (p *PlaybackService) Skip(ctx context.Context, input SkipInput) (*SkipOutpu
 		})
 	}
 
-	// Advance to next track, ignoring loop mode (skip always advances)
-	// We use LoopModeNone to ensure we move forward
+	// Advance to next track, using LoopModeNone to ensure we move forward
+	// (skip should not repeat the same track even in track loop mode)
 	state.Queue.Advance(domain.LoopModeNone)
 
 	// Check if we've reached the end of the queue
 	if state.Queue.IsIdle() {
-		// Stop playback if no more tracks
-		if err := p.audioPlayer.Stop(ctx, input.GuildID); err != nil {
-			return nil, err
+		// If queue loop mode is enabled, wrap to the beginning
+		if state.LoopMode() == domain.LoopModeQueue {
+			state.Queue.Seek(0)
+		} else {
+			// Stop playback if no more tracks and not looping queue
+			if err := p.audioPlayer.Stop(ctx, input.GuildID); err != nil {
+				return nil, err
+			}
+			state.StopPlayback()
+			return &SkipOutput{
+				SkippedTrack: skippedTrack,
+				NextTrack:    nil,
+			}, nil
 		}
-		state.StopPlayback()
-		return &SkipOutput{
-			SkippedTrack: skippedTrack,
-			NextTrack:    nil,
-		}, nil
 	}
 
 	// Play the next track (now the current track after advance)
