@@ -175,6 +175,25 @@ func TestPlayerState_SetStopped(t *testing.T) {
 	}
 }
 
+func TestPlayerState_StopPlayback_ResetsLoopMode(t *testing.T) {
+	state := newTestPlayerState()
+	state.SetPlaying(&Track{ID: "track-1"})
+	state.SetLoopMode(LoopModeQueue)
+
+	if state.LoopMode() != LoopModeQueue {
+		t.Error("expected loop mode to be queue")
+	}
+
+	state.StopPlayback()
+
+	if state.LoopMode() != LoopModeNone {
+		t.Error("expected loop mode to be reset to none after StopPlayback")
+	}
+	if !state.IsIdle() {
+		t.Error("expected IsIdle to return true")
+	}
+}
+
 func TestPlayerState_HasTrack(t *testing.T) {
 	state := newTestPlayerState()
 

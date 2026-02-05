@@ -97,12 +97,13 @@ func (p *PlayerState) StartPlayback() {
 }
 
 // StopPlayback marks playback as inactive without changing queue position.
-// Called when Play() fails or playback ends.
+// Called when Play() fails or playback ends. Also resets loop mode to none.
 func (p *PlayerState) StopPlayback() {
 	p.mu.Lock()
 	defer p.mu.Unlock()
 	p.playbackActive = false
 	p.paused = false
+	p.loopMode = LoopModeNone
 }
 
 // SetPaused sets the paused state to true.
