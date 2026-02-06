@@ -65,6 +65,130 @@ func TestQueue_Add_WasIdleAfterQueueEnds(t *testing.T) {
 	}
 }
 
+func TestQueue_AddMultiple(t *testing.T) {
+	t.Run("add to empty queue returns wasIdle=true", func(t *testing.T) {
+		q := NewQueue()
+		tracks := []*Track{
+			{ID: "track-1", Title: "Song 1"},
+			{ID: "track-2", Title: "Song 2"},
+			{ID: "track-3", Title: "Song 3"},
+		}
+
+		wasIdle := q.AddMultiple(tracks)
+		if !wasIdle {
+			t.Error("expected wasIdle=true for adding to empty queue")
+		}
+		if q.Len() != 3 {
+			t.Errorf("expected length 3, got %d", q.Len())
+		}
+	})
+
+	t.Run("add while playing returns wasIdle=false", func(t *testing.T) {
+		q := NewQueue()
+		q.Add(&Track{ID: "track-0", Title: "Song 0"})
+		q.Start()
+
+		tracks := []*Track{
+			{ID: "track-1", Title: "Song 1"},
+			{ID: "track-2", Title: "Song 2"},
+		}
+
+		wasIdle := q.AddMultiple(tracks)
+		if wasIdle {
+			t.Error("expected wasIdle=false when playing")
+		}
+		if q.Len() != 3 {
+			t.Errorf("expected length 3, got %d", q.Len())
+		}
+	})
+
+	t.Run("add empty slice", func(t *testing.T) {
+		q := NewQueue()
+		tracks := []*Track{}
+
+		wasIdle := q.AddMultiple(tracks)
+		if !wasIdle {
+			t.Error("expected wasIdle=true for empty queue")
+		}
+		if q.Len() != 0 {
+			t.Errorf("expected length 0, got %d", q.Len())
+		}
+	})
+
+	t.Run("add after queue ends returns wasIdle=true", func(t *testing.T) {
+		q := NewQueue()
+		q.Add(&Track{ID: "track-0", Title: "Song 0"})
+		q.Start()
+		q.Advance(LoopModeNone) // past end
+
+		tracks := []*Track{
+			{ID: "track-1", Title: "Song 1"},
+			{ID: "track-2", Title: "Song 2"},
+		}
+
+		wasIdle := q.AddMultiple(tracks)
+		if !wasIdle {
+			t.Error("expected wasIdle=true after queue ended")
+		}
+		if q.Len() != 3 {
+			t.Errorf("expected length 3, got %d", q.Len())
+		}
+	})
+
+	t.Run("tracks are appended in order", func(t *testing.T) {
+		q := NewQueue()
+		q.Add(&Track{ID: "track-0", Title: "Song 0"})
+
+		tracks := []*Track{
+			{ID: "track-1", Title: "Song 1"},
+			{ID: "track-2", Title: "Song 2"},
+		}
+
+		q.AddMultiple(tracks)
+
+		list := q.List()
+		if len(list) != 3 {
+			t.Fatalf("expected 3 tracks, got %d", len(list))
+		}
+		if list[0].ID != "track-0" || list[1].ID != "track-1" || list[2].ID != "track-2" {
+			t.Error("tracks not in expected order")
+		}
+	})
+}
+
+func TestQueue_AddMultiple_Concurrent(t *testing.T) {
+	q := NewQueue()
+	var wg sync.WaitGroup
+
+	// Concurrent AddMultiple calls
+	for i := range 10 {
+		wg.Add(1)
+		go func(batch int) {
+			defer wg.Done()
+			tracks := make([]*Track, 10)
+			for j := range 10 {
+				tracks[j] = &Track{ID: TrackID(strconv.Itoa(batch*10 + j))}
+			}
+			q.AddMultiple(tracks)
+		}(i)
+	}
+
+	// Concurrent reads while adding
+	for range 50 {
+		wg.Go(func() {
+			q.Len()
+			q.List()
+			q.IsIdle()
+		})
+	}
+
+	wg.Wait()
+
+	if q.Len() != 100 {
+		t.Errorf("expected 100 tracks after concurrent adds, got %d", q.Len())
+	}
+}
+
 func TestQueue_Current(t *testing.T) {
 	q := NewQueue()
 	track := &Track{ID: "track-1", Title: "Song 1"}

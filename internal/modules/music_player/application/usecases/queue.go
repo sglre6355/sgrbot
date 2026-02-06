@@ -22,6 +22,19 @@ type QueueAddOutput struct {
 	Position int // 0-indexed position in queue where track was added
 }
 
+// QueueAddMultipleInput contains the input for adding multiple tracks.
+type QueueAddMultipleInput struct {
+	GuildID               snowflake.ID
+	Tracks                []*domain.Track
+	NotificationChannelID snowflake.ID // Optional: updates notification channel if non-zero
+}
+
+// QueueAddMultipleOutput contains the result of adding multiple tracks.
+type QueueAddMultipleOutput struct {
+	StartPosition int // 0-indexed position where first track was added
+	Count         int // Number of tracks added
+}
+
 // QueueListInput contains the input for the QueueList use case.
 type QueueListInput struct {
 	GuildID               snowflake.ID
@@ -133,6 +146,47 @@ func (q *QueueService) Add(_ context.Context, input QueueAddInput) (*QueueAddOut
 
 	return &QueueAddOutput{
 		Position: position,
+	}, nil
+}
+
+// AddMultiple adds multiple tracks to the queue atomically.
+// Publishes a single TrackEnqueuedEvent for the first track to trigger playback if idle.
+func (q *QueueService) AddMultiple(
+	_ context.Context,
+	input QueueAddMultipleInput,
+) (*QueueAddMultipleOutput, error) {
+	if len(input.Tracks) == 0 {
+		return &QueueAddMultipleOutput{
+			StartPosition: 0,
+			Count:         0,
+		}, nil
+	}
+
+	state := q.repo.Get(input.GuildID)
+	if state == nil {
+		return nil, ErrNotConnected
+	}
+
+	// Update notification channel if provided
+	if input.NotificationChannelID != 0 {
+		state.SetNotificationChannel(input.NotificationChannelID)
+	}
+
+	startPosition := state.Queue.Len()
+	wasIdle := state.Queue.AddMultiple(input.Tracks)
+
+	// Publish single event for the first track - PlaybackEventHandler will start playback if wasIdle
+	if q.publisher != nil {
+		q.publisher.PublishTrackEnqueued(ports.TrackEnqueuedEvent{
+			GuildID: input.GuildID,
+			Track:   input.Tracks[0],
+			WasIdle: wasIdle,
+		})
+	}
+
+	return &QueueAddMultipleOutput{
+		StartPosition: startPosition,
+		Count:         len(input.Tracks),
 	}, nil
 }
 

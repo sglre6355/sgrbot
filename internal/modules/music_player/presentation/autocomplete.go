@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"log/slog"
+	"net/url"
 
 	"github.com/bwmarrin/discordgo"
 	"github.com/disgoorg/snowflake/v2"
@@ -111,7 +112,29 @@ func (h *AutocompleteHandler) HandlePlay(s *discordgo.Session, i *discordgo.Inte
 		return
 	}
 
-	// Search for tracks
+	// Check if query is a URL (potential playlist)
+	if _, err := url.ParseRequestURI(query); err == nil {
+		result, err := h.autocomplete.LoadTracksForAutocomplete(
+			context.Background(),
+			usecases.LoadTracksForAutocompleteInput{
+				Query: query,
+				Limit: 24, // Leave room for playlist option
+			},
+		)
+		if err == nil && result.IsPlaylist && len(result.Tracks) > 0 {
+			choices := buildPlaylistChoices(result)
+			_ = s.InteractionRespond(i.Interaction, &discordgo.InteractionResponse{
+				Type: discordgo.InteractionApplicationCommandAutocompleteResult,
+				Data: &discordgo.InteractionResponseData{
+					Choices: choices,
+				},
+			})
+			return
+		}
+		// If not a playlist or error, fall through to regular search
+	}
+
+	// Search for tracks (regular search behavior)
 	result, err := h.autocomplete.SearchTracks(context.Background(), usecases.SearchTracksInput{
 		Query: query,
 		Limit: 10,
@@ -130,7 +153,7 @@ func (h *AutocompleteHandler) HandlePlay(s *discordgo.Session, i *discordgo.Inte
 	for _, track := range result.Tracks {
 		// Use the URI as the value so it can be played directly
 		choices = append(choices, &discordgo.ApplicationCommandOptionChoice{
-			Name:  truncate(fmt.Sprintf("%s - %s", track.Title, track.Artist), 100),
+			Name:  truncate(fmt.Sprintf("🎵 %s - %s", track.Title, track.Artist), 100),
 			Value: track.URI,
 		})
 	}
@@ -141,6 +164,32 @@ func (h *AutocompleteHandler) HandlePlay(s *discordgo.Session, i *discordgo.Inte
 			Choices: choices,
 		},
 	})
+}
+
+// buildPlaylistChoices builds autocomplete choices for a playlist result.
+func buildPlaylistChoices(
+	result *usecases.LoadTracksForAutocompleteOutput,
+) []*discordgo.ApplicationCommandOptionChoice {
+	choices := make([]*discordgo.ApplicationCommandOptionChoice, 0, len(result.Tracks)+1)
+
+	// First choice: entire playlist
+	choices = append(choices, &discordgo.ApplicationCommandOptionChoice{
+		Name: truncate(
+			fmt.Sprintf("📋 %s (%d tracks)", result.PlaylistName, result.TrackCount),
+			100,
+		),
+		Value: result.PlaylistURL,
+	})
+
+	// Remaining choices: individual tracks
+	for i, track := range result.Tracks {
+		choices = append(choices, &discordgo.ApplicationCommandOptionChoice{
+			Name:  truncate(fmt.Sprintf("🎵 %d. %s - %s", i+1, track.Title, track.Artist), 100),
+			Value: track.URI,
+		})
+	}
+
+	return choices
 }
 
 func truncate(s string, maxLen int) string {

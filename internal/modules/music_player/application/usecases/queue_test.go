@@ -1085,3 +1085,183 @@ func TestQueueService_Seek(t *testing.T) {
 		})
 	}
 }
+
+func TestQueueService_AddMultiple(t *testing.T) {
+	guildID := snowflake.ID(1)
+	voiceChannelID := snowflake.ID(4)
+	notificationChannelID := snowflake.ID(3)
+
+	tests := []struct {
+		name              string
+		input             QueueAddMultipleInput
+		setupRepo         func(*mockRepository)
+		wantErr           error
+		wantStartPosition int
+		wantCount         int
+		wantWasIdle       bool
+	}{
+		{
+			name: "add multiple tracks to empty queue",
+			input: QueueAddMultipleInput{
+				GuildID:               guildID,
+				NotificationChannelID: notificationChannelID,
+				Tracks: []*Track{
+					mockTrack("track-1"),
+					mockTrack("track-2"),
+					mockTrack("track-3"),
+				},
+			},
+			setupRepo: func(m *mockRepository) {
+				m.createConnectedState(guildID, voiceChannelID, notificationChannelID)
+			},
+			wantStartPosition: 0,
+			wantCount:         3,
+			wantWasIdle:       true,
+		},
+		{
+			name: "add multiple tracks to playing queue",
+			input: QueueAddMultipleInput{
+				GuildID:               guildID,
+				NotificationChannelID: notificationChannelID,
+				Tracks: []*Track{
+					mockTrack("new-1"),
+					mockTrack("new-2"),
+				},
+			},
+			setupRepo: func(m *mockRepository) {
+				state := m.createConnectedState(guildID, voiceChannelID, notificationChannelID)
+				state.SetPlaying(mockTrack("current"))
+				state.Queue.Add(mockTrack("queued-1"))
+			},
+			wantStartPosition: 2, // after current + queued-1
+			wantCount:         2,
+			wantWasIdle:       false,
+		},
+		{
+			name: "add empty tracks slice",
+			input: QueueAddMultipleInput{
+				GuildID:               guildID,
+				NotificationChannelID: notificationChannelID,
+				Tracks:                []*Track{},
+			},
+			setupRepo: func(m *mockRepository) {
+				m.createConnectedState(guildID, voiceChannelID, notificationChannelID)
+			},
+			wantStartPosition: 0,
+			wantCount:         0,
+			wantWasIdle:       false, // no event published for empty
+		},
+		{
+			name: "not connected",
+			input: QueueAddMultipleInput{
+				GuildID: guildID,
+				Tracks:  []*Track{mockTrack("track-1")},
+			},
+			wantErr: ErrNotConnected,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			repo := newMockRepository()
+			publisher := &mockEventPublisher{}
+
+			if tt.setupRepo != nil {
+				tt.setupRepo(repo)
+			}
+
+			service := NewQueueService(repo, publisher)
+			output, err := service.AddMultiple(context.Background(), tt.input)
+
+			if tt.wantErr != nil {
+				if err == nil {
+					t.Errorf("expected error %v, got nil", tt.wantErr)
+					return
+				}
+				if err != tt.wantErr {
+					t.Errorf("expected error %v, got %v", tt.wantErr, err)
+				}
+				return
+			}
+
+			if err != nil {
+				t.Errorf("unexpected error: %v", err)
+				return
+			}
+
+			if output.StartPosition != tt.wantStartPosition {
+				t.Errorf("StartPosition = %d, want %d", output.StartPosition, tt.wantStartPosition)
+			}
+
+			if output.Count != tt.wantCount {
+				t.Errorf("Count = %d, want %d", output.Count, tt.wantCount)
+			}
+
+			// Check event publishing
+			if tt.wantCount == 0 {
+				// Empty tracks should not publish event
+				if len(publisher.trackEnqueued) != 0 {
+					t.Errorf(
+						"expected 0 events for empty tracks, got %d",
+						len(publisher.trackEnqueued),
+					)
+				}
+			} else {
+				// Should publish exactly 1 event for the first track
+				if len(publisher.trackEnqueued) != 1 {
+					t.Fatalf("expected 1 TrackEnqueuedEvent, got %d", len(publisher.trackEnqueued))
+				}
+				event := publisher.trackEnqueued[0]
+				if event.GuildID != tt.input.GuildID {
+					t.Errorf("event GuildID = %d, want %d", event.GuildID, tt.input.GuildID)
+				}
+				if event.WasIdle != tt.wantWasIdle {
+					t.Errorf("event WasIdle = %v, want %v", event.WasIdle, tt.wantWasIdle)
+				}
+				// Event should contain the first track
+				if event.Track.ID != tt.input.Tracks[0].ID {
+					t.Errorf("event Track.ID = %q, want %q", event.Track.ID, tt.input.Tracks[0].ID)
+				}
+			}
+		})
+	}
+}
+
+func TestQueueService_AddMultiple_TracksOrder(t *testing.T) {
+	guildID := snowflake.ID(1)
+	voiceChannelID := snowflake.ID(4)
+	notificationChannelID := snowflake.ID(3)
+
+	repo := newMockRepository()
+	publisher := &mockEventPublisher{}
+
+	state := repo.createConnectedState(guildID, voiceChannelID, notificationChannelID)
+	state.SetPlaying(mockTrack("current"))
+
+	service := NewQueueService(repo, publisher)
+	_, err := service.AddMultiple(context.Background(), QueueAddMultipleInput{
+		GuildID:               guildID,
+		NotificationChannelID: notificationChannelID,
+		Tracks: []*Track{
+			mockTrack("new-1"),
+			mockTrack("new-2"),
+			mockTrack("new-3"),
+		},
+	})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	// Verify tracks are in correct order
+	tracks := state.Queue.List()
+	if len(tracks) != 4 {
+		t.Fatalf("expected 4 tracks in queue, got %d", len(tracks))
+	}
+
+	expectedOrder := []string{"current", "new-1", "new-2", "new-3"}
+	for i, expected := range expectedOrder {
+		if string(tracks[i].ID) != expected {
+			t.Errorf("track[%d].ID = %q, want %q", i, tracks[i].ID, expected)
+		}
+	}
+}

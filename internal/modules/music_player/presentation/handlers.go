@@ -148,8 +148,8 @@ func (h *Handlers) HandlePlay(
 		return respondError(r, err.Error())
 	}
 
-	// 2. Load track via TrackLoaderService
-	trackOutput, err := h.trackLoader.LoadTrack(ctx, usecases.LoadTrackInput{
+	// 2. Load tracks via TrackLoaderService (may be single track or playlist)
+	tracksOutput, err := h.trackLoader.LoadTracks(ctx, usecases.LoadTracksInput{
 		Query:              query,
 		RequesterID:        userID,
 		RequesterName:      getDisplayName(i.Member),
@@ -159,18 +159,31 @@ func (h *Handlers) HandlePlay(
 		return respondError(r, err.Error())
 	}
 
-	// 3. Add to queue (auto-starts playback if CurrentTrack is nil)
-	_, err = h.queue.Add(ctx, usecases.QueueAddInput{
+	// 3. Add to queue based on result type
+	if len(tracksOutput.Tracks) == 1 {
+		// Single track - use existing Add method
+		_, err = h.queue.Add(ctx, usecases.QueueAddInput{
+			GuildID:               guildID,
+			Track:                 tracksOutput.Tracks[0],
+			NotificationChannelID: notificationChannelID,
+		})
+		if err != nil {
+			return respondError(r, err.Error())
+		}
+		return respondQueueAdded(r, tracksOutput.Tracks[0])
+	}
+
+	// Playlist - use AddMultiple method
+	output, err := h.queue.AddMultiple(ctx, usecases.QueueAddMultipleInput{
 		GuildID:               guildID,
-		Track:                 trackOutput.Track,
+		Tracks:                tracksOutput.Tracks,
 		NotificationChannelID: notificationChannelID,
 	})
 	if err != nil {
 		return respondError(r, err.Error())
 	}
 
-	// Always respond with "Added to Queue" - "Now Playing" is sent as a separate message
-	return respondQueueAdded(r, trackOutput.Track)
+	return respondPlaylistAdded(r, tracksOutput.PlaylistName, output.Count)
 }
 
 // HandleStop handles the /stop command.
@@ -778,6 +791,26 @@ func respondQueueAdded(r bot.Responder, track *usecases.Track) error {
 	} else {
 		description = fmt.Sprintf("Added **%s** to the queue.", track.Title)
 	}
+
+	return r.Respond(&discordgo.InteractionResponse{
+		Type: discordgo.InteractionResponseChannelMessageWithSource,
+		Data: &discordgo.InteractionResponseData{
+			Embeds: []*discordgo.MessageEmbed{
+				{
+					Description: description,
+					Color:       colorSuccess,
+				},
+			},
+		},
+	})
+}
+
+func respondPlaylistAdded(r bot.Responder, playlistName string, trackCount int) error {
+	description := fmt.Sprintf(
+		"Added **%d tracks** from playlist **%s** to the queue.",
+		trackCount,
+		playlistName,
+	)
 
 	return r.Respond(&discordgo.InteractionResponse{
 		Type: discordgo.InteractionResponseChannelMessageWithSource,
