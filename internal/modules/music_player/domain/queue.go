@@ -30,6 +30,18 @@ func (q *Queue) Add(track *Track) (wasIdle bool) {
 	return wasIdle
 }
 
+// AddMultiple adds multiple tracks to the end of the queue atomically.
+// Returns true if the player was idle (no current track), to trigger auto-play.
+// This is more efficient than calling Add() multiple times as it only locks once.
+func (q *Queue) AddMultiple(tracks []*Track) (wasIdle bool) {
+	q.mu.Lock()
+	defer q.mu.Unlock()
+
+	wasIdle = q.currentIndex < 0 || q.currentIndex >= len(q.tracks)
+	q.tracks = append(q.tracks, tracks...)
+	return wasIdle
+}
+
 // Current returns the track at currentIndex, or nil if no current track.
 func (q *Queue) Current() *Track {
 	q.mu.RLock()

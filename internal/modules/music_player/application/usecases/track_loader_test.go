@@ -8,6 +8,7 @@ import (
 
 	"github.com/disgoorg/snowflake/v2"
 	"github.com/sglre6355/sgrbot/internal/modules/music_player/application/ports"
+	"github.com/sglre6355/sgrbot/internal/modules/music_player/domain"
 )
 
 func TestTrackLoaderService_LoadTrack(t *testing.T) {
@@ -152,5 +153,239 @@ func TestTrackLoaderService_LoadTrack(t *testing.T) {
 				t.Error("expected Track.ID to be set")
 			}
 		})
+	}
+}
+
+func TestTrackLoaderService_LoadTracks(t *testing.T) {
+	requesterID := snowflake.ID(123)
+	requesterName := "TestUser"
+	requesterAvatarURL := "https://example.com/avatar.jpg"
+
+	singleTrackResult := &ports.LoadResult{
+		Type: ports.LoadTypeTrack,
+		Tracks: []*ports.TrackInfo{
+			{
+				Identifier: "track-1",
+				Encoded:    "encoded-1",
+				Title:      "Single Track",
+				Artist:     "Artist 1",
+				Duration:   3 * time.Minute,
+				URI:        "https://example.com/track1",
+				SourceName: "youtube",
+			},
+		},
+	}
+
+	searchResult := &ports.LoadResult{
+		Type: ports.LoadTypeSearch,
+		Tracks: []*ports.TrackInfo{
+			{Identifier: "search-1", Title: "Search Result 1"},
+			{Identifier: "search-2", Title: "Search Result 2"},
+			{Identifier: "search-3", Title: "Search Result 3"},
+		},
+	}
+
+	playlistResult := &ports.LoadResult{
+		Type:       ports.LoadTypePlaylist,
+		PlaylistID: "My Awesome Playlist",
+		Tracks: []*ports.TrackInfo{
+			{Identifier: "playlist-1", Title: "Playlist Track 1", Artist: "Artist 1"},
+			{Identifier: "playlist-2", Title: "Playlist Track 2", Artist: "Artist 2"},
+			{Identifier: "playlist-3", Title: "Playlist Track 3", Artist: "Artist 3"},
+		},
+	}
+
+	tests := []struct {
+		name             string
+		input            LoadTracksInput
+		setupResolver    func(*mockTrackResolver)
+		wantErr          error
+		wantTrackCount   int
+		wantIsPlaylist   bool
+		wantPlaylistName string
+		wantFirstTitle   string
+	}{
+		{
+			name: "single track result returns one track",
+			input: LoadTracksInput{
+				Query:              "https://youtube.com/watch?v=123",
+				RequesterID:        requesterID,
+				RequesterName:      requesterName,
+				RequesterAvatarURL: requesterAvatarURL,
+			},
+			setupResolver: func(m *mockTrackResolver) {
+				m.loadResult = singleTrackResult
+			},
+			wantTrackCount: 1,
+			wantIsPlaylist: false,
+			wantFirstTitle: "Single Track",
+		},
+		{
+			name: "search result returns only first track",
+			input: LoadTracksInput{
+				Query:       "search query",
+				RequesterID: requesterID,
+			},
+			setupResolver: func(m *mockTrackResolver) {
+				m.loadResult = searchResult
+			},
+			wantTrackCount: 1,
+			wantIsPlaylist: false,
+			wantFirstTitle: "Search Result 1",
+		},
+		{
+			name: "playlist result returns all tracks",
+			input: LoadTracksInput{
+				Query:              "https://youtube.com/playlist?list=abc",
+				RequesterID:        requesterID,
+				RequesterName:      requesterName,
+				RequesterAvatarURL: requesterAvatarURL,
+			},
+			setupResolver: func(m *mockTrackResolver) {
+				m.loadResult = playlistResult
+			},
+			wantTrackCount:   3,
+			wantIsPlaylist:   true,
+			wantPlaylistName: "My Awesome Playlist",
+			wantFirstTitle:   "Playlist Track 1",
+		},
+		{
+			name: "no results - empty type",
+			input: LoadTracksInput{
+				Query:       "nonexistent",
+				RequesterID: requesterID,
+			},
+			setupResolver: func(m *mockTrackResolver) {
+				m.loadResult = &ports.LoadResult{Type: ports.LoadTypeEmpty}
+			},
+			wantErr: ErrNoResults,
+		},
+		{
+			name: "no results - error type",
+			input: LoadTracksInput{
+				Query:       "error",
+				RequesterID: requesterID,
+			},
+			setupResolver: func(m *mockTrackResolver) {
+				m.loadResult = &ports.LoadResult{Type: ports.LoadTypeError}
+			},
+			wantErr: ErrNoResults,
+		},
+		{
+			name: "resolver error",
+			input: LoadTracksInput{
+				Query:       "test",
+				RequesterID: requesterID,
+			},
+			setupResolver: func(m *mockTrackResolver) {
+				m.loadErr = errors.New("connection failed")
+			},
+			wantErr: errors.New("connection failed"),
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			resolver := &mockTrackResolver{}
+			if tt.setupResolver != nil {
+				tt.setupResolver(resolver)
+			}
+
+			service := NewTrackLoaderService(resolver)
+			output, err := service.LoadTracks(context.Background(), tt.input)
+
+			if tt.wantErr != nil {
+				if err == nil {
+					t.Errorf("expected error %v, got nil", tt.wantErr)
+					return
+				}
+				if err.Error() != tt.wantErr.Error() {
+					t.Errorf("expected error %v, got %v", tt.wantErr, err)
+				}
+				return
+			}
+
+			if err != nil {
+				t.Errorf("unexpected error: %v", err)
+				return
+			}
+
+			if len(output.Tracks) != tt.wantTrackCount {
+				t.Errorf("got %d tracks, want %d", len(output.Tracks), tt.wantTrackCount)
+			}
+
+			if output.IsPlaylist != tt.wantIsPlaylist {
+				t.Errorf("IsPlaylist = %v, want %v", output.IsPlaylist, tt.wantIsPlaylist)
+			}
+
+			if output.PlaylistName != tt.wantPlaylistName {
+				t.Errorf("PlaylistName = %q, want %q", output.PlaylistName, tt.wantPlaylistName)
+			}
+
+			if len(output.Tracks) > 0 && output.Tracks[0].Title != tt.wantFirstTitle {
+				t.Errorf(
+					"first track title = %q, want %q",
+					output.Tracks[0].Title,
+					tt.wantFirstTitle,
+				)
+			}
+		})
+	}
+}
+
+func TestTrackLoaderService_LoadTracks_RequesterInfo(t *testing.T) {
+	requesterID := snowflake.ID(456)
+	requesterName := "TestUser"
+	requesterAvatarURL := "https://example.com/avatar.jpg"
+
+	resolver := &mockTrackResolver{
+		loadResult: &ports.LoadResult{
+			Type:       ports.LoadTypePlaylist,
+			PlaylistID: "Test Playlist",
+			Tracks: []*ports.TrackInfo{
+				{Identifier: "track-1", Title: "Track 1"},
+				{Identifier: "track-2", Title: "Track 2"},
+			},
+		},
+	}
+
+	service := NewTrackLoaderService(resolver)
+	output, err := service.LoadTracks(context.Background(), LoadTracksInput{
+		Query:              "https://example.com/playlist",
+		RequesterID:        requesterID,
+		RequesterName:      requesterName,
+		RequesterAvatarURL: requesterAvatarURL,
+	})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	// Verify requester info is set on all tracks
+	for i, track := range output.Tracks {
+		if track.RequesterID != requesterID {
+			t.Errorf("track %d: RequesterID = %d, want %d", i, track.RequesterID, requesterID)
+		}
+		if track.RequesterName != requesterName {
+			t.Errorf("track %d: RequesterName = %q, want %q", i, track.RequesterName, requesterName)
+		}
+		if track.RequesterAvatarURL != requesterAvatarURL {
+			t.Errorf(
+				"track %d: RequesterAvatarURL = %q, want %q",
+				i,
+				track.RequesterAvatarURL,
+				requesterAvatarURL,
+			)
+		}
+		if track.ID == "" {
+			t.Errorf("track %d: ID should be set", i)
+		}
+		if track.ID != domain.TrackID(resolver.loadResult.Tracks[i].Identifier) {
+			t.Errorf(
+				"track %d: ID = %q, want %q",
+				i,
+				track.ID,
+				resolver.loadResult.Tracks[i].Identifier,
+			)
+		}
 	}
 }
