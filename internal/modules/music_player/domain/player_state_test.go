@@ -24,14 +24,18 @@ func TestNewPlayerState(t *testing.T) {
 
 	state := NewPlayerState(guildID, voiceID, notifyID)
 
-	if state.GuildID != guildID {
-		t.Errorf("expected GuildID %d, got %d", guildID, state.GuildID)
+	if state.GetGuildID() != guildID {
+		t.Errorf("expected GuildID %d, got %d", guildID, state.GetGuildID())
 	}
-	if state.VoiceChannelID != voiceID {
-		t.Errorf("expected VoiceChannelID %d, got %d", voiceID, state.VoiceChannelID)
+	if state.GetVoiceChannelID() != voiceID {
+		t.Errorf("expected VoiceChannelID %d, got %d", voiceID, state.GetVoiceChannelID())
 	}
-	if state.NotificationChannelID != notifyID {
-		t.Errorf("expected NotificationChannelID %d, got %d", notifyID, state.NotificationChannelID)
+	if state.GetNotificationChannelID() != notifyID {
+		t.Errorf(
+			"expected NotificationChannelID %d, got %d",
+			notifyID,
+			state.GetNotificationChannelID(),
+		)
 	}
 	if state.IsPaused() {
 		t.Error("expected not to be paused")
@@ -74,28 +78,28 @@ func TestPlayerState_StatusMethods(t *testing.T) {
 	}
 }
 
-func TestPlayerState_SetVoiceChannel(t *testing.T) {
+func TestPlayerState_SetVoiceChannelID(t *testing.T) {
 	state := newTestPlayerState()
 	newVoiceID := snowflake.ID(999)
 
-	state.SetVoiceChannel(newVoiceID)
+	state.SetVoiceChannelID(newVoiceID)
 
-	if state.VoiceChannelID != newVoiceID {
-		t.Errorf("expected VoiceChannelID %d, got %d", newVoiceID, state.VoiceChannelID)
+	if state.GetVoiceChannelID() != newVoiceID {
+		t.Errorf("expected VoiceChannelID %d, got %d", newVoiceID, state.GetVoiceChannelID())
 	}
 }
 
-func TestPlayerState_SetNotificationChannel(t *testing.T) {
+func TestPlayerState_SetNotificationChannelID(t *testing.T) {
 	state := newTestPlayerState()
 	newNotifyID := snowflake.ID(888)
 
-	state.SetNotificationChannel(newNotifyID)
+	state.SetNotificationChannelID(newNotifyID)
 
-	if state.NotificationChannelID != newNotifyID {
+	if state.GetNotificationChannelID() != newNotifyID {
 		t.Errorf(
 			"expected NotificationChannelID %d, got %d",
 			newNotifyID,
-			state.NotificationChannelID,
+			state.GetNotificationChannelID(),
 		)
 	}
 }

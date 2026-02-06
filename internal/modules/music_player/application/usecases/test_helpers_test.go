@@ -36,7 +36,7 @@ func (m *mockRepository) Get(guildID snowflake.ID) *domain.PlayerState {
 }
 
 func (m *mockRepository) Save(state *domain.PlayerState) {
-	m.states[state.GuildID] = state
+	m.states[state.GetGuildID()] = state
 }
 
 // createConnectedState creates a PlayerState with the given IDs and saves it to the mock repository.

@@ -74,8 +74,8 @@ func (v *VoiceChannelService) Join(ctx context.Context, input JoinInput) (*JoinO
 	}
 
 	// Check if already connected to the same channel - just update notification channel
-	if existingState != nil && existingState.VoiceChannelID == voiceChannelID {
-		existingState.SetNotificationChannel(input.NotificationChannelID)
+	if existingState != nil && existingState.GetVoiceChannelID() == voiceChannelID {
+		existingState.SetNotificationChannelID(input.NotificationChannelID)
 		return &JoinOutput{VoiceChannelID: voiceChannelID}, nil
 	}
 
@@ -86,8 +86,8 @@ func (v *VoiceChannelService) Join(ctx context.Context, input JoinInput) (*JoinO
 
 	if existingState != nil {
 		// Moving channels - preserve queue, update channel IDs
-		existingState.SetVoiceChannel(voiceChannelID)
-		existingState.SetNotificationChannel(input.NotificationChannelID)
+		existingState.SetVoiceChannelID(voiceChannelID)
+		existingState.SetNotificationChannelID(input.NotificationChannelID)
 	} else {
 		// Fresh connection - create new state
 		state := domain.NewPlayerState(input.GuildID, voiceChannelID, input.NotificationChannelID)
@@ -126,7 +126,7 @@ func (v *VoiceChannelService) HandleBotVoiceStateChange(input BotVoiceStateChang
 
 	// Bot was moved to a different channel
 	if *input.NewChannelID != state.GetVoiceChannelID() {
-		state.SetVoiceChannel(*input.NewChannelID)
+		state.SetVoiceChannelID(*input.NewChannelID)
 	}
 }
 

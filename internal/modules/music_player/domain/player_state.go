@@ -17,9 +17,9 @@ type NowPlayingMessage struct {
 // PlayerState represents the state of a music player for a guild.
 type PlayerState struct {
 	mu                    sync.RWMutex
-	GuildID               snowflake.ID
-	VoiceChannelID        snowflake.ID       // Voice channel the bot is connected to
-	NotificationChannelID snowflake.ID       // Text channel for notifications
+	guildID               snowflake.ID
+	voiceChannelID        snowflake.ID       // Voice channel the bot is connected to
+	notificationChannelID snowflake.ID       // Text channel for notifications
 	playbackActive        bool               // true when audio player is engaged (playing or paused)
 	paused                bool               // true when playback is paused
 	loopMode              LoopMode           // loop mode for playback
@@ -30,9 +30,9 @@ type PlayerState struct {
 // NewPlayerState creates a new PlayerState for the given guild and channels.
 func NewPlayerState(guildID, voiceChannelID, notificationChannelID snowflake.ID) *PlayerState {
 	return &PlayerState{
-		GuildID:               guildID,
-		VoiceChannelID:        voiceChannelID,
-		NotificationChannelID: notificationChannelID,
+		guildID:               guildID,
+		voiceChannelID:        voiceChannelID,
+		notificationChannelID: notificationChannelID,
 		loopMode:              LoopModeNone,
 		Queue:                 NewQueue(),
 	}
@@ -58,25 +58,40 @@ func (p *PlayerState) CurrentTrack() *Track {
 	return p.Queue.Current()
 }
 
-// SetVoiceChannel updates the voice channel ID.
-func (p *PlayerState) SetVoiceChannel(channelID snowflake.ID) {
-	p.mu.Lock()
-	defer p.mu.Unlock()
-	p.VoiceChannelID = channelID
+// GetGuildID returns the guild ID.
+func (p *PlayerState) GetGuildID() snowflake.ID {
+	// No read mutex: guildID must not be modified after initialization
+	return p.guildID
 }
+
+// No SetGuildID method: guildID must not be modified after initialization
 
 // GetVoiceChannelID returns the current voice channel ID.
 func (p *PlayerState) GetVoiceChannelID() snowflake.ID {
 	p.mu.RLock()
 	defer p.mu.RUnlock()
-	return p.VoiceChannelID
+	return p.voiceChannelID
 }
 
-// SetNotificationChannel updates the notification channel ID.
-func (p *PlayerState) SetNotificationChannel(channelID snowflake.ID) {
+// SetVoiceChannelID updates the voice channel ID.
+func (p *PlayerState) SetVoiceChannelID(channelID snowflake.ID) {
 	p.mu.Lock()
 	defer p.mu.Unlock()
-	p.NotificationChannelID = channelID
+	p.voiceChannelID = channelID
+}
+
+// GetNotificationChannelID returns the current voice channel ID.
+func (p *PlayerState) GetNotificationChannelID() snowflake.ID {
+	p.mu.RLock()
+	defer p.mu.RUnlock()
+	return p.notificationChannelID
+}
+
+// SetNotificationChannelID updates the notification channel ID.
+func (p *PlayerState) SetNotificationChannelID(channelID snowflake.ID) {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	p.notificationChannelID = channelID
 }
 
 // SetPlaying sets the current track (prepends to queue) and starts playback.

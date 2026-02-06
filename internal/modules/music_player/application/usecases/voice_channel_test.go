@@ -149,11 +149,11 @@ func TestVoiceChannelService_Join(t *testing.T) {
 			if state == nil {
 				t.Fatal("expected state to exist")
 			}
-			if state.VoiceChannelID != tt.wantVoiceChannelID {
+			if state.GetVoiceChannelID() != tt.wantVoiceChannelID {
 				t.Errorf(
 					"expected state channel ID %d, got %d",
 					tt.wantVoiceChannelID,
-					state.VoiceChannelID,
+					state.GetVoiceChannelID(),
 				)
 			}
 		})
@@ -199,11 +199,11 @@ func TestVoiceChannelService_Join_PreservesQueueOnMove(t *testing.T) {
 	}
 
 	// Verify voice channel was updated
-	if updatedState.VoiceChannelID != newVoiceChannel {
+	if updatedState.GetVoiceChannelID() != newVoiceChannel {
 		t.Errorf(
 			"expected state channel ID %d, got %d",
 			newVoiceChannel,
-			updatedState.VoiceChannelID,
+			updatedState.GetVoiceChannelID(),
 		)
 	}
 

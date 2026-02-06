@@ -33,7 +33,7 @@ func (r *MemoryRepository) Save(state *domain.PlayerState) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 
-	r.states[state.GuildID] = state
+	r.states[state.GetGuildID()] = state
 }
 
 // Delete removes the PlayerState for the given guild.

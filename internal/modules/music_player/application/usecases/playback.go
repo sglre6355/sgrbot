@@ -82,7 +82,7 @@ func (p *PlaybackService) Pause(ctx context.Context, input PauseInput) error {
 
 	// Update notification channel if provided
 	if input.NotificationChannelID != 0 {
-		state.SetNotificationChannel(input.NotificationChannelID)
+		state.SetNotificationChannelID(input.NotificationChannelID)
 	}
 
 	if state.IsIdle() {
@@ -110,7 +110,7 @@ func (p *PlaybackService) Resume(ctx context.Context, input ResumeInput) error {
 
 	// Update notification channel if provided
 	if input.NotificationChannelID != 0 {
-		state.SetNotificationChannel(input.NotificationChannelID)
+		state.SetNotificationChannelID(input.NotificationChannelID)
 	}
 
 	if state.IsIdle() {
@@ -139,7 +139,7 @@ func (p *PlaybackService) Skip(ctx context.Context, input SkipInput) (*SkipOutpu
 
 	// Update notification channel if provided
 	if input.NotificationChannelID != 0 {
-		state.SetNotificationChannel(input.NotificationChannelID)
+		state.SetNotificationChannelID(input.NotificationChannelID)
 	}
 
 	if !state.HasTrack() {
@@ -234,7 +234,7 @@ func (p *PlaybackService) PlayNext(
 		p.publisher.PublishPlaybackStarted(domain.PlaybackStartedEvent{
 			GuildID:               guildID,
 			Track:                 nextTrack,
-			NotificationChannelID: state.NotificationChannelID,
+			NotificationChannelID: state.GetNotificationChannelID(),
 		})
 	}
 
@@ -250,7 +250,7 @@ func (p *PlaybackService) SetLoopMode(ctx context.Context, input SetLoopModeInpu
 
 	// Update notification channel if provided
 	if input.NotificationChannelID != 0 {
-		state.SetNotificationChannel(input.NotificationChannelID)
+		state.SetNotificationChannelID(input.NotificationChannelID)
 	}
 
 	state.SetLoopMode(parseLoopMode(input.Mode))
@@ -282,7 +282,7 @@ func (p *PlaybackService) CycleLoopMode(
 
 	// Update notification channel if provided
 	if input.NotificationChannelID != 0 {
-		state.SetNotificationChannel(input.NotificationChannelID)
+		state.SetNotificationChannelID(input.NotificationChannelID)
 	}
 
 	newMode := state.CycleLoopMode()

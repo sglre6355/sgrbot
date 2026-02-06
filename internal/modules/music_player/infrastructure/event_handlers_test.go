@@ -27,7 +27,7 @@ func (m *mockRepository) Get(guildID snowflake.ID) *domain.PlayerState {
 }
 
 func (m *mockRepository) Save(state *domain.PlayerState) {
-	m.states[state.GuildID] = state
+	m.states[state.GetGuildID()] = state
 }
 
 func (m *mockRepository) Delete(guildID snowflake.ID) {

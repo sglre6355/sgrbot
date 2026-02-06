@@ -127,7 +127,7 @@ func (q *QueueService) Add(_ context.Context, input QueueAddInput) (*QueueAddOut
 
 	// Update notification channel if provided
 	if input.NotificationChannelID != 0 {
-		state.SetNotificationChannel(input.NotificationChannelID)
+		state.SetNotificationChannelID(input.NotificationChannelID)
 	}
 
 	wasIdle := state.IsIdle()
@@ -169,7 +169,7 @@ func (q *QueueService) AddMultiple(
 
 	// Update notification channel if provided
 	if input.NotificationChannelID != 0 {
-		state.SetNotificationChannel(input.NotificationChannelID)
+		state.SetNotificationChannelID(input.NotificationChannelID)
 	}
 
 	startPosition := state.Queue.Len()
@@ -199,7 +199,7 @@ func (q *QueueService) List(input QueueListInput) (*QueueListOutput, error) {
 
 	// Update notification channel if provided
 	if input.NotificationChannelID != 0 {
-		state.SetNotificationChannel(input.NotificationChannelID)
+		state.SetNotificationChannelID(input.NotificationChannelID)
 	}
 
 	// Validate and set defaults
@@ -266,7 +266,7 @@ func (q *QueueService) Remove(input QueueRemoveInput) (*QueueRemoveOutput, error
 
 	// Update notification channel if provided
 	if input.NotificationChannelID != 0 {
-		state.SetNotificationChannel(input.NotificationChannelID)
+		state.SetNotificationChannelID(input.NotificationChannelID)
 	}
 
 	if state.Queue.Len() == 0 {
@@ -304,7 +304,7 @@ func (q *QueueService) Clear(input QueueClearInput) (*QueueClearOutput, error) {
 
 	// Update notification channel if provided
 	if input.NotificationChannelID != 0 {
-		state.SetNotificationChannel(input.NotificationChannelID)
+		state.SetNotificationChannelID(input.NotificationChannelID)
 	}
 
 	var count int
@@ -378,7 +378,7 @@ func (q *QueueService) Seek(
 
 	// Update notification channel if provided
 	if input.NotificationChannelID != 0 {
-		state.SetNotificationChannel(input.NotificationChannelID)
+		state.SetNotificationChannelID(input.NotificationChannelID)
 	}
 
 	if state.Queue.Len() == 0 {
