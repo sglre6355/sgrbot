@@ -1,9 +1,8 @@
-package events
+package infrastructure
 
 import (
 	"context"
 	"log/slog"
-	"sync"
 
 	"github.com/disgoorg/snowflake/v2"
 	"github.com/sglre6355/sgrbot/internal/modules/music_player/application/ports"
@@ -17,15 +16,13 @@ type PlayNextFunc func(ctx context.Context, guildID snowflake.ID) (*domain.Track
 type StopFunc func(ctx context.Context, guildID snowflake.ID) error
 
 // PlaybackEventHandler handles events related to playback control.
-// It listens for TrackEnqueued, TrackEnded, and QueueCleared events to manage playback flow.
+// It subscribes to TrackEnqueued, TrackEnded, and QueueCleared events to manage playback flow.
 type PlaybackEventHandler struct {
 	playNextFunc PlayNextFunc
 	stopFunc     StopFunc
 	repo         domain.PlayerStateRepository
-	bus          *Bus
-
-	wg   sync.WaitGroup
-	done chan struct{}
+	subscriber   ports.EventSubscriber
+	publisher    ports.EventPublisher
 }
 
 // NewPlaybackEventHandler creates a new PlaybackEventHandler.
@@ -33,86 +30,31 @@ func NewPlaybackEventHandler(
 	playNextFunc PlayNextFunc,
 	stopFunc StopFunc,
 	repo domain.PlayerStateRepository,
-	bus *Bus,
+	subscriber ports.EventSubscriber,
+	publisher ports.EventPublisher,
 ) *PlaybackEventHandler {
 	return &PlaybackEventHandler{
 		playNextFunc: playNextFunc,
 		stopFunc:     stopFunc,
 		repo:         repo,
-		bus:          bus,
-		done:         make(chan struct{}),
+		subscriber:   subscriber,
+		publisher:    publisher,
 	}
 }
 
-// Start begins listening for events in background goroutines.
-func (h *PlaybackEventHandler) Start(ctx context.Context) {
-	h.wg.Add(3)
-
-	// Handle TrackEnqueued events
-	go func() {
-		defer h.wg.Done()
-		for {
-			select {
-			case <-ctx.Done():
-				return
-			case <-h.done:
-				return
-			case event, ok := <-h.bus.TrackEnqueued():
-				if !ok {
-					return
-				}
-				h.handleTrackEnqueued(ctx, event)
-			}
-		}
-	}()
-
-	// Handle TrackEnded events
-	go func() {
-		defer h.wg.Done()
-		for {
-			select {
-			case <-ctx.Done():
-				return
-			case <-h.done:
-				return
-			case event, ok := <-h.bus.TrackEnded():
-				if !ok {
-					return
-				}
-				h.handleTrackEnded(ctx, event)
-			}
-		}
-	}()
-
-	// Handle QueueCleared events
-	go func() {
-		defer h.wg.Done()
-		for {
-			select {
-			case <-ctx.Done():
-				return
-			case <-h.done:
-				return
-			case event, ok := <-h.bus.QueueCleared():
-				if !ok {
-					return
-				}
-				h.handleQueueCleared(ctx, event)
-			}
-		}
-	}()
+// Start registers event handlers with the subscriber.
+func (h *PlaybackEventHandler) Start() {
+	h.subscriber.OnTrackEnqueued(h.handleTrackEnqueued)
+	h.subscriber.OnTrackEnded(h.handleTrackEnded)
+	h.subscriber.OnQueueCleared(h.handleQueueCleared)
 
 	slog.Debug("playback event handler started")
 }
 
-// Stop stops the event handler and waits for goroutines to finish.
-func (h *PlaybackEventHandler) Stop() {
-	close(h.done)
-	h.wg.Wait()
-	slog.Debug("playback event handler stopped")
-}
-
-func (h *PlaybackEventHandler) handleTrackEnqueued(ctx context.Context, event TrackEnqueuedEvent) {
+func (h *PlaybackEventHandler) handleTrackEnqueued(
+	ctx context.Context,
+	event domain.TrackEnqueuedEvent,
+) {
 	// Only start playback if the player was idle at enqueue time
 	if !event.WasIdle {
 		slog.Debug("track enqueued but player not idle, skipping auto-play",
@@ -157,7 +99,10 @@ func (h *PlaybackEventHandler) handleTrackEnqueued(ctx context.Context, event Tr
 	}
 }
 
-func (h *PlaybackEventHandler) handleQueueCleared(ctx context.Context, event QueueClearedEvent) {
+func (h *PlaybackEventHandler) handleQueueCleared(
+	ctx context.Context,
+	event domain.QueueClearedEvent,
+) {
 	slog.Debug("queue cleared, stopping playback",
 		"guild", event.GuildID,
 	)
@@ -175,7 +120,7 @@ func (h *PlaybackEventHandler) handleQueueCleared(ctx context.Context, event Que
 	if state != nil {
 		nowPlayingMsg := state.GetNowPlayingMessage()
 		if nowPlayingMsg != nil {
-			h.bus.PublishPlaybackFinished(PlaybackFinishedEvent{
+			h.publisher.PublishPlaybackFinished(domain.PlaybackFinishedEvent{
 				GuildID:               event.GuildID,
 				NotificationChannelID: nowPlayingMsg.ChannelID,
 				LastMessageID:         &nowPlayingMsg.MessageID,
@@ -184,7 +129,7 @@ func (h *PlaybackEventHandler) handleQueueCleared(ctx context.Context, event Que
 	}
 }
 
-func (h *PlaybackEventHandler) handleTrackEnded(ctx context.Context, event TrackEndedEvent) {
+func (h *PlaybackEventHandler) handleTrackEnded(ctx context.Context, event domain.TrackEndedEvent) {
 	// Only advance queue for certain end reasons
 	if !event.Reason.ShouldAdvanceQueue() {
 		slog.Debug("track ended but should not advance queue",
@@ -214,7 +159,7 @@ func (h *PlaybackEventHandler) handleTrackEnded(ctx context.Context, event Track
 	// Delete the old "Now Playing" message before playing next
 	nowPlayingMsg := state.GetNowPlayingMessage()
 	if nowPlayingMsg != nil {
-		h.bus.PublishPlaybackFinished(PlaybackFinishedEvent{
+		h.publisher.PublishPlaybackFinished(domain.PlaybackFinishedEvent{
 			GuildID:               event.GuildID,
 			NotificationChannelID: nowPlayingMsg.ChannelID,
 			LastMessageID:         &nowPlayingMsg.MessageID,
@@ -223,7 +168,7 @@ func (h *PlaybackEventHandler) handleTrackEnded(ctx context.Context, event Track
 
 	// Advance queue based on loop mode
 	// For TrackEndLoadFailed, remove the failing track and advance to prevent infinite retry loops
-	if event.Reason == TrackEndLoadFailed {
+	if event.Reason == domain.TrackEndLoadFailed {
 		failedIndex := state.Queue.CurrentIndex()
 		// Use LoopModeNone for LoopModeTrack to prevent infinite retry on same track,
 		// but preserve LoopModeQueue to allow wrapping to first track
@@ -246,7 +191,7 @@ func (h *PlaybackEventHandler) handleTrackEnded(ctx context.Context, event Track
 
 		// Publish error notification if we have a channel
 		if errNowPlayingMsg := state.GetNowPlayingMessage(); errNowPlayingMsg != nil {
-			h.bus.PublishPlaybackFinished(PlaybackFinishedEvent{
+			h.publisher.PublishPlaybackFinished(domain.PlaybackFinishedEvent{
 				GuildID:               event.GuildID,
 				NotificationChannelID: errNowPlayingMsg.ChannelID,
 				LastMessageID:         &errNowPlayingMsg.MessageID,
@@ -256,81 +201,38 @@ func (h *PlaybackEventHandler) handleTrackEnded(ctx context.Context, event Track
 }
 
 // NotificationEventHandler handles events related to Discord notifications.
-// It listens for PlaybackStarted and PlaybackFinished events to send/delete messages.
+// It subscribes to PlaybackStarted and PlaybackFinished events to send/delete messages.
 type NotificationEventHandler struct {
-	notifier ports.NotificationSender
-	repo     domain.PlayerStateRepository
-	bus      *Bus
-
-	wg   sync.WaitGroup
-	done chan struct{}
+	notifier   ports.NotificationSender
+	repo       domain.PlayerStateRepository
+	subscriber ports.EventSubscriber
 }
 
 // NewNotificationEventHandler creates a new NotificationEventHandler.
 func NewNotificationEventHandler(
 	notifier ports.NotificationSender,
 	repo domain.PlayerStateRepository,
-	bus *Bus,
+	subscriber ports.EventSubscriber,
 ) *NotificationEventHandler {
 	return &NotificationEventHandler{
-		notifier: notifier,
-		repo:     repo,
-		bus:      bus,
-		done:     make(chan struct{}),
+		notifier:   notifier,
+		repo:       repo,
+		subscriber: subscriber,
 	}
 }
 
-// Start begins listening for events in background goroutines.
-func (h *NotificationEventHandler) Start(ctx context.Context) {
-	h.wg.Add(2)
-
-	// Handle PlaybackStarted events
-	go func() {
-		defer h.wg.Done()
-		for {
-			select {
-			case <-ctx.Done():
-				return
-			case <-h.done:
-				return
-			case event, ok := <-h.bus.PlaybackStarted():
-				if !ok {
-					return
-				}
-				h.handlePlaybackStarted(event)
-			}
-		}
-	}()
-
-	// Handle PlaybackFinished events
-	go func() {
-		defer h.wg.Done()
-		for {
-			select {
-			case <-ctx.Done():
-				return
-			case <-h.done:
-				return
-			case event, ok := <-h.bus.PlaybackFinished():
-				if !ok {
-					return
-				}
-				h.handlePlaybackFinished(event)
-			}
-		}
-	}()
+// Start registers event handlers with the subscriber.
+func (h *NotificationEventHandler) Start() {
+	h.subscriber.OnPlaybackStarted(h.handlePlaybackStarted)
+	h.subscriber.OnPlaybackFinished(h.handlePlaybackFinished)
 
 	slog.Debug("notification event handler started")
 }
 
-// Stop stops the event handler and waits for goroutines to finish.
-func (h *NotificationEventHandler) Stop() {
-	close(h.done)
-	h.wg.Wait()
-	slog.Debug("notification event handler stopped")
-}
-
-func (h *NotificationEventHandler) handlePlaybackStarted(event PlaybackStartedEvent) {
+func (h *NotificationEventHandler) handlePlaybackStarted(
+	_ context.Context,
+	event domain.PlaybackStartedEvent,
+) {
 	// Check if the track is still current before sending notification.
 	// This prevents sending "Now Playing" for tracks that failed to load,
 	// which would leave orphaned messages since handleTrackEnded already ran.
@@ -381,7 +283,10 @@ func (h *NotificationEventHandler) handlePlaybackStarted(event PlaybackStartedEv
 	state.SetNowPlayingMessage(event.NotificationChannelID, messageID)
 }
 
-func (h *NotificationEventHandler) handlePlaybackFinished(event PlaybackFinishedEvent) {
+func (h *NotificationEventHandler) handlePlaybackFinished(
+	_ context.Context,
+	event domain.PlaybackFinishedEvent,
+) {
 	// Delete the "Now Playing" message if it exists
 	if event.LastMessageID == nil {
 		return

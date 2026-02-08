@@ -117,29 +117,29 @@ func (m *mockVoiceStateProvider) GetUserVoiceChannel(
 }
 
 type mockEventPublisher struct {
-	trackEnqueued    []ports.TrackEnqueuedEvent
-	playbackStarted  []ports.PlaybackStartedEvent
-	playbackFinished []ports.PlaybackFinishedEvent
-	trackEnded       []ports.TrackEndedEvent
-	queueCleared     []ports.QueueClearedEvent
+	trackEnqueued    []domain.TrackEnqueuedEvent
+	playbackStarted  []domain.PlaybackStartedEvent
+	playbackFinished []domain.PlaybackFinishedEvent
+	trackEnded       []domain.TrackEndedEvent
+	queueCleared     []domain.QueueClearedEvent
 }
 
-func (m *mockEventPublisher) PublishTrackEnqueued(event ports.TrackEnqueuedEvent) {
+func (m *mockEventPublisher) PublishTrackEnqueued(event domain.TrackEnqueuedEvent) {
 	m.trackEnqueued = append(m.trackEnqueued, event)
 }
 
-func (m *mockEventPublisher) PublishPlaybackStarted(event ports.PlaybackStartedEvent) {
+func (m *mockEventPublisher) PublishPlaybackStarted(event domain.PlaybackStartedEvent) {
 	m.playbackStarted = append(m.playbackStarted, event)
 }
 
-func (m *mockEventPublisher) PublishPlaybackFinished(event ports.PlaybackFinishedEvent) {
+func (m *mockEventPublisher) PublishPlaybackFinished(event domain.PlaybackFinishedEvent) {
 	m.playbackFinished = append(m.playbackFinished, event)
 }
 
-func (m *mockEventPublisher) PublishTrackEnded(event ports.TrackEndedEvent) {
+func (m *mockEventPublisher) PublishTrackEnded(event domain.TrackEndedEvent) {
 	m.trackEnded = append(m.trackEnded, event)
 }
 
-func (m *mockEventPublisher) PublishQueueCleared(event ports.QueueClearedEvent) {
+func (m *mockEventPublisher) PublishQueueCleared(event domain.QueueClearedEvent) {
 	m.queueCleared = append(m.queueCleared, event)
 }

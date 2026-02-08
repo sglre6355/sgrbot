@@ -112,7 +112,7 @@ func (v *VoiceChannelService) HandleBotVoiceStateChange(input BotVoiceStateChang
 		// Publish event to delete the "Now Playing" message before we lose the state
 		nowPlayingMsg := state.GetNowPlayingMessage()
 		if nowPlayingMsg != nil && v.publisher != nil {
-			v.publisher.PublishPlaybackFinished(ports.PlaybackFinishedEvent{
+			v.publisher.PublishPlaybackFinished(domain.PlaybackFinishedEvent{
 				GuildID:               input.GuildID,
 				NotificationChannelID: nowPlayingMsg.ChannelID,
 				LastMessageID:         &nowPlayingMsg.MessageID,
@@ -140,7 +140,7 @@ func (v *VoiceChannelService) Leave(ctx context.Context, input LeaveInput) error
 	// Publish event to delete the "Now Playing" message before we lose the state
 	nowPlayingMsg := state.GetNowPlayingMessage()
 	if nowPlayingMsg != nil && v.publisher != nil {
-		v.publisher.PublishPlaybackFinished(ports.PlaybackFinishedEvent{
+		v.publisher.PublishPlaybackFinished(domain.PlaybackFinishedEvent{
 			GuildID:               input.GuildID,
 			NotificationChannelID: nowPlayingMsg.ChannelID,
 			LastMessageID:         &nowPlayingMsg.MessageID,

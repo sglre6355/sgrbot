@@ -507,7 +507,7 @@ func (c *LavalinkAdapter) onTrackEnd(player disgolink.Player, event lavalink.Tra
 
 	if c.publisher != nil {
 		reason := convertEndReason(event.Reason)
-		c.publisher.PublishTrackEnded(ports.TrackEndedEvent{
+		c.publisher.PublishTrackEnded(domain.TrackEndedEvent{
 			GuildID: player.GuildID(),
 			Reason:  reason,
 		})
@@ -525,20 +525,20 @@ func (c *LavalinkAdapter) onTrackStuck(player disgolink.Player, event lavalink.T
 	slog.Warn("track stuck", "guild", player.GuildID(), "threshold", event.Threshold)
 }
 
-func convertEndReason(reason lavalink.TrackEndReason) ports.TrackEndReason {
+func convertEndReason(reason lavalink.TrackEndReason) domain.TrackEndReason {
 	switch reason {
 	case lavalink.TrackEndReasonFinished:
-		return ports.TrackEndFinished
+		return domain.TrackEndFinished
 	case lavalink.TrackEndReasonLoadFailed:
-		return ports.TrackEndLoadFailed
+		return domain.TrackEndLoadFailed
 	case lavalink.TrackEndReasonStopped:
-		return ports.TrackEndStopped
+		return domain.TrackEndStopped
 	case lavalink.TrackEndReasonReplaced:
-		return ports.TrackEndReplaced
+		return domain.TrackEndReplaced
 	case lavalink.TrackEndReasonCleanup:
-		return ports.TrackEndCleanup
+		return domain.TrackEndCleanup
 	default:
-		return ports.TrackEndStopped
+		return domain.TrackEndStopped
 	}
 }
 

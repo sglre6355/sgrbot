@@ -137,7 +137,7 @@ func (q *QueueService) Add(_ context.Context, input QueueAddInput) (*QueueAddOut
 
 	// Publish event - PlaybackEventHandler will start playback if wasIdle
 	if q.publisher != nil {
-		q.publisher.PublishTrackEnqueued(ports.TrackEnqueuedEvent{
+		q.publisher.PublishTrackEnqueued(domain.TrackEnqueuedEvent{
 			GuildID: input.GuildID,
 			Track:   input.Track,
 			WasIdle: wasIdle,
@@ -177,7 +177,7 @@ func (q *QueueService) AddMultiple(
 
 	// Publish single event for the first track - PlaybackEventHandler will start playback if wasIdle
 	if q.publisher != nil {
-		q.publisher.PublishTrackEnqueued(ports.TrackEnqueuedEvent{
+		q.publisher.PublishTrackEnqueued(domain.TrackEnqueuedEvent{
 			GuildID: input.GuildID,
 			Track:   input.Tracks[0],
 			WasIdle: wasIdle,
@@ -336,7 +336,7 @@ func (q *QueueService) Clear(input QueueClearInput) (*QueueClearOutput, error) {
 
 		// Publish event to stop playback
 		if q.publisher != nil {
-			q.publisher.PublishQueueCleared(ports.QueueClearedEvent{
+			q.publisher.PublishQueueCleared(domain.QueueClearedEvent{
 				GuildID:               input.GuildID,
 				NotificationChannelID: input.NotificationChannelID,
 			})
@@ -395,7 +395,7 @@ func (q *QueueService) Seek(
 	if q.publisher != nil {
 		nowPlayingMsg := state.GetNowPlayingMessage()
 		if nowPlayingMsg != nil {
-			q.publisher.PublishPlaybackFinished(ports.PlaybackFinishedEvent{
+			q.publisher.PublishPlaybackFinished(domain.PlaybackFinishedEvent{
 				GuildID:               input.GuildID,
 				NotificationChannelID: nowPlayingMsg.ChannelID,
 				LastMessageID:         &nowPlayingMsg.MessageID,
@@ -410,7 +410,7 @@ func (q *QueueService) Seek(
 	// PlayNext will see currentIndex >= 0 (not idle) and play Current() directly,
 	// which is the track we just seeked to.
 	if q.publisher != nil {
-		q.publisher.PublishTrackEnqueued(ports.TrackEnqueuedEvent{
+		q.publisher.PublishTrackEnqueued(domain.TrackEnqueuedEvent{
 			GuildID: input.GuildID,
 			Track:   track,
 			WasIdle: true,

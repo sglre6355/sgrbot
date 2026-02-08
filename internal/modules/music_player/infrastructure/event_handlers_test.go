@@ -1,4 +1,4 @@
-package events
+package infrastructure
 
 import (
 	"context"
@@ -115,7 +115,7 @@ func mockTrack(id string) *domain.Track {
 // --- PlaybackEventHandler Tests ---
 
 func TestPlaybackEventHandler_TrackEnqueued_WhenIdle_StartsPlayback(t *testing.T) {
-	bus := NewBus(10)
+	bus := NewChannelEventBus(10)
 	defer bus.Close()
 
 	repo := newMockRepository()
@@ -133,14 +133,14 @@ func TestPlaybackEventHandler_TrackEnqueued_WhenIdle_StartsPlayback(t *testing.T
 		},
 		func(_ context.Context, _ snowflake.ID) error { return nil },
 		repo,
-		bus,
+		bus, // subscriber
+		bus, // publisher
 	)
 
-	handler.Start(t.Context())
-	defer handler.Stop()
+	handler.Start()
 
 	// Publish event with wasIdle=true
-	bus.PublishTrackEnqueued(TrackEnqueuedEvent{
+	bus.PublishTrackEnqueued(domain.TrackEnqueuedEvent{
 		GuildID: guildID,
 		Track:   mockTrack("track-1"),
 		WasIdle: true,
@@ -158,7 +158,7 @@ func TestPlaybackEventHandler_TrackEnqueued_WhenIdle_StartsPlayback(t *testing.T
 }
 
 func TestPlaybackEventHandler_TrackEnqueued_WhenNotIdle_DoesNotStartPlayback(t *testing.T) {
-	bus := NewBus(10)
+	bus := NewChannelEventBus(10)
 	defer bus.Close()
 
 	repo := newMockRepository()
@@ -171,14 +171,14 @@ func TestPlaybackEventHandler_TrackEnqueued_WhenNotIdle_DoesNotStartPlayback(t *
 		},
 		func(_ context.Context, _ snowflake.ID) error { return nil },
 		repo,
-		bus,
+		bus, // subscriber
+		bus, // publisher
 	)
 
-	handler.Start(t.Context())
-	defer handler.Stop()
+	handler.Start()
 
 	// Publish event with wasIdle=false
-	bus.PublishTrackEnqueued(TrackEnqueuedEvent{
+	bus.PublishTrackEnqueued(domain.TrackEnqueuedEvent{
 		GuildID: snowflake.ID(1),
 		Track:   mockTrack("track-1"),
 		WasIdle: false,
@@ -194,7 +194,7 @@ func TestPlaybackEventHandler_TrackEnqueued_WhenNotIdle_DoesNotStartPlayback(t *
 }
 
 func TestPlaybackEventHandler_TrackEnqueued_AfterQueueEnds_StartsPlayback(t *testing.T) {
-	bus := NewBus(10)
+	bus := NewChannelEventBus(10)
 	defer bus.Close()
 
 	repo := newMockRepository()
@@ -221,17 +221,17 @@ func TestPlaybackEventHandler_TrackEnqueued_AfterQueueEnds_StartsPlayback(t *tes
 		},
 		func(_ context.Context, _ snowflake.ID) error { return nil },
 		repo,
-		bus,
+		bus, // subscriber
+		bus, // publisher
 	)
 
-	handler.Start(t.Context())
-	defer handler.Stop()
+	handler.Start()
 
 	// Add new track to queue (this is what Add() does)
 	state.Queue.Add(newTrack)
 
 	// Publish event with wasIdle=true (because Add() returned wasIdle=true)
-	bus.PublishTrackEnqueued(TrackEnqueuedEvent{
+	bus.PublishTrackEnqueued(domain.TrackEnqueuedEvent{
 		GuildID: guildID,
 		Track:   newTrack,
 		WasIdle: true,
@@ -251,7 +251,7 @@ func TestPlaybackEventHandler_TrackEnqueued_AfterQueueEnds_StartsPlayback(t *tes
 func TestPlaybackEventHandler_TrackEnqueued_DifferentTrackCurrent_DoesNotStartPlayback(
 	t *testing.T,
 ) {
-	bus := NewBus(10)
+	bus := NewChannelEventBus(10)
 	defer bus.Close()
 
 	repo := newMockRepository()
@@ -270,15 +270,15 @@ func TestPlaybackEventHandler_TrackEnqueued_DifferentTrackCurrent_DoesNotStartPl
 		},
 		func(_ context.Context, _ snowflake.ID) error { return nil },
 		repo,
-		bus,
+		bus, // subscriber
+		bus, // publisher
 	)
 
-	handler.Start(t.Context())
-	defer handler.Stop()
+	handler.Start()
 
 	// Publish event with wasIdle=true but for a different track
 	// (simulates concurrent enqueue where another track won the race)
-	bus.PublishTrackEnqueued(TrackEnqueuedEvent{
+	bus.PublishTrackEnqueued(domain.TrackEnqueuedEvent{
 		GuildID: guildID,
 		Track:   mockTrack("second-track"),
 		WasIdle: true,
@@ -294,7 +294,7 @@ func TestPlaybackEventHandler_TrackEnqueued_DifferentTrackCurrent_DoesNotStartPl
 }
 
 func TestPlaybackEventHandler_TrackEnded_Finished_AdvancesQueue(t *testing.T) {
-	bus := NewBus(10)
+	bus := NewChannelEventBus(10)
 	defer bus.Close()
 
 	repo := newMockRepository()
@@ -313,16 +313,16 @@ func TestPlaybackEventHandler_TrackEnded_Finished_AdvancesQueue(t *testing.T) {
 		},
 		func(_ context.Context, _ snowflake.ID) error { return nil },
 		repo,
-		bus,
+		bus, // subscriber
+		bus, // publisher
 	)
 
-	handler.Start(t.Context())
-	defer handler.Stop()
+	handler.Start()
 
 	// Publish track ended with "finished" reason
-	bus.PublishTrackEnded(TrackEndedEvent{
+	bus.PublishTrackEnded(domain.TrackEndedEvent{
 		GuildID: guildID,
-		Reason:  TrackEndFinished,
+		Reason:  domain.TrackEndFinished,
 	})
 
 	// Wait for event processing
@@ -337,7 +337,7 @@ func TestPlaybackEventHandler_TrackEnded_Finished_AdvancesQueue(t *testing.T) {
 func TestPlaybackEventHandler_TrackEnded_LoadFailed_WithLoopModeTrack_AdvancesToNextTrack(
 	t *testing.T,
 ) {
-	bus := NewBus(10)
+	bus := NewChannelEventBus(10)
 	defer bus.Close()
 
 	repo := newMockRepository()
@@ -357,16 +357,16 @@ func TestPlaybackEventHandler_TrackEnded_LoadFailed_WithLoopModeTrack_AdvancesTo
 		},
 		func(_ context.Context, _ snowflake.ID) error { return nil },
 		repo,
-		bus,
+		bus, // subscriber
+		bus, // publisher
 	)
 
-	handler.Start(t.Context())
-	defer handler.Stop()
+	handler.Start()
 
 	// Publish track ended with TrackEndLoadFailed reason
-	bus.PublishTrackEnded(TrackEndedEvent{
+	bus.PublishTrackEnded(domain.TrackEndedEvent{
 		GuildID: guildID,
-		Reason:  TrackEndLoadFailed,
+		Reason:  domain.TrackEndLoadFailed,
 	})
 
 	// Wait for event processing
@@ -400,7 +400,7 @@ func TestPlaybackEventHandler_TrackEnded_LoadFailed_WithLoopModeTrack_AdvancesTo
 }
 
 func TestPlaybackEventHandler_TrackEnded_Stopped_DoesNotAdvanceQueue(t *testing.T) {
-	bus := NewBus(10)
+	bus := NewChannelEventBus(10)
 	defer bus.Close()
 
 	repo := newMockRepository()
@@ -419,16 +419,16 @@ func TestPlaybackEventHandler_TrackEnded_Stopped_DoesNotAdvanceQueue(t *testing.
 		},
 		func(_ context.Context, _ snowflake.ID) error { return nil },
 		repo,
-		bus,
+		bus, // subscriber
+		bus, // publisher
 	)
 
-	handler.Start(t.Context())
-	defer handler.Stop()
+	handler.Start()
 
 	// Publish track ended with "stopped" reason (user-initiated stop)
-	bus.PublishTrackEnded(TrackEndedEvent{
+	bus.PublishTrackEnded(domain.TrackEndedEvent{
 		GuildID: guildID,
-		Reason:  TrackEndStopped,
+		Reason:  domain.TrackEndStopped,
 	})
 
 	// Wait for event processing - should NOT be called
@@ -440,43 +440,8 @@ func TestPlaybackEventHandler_TrackEnded_Stopped_DoesNotAdvanceQueue(t *testing.
 	}
 }
 
-func TestPlaybackEventHandler_StopsOnContextCancellation(t *testing.T) {
-	bus := NewBus(10)
-	defer bus.Close()
-
-	repo := newMockRepository()
-	handler := NewPlaybackEventHandler(
-		func(_ context.Context, _ snowflake.ID) (*domain.Track, error) {
-			return nil, nil
-		},
-		func(_ context.Context, _ snowflake.ID) error { return nil },
-		repo,
-		bus,
-	)
-
-	ctx, cancel := context.WithCancel(context.Background())
-	handler.Start(ctx)
-
-	// Cancel context
-	cancel()
-
-	// Handler should stop gracefully
-	done := make(chan struct{})
-	go func() {
-		handler.Stop()
-		close(done)
-	}()
-
-	select {
-	case <-done:
-		// Success
-	case <-time.After(500 * time.Millisecond):
-		t.Error("handler did not stop after context cancellation")
-	}
-}
-
 func TestPlaybackEventHandler_QueueCleared_StopsPlayback(t *testing.T) {
-	bus := NewBus(10)
+	bus := NewChannelEventBus(10)
 	defer bus.Close()
 
 	repo := newMockRepository()
@@ -499,14 +464,14 @@ func TestPlaybackEventHandler_QueueCleared_StopsPlayback(t *testing.T) {
 			return nil
 		},
 		repo,
-		bus,
+		bus, // subscriber
+		bus, // publisher
 	)
 
-	handler.Start(t.Context())
-	defer handler.Stop()
+	handler.Start()
 
 	// Publish QueueCleared event
-	bus.PublishQueueCleared(QueueClearedEvent{
+	bus.PublishQueueCleared(domain.QueueClearedEvent{
 		GuildID:               guildID,
 		NotificationChannelID: channelID,
 	})
@@ -530,7 +495,7 @@ func TestPlaybackEventHandler_QueueCleared_StopsPlayback(t *testing.T) {
 // --- NotificationEventHandler Tests ---
 
 func TestNotificationEventHandler_PlaybackStarted_SendsNowPlaying(t *testing.T) {
-	bus := NewBus(10)
+	bus := NewChannelEventBus(10)
 	defer bus.Close()
 
 	repo := newMockRepository()
@@ -544,10 +509,9 @@ func TestNotificationEventHandler_PlaybackStarted_SendsNowPlaying(t *testing.T) 
 
 	handler := NewNotificationEventHandler(notifier, repo, bus)
 
-	handler.Start(t.Context())
-	defer handler.Stop()
+	handler.Start()
 
-	bus.PublishPlaybackStarted(PlaybackStartedEvent{
+	bus.PublishPlaybackStarted(domain.PlaybackStartedEvent{
 		GuildID:               guildID,
 		Track:                 track,
 		NotificationChannelID: snowflake.ID(200),
@@ -568,7 +532,7 @@ func TestNotificationEventHandler_PlaybackStarted_SendsNowPlaying(t *testing.T) 
 }
 
 func TestNotificationEventHandler_PlaybackStarted_StoresMessageID(t *testing.T) {
-	bus := NewBus(10)
+	bus := NewChannelEventBus(10)
 	defer bus.Close()
 
 	repo := newMockRepository()
@@ -582,17 +546,16 @@ func TestNotificationEventHandler_PlaybackStarted_StoresMessageID(t *testing.T) 
 
 	handler := NewNotificationEventHandler(notifier, repo, bus)
 
-	handler.Start(t.Context())
+	handler.Start()
 
-	bus.PublishPlaybackStarted(PlaybackStartedEvent{
+	bus.PublishPlaybackStarted(domain.PlaybackStartedEvent{
 		GuildID:               guildID,
 		Track:                 track,
 		NotificationChannelID: snowflake.ID(200),
 	})
 
-	// Wait for event processing and stop handler to ensure all events are processed
+	// Wait for event processing
 	time.Sleep(100 * time.Millisecond)
-	handler.Stop()
 
 	if state.GetNowPlayingMessage() == nil {
 		t.Error("expected NowPlayingMessage to be set")
@@ -600,7 +563,7 @@ func TestNotificationEventHandler_PlaybackStarted_StoresMessageID(t *testing.T) 
 }
 
 func TestNotificationEventHandler_PlaybackStarted_SkipsIfTrackNoLongerCurrent(t *testing.T) {
-	bus := NewBus(10)
+	bus := NewChannelEventBus(10)
 	defer bus.Close()
 
 	repo := newMockRepository()
@@ -615,18 +578,17 @@ func TestNotificationEventHandler_PlaybackStarted_SkipsIfTrackNoLongerCurrent(t 
 
 	handler := NewNotificationEventHandler(notifier, repo, bus)
 
-	handler.Start(t.Context())
+	handler.Start()
 
 	// Publish event for a track that is NOT the current track
-	bus.PublishPlaybackStarted(PlaybackStartedEvent{
+	bus.PublishPlaybackStarted(domain.PlaybackStartedEvent{
 		GuildID:               guildID,
 		Track:                 mockTrack("failed-track"),
 		NotificationChannelID: snowflake.ID(200),
 	})
 
-	// Wait for event processing and stop handler
+	// Wait for event processing
 	time.Sleep(100 * time.Millisecond)
-	handler.Stop()
 
 	// Should NOT have sent a notification since the track is not current
 	sentNowPlaying := notifier.getSentNowPlaying()
@@ -636,7 +598,7 @@ func TestNotificationEventHandler_PlaybackStarted_SkipsIfTrackNoLongerCurrent(t 
 }
 
 func TestNotificationEventHandler_PlaybackFinished_DeletesMessage(t *testing.T) {
-	bus := NewBus(10)
+	bus := NewChannelEventBus(10)
 	defer bus.Close()
 
 	repo := newMockRepository()
@@ -651,17 +613,16 @@ func TestNotificationEventHandler_PlaybackFinished_DeletesMessage(t *testing.T) 
 
 	handler := NewNotificationEventHandler(notifier, repo, bus)
 
-	handler.Start(t.Context())
+	handler.Start()
 
-	bus.PublishPlaybackFinished(PlaybackFinishedEvent{
+	bus.PublishPlaybackFinished(domain.PlaybackFinishedEvent{
 		GuildID:               guildID,
 		NotificationChannelID: snowflake.ID(200),
 		LastMessageID:         &messageID,
 	})
 
-	// Wait for event processing and stop handler to ensure all events are processed
+	// Wait for event processing
 	time.Sleep(100 * time.Millisecond)
-	handler.Stop()
 
 	deletedMessages := notifier.getDeletedMessages()
 	if len(deletedMessages) != 1 {
@@ -678,7 +639,7 @@ func TestNotificationEventHandler_PlaybackFinished_DeletesMessage(t *testing.T) 
 }
 
 func TestNotificationEventHandler_PlaybackFinished_NilMessageID_DoesNotDelete(t *testing.T) {
-	bus := NewBus(10)
+	bus := NewChannelEventBus(10)
 	defer bus.Close()
 
 	repo := newMockRepository()
@@ -686,50 +647,19 @@ func TestNotificationEventHandler_PlaybackFinished_NilMessageID_DoesNotDelete(t 
 
 	handler := NewNotificationEventHandler(notifier, repo, bus)
 
-	handler.Start(t.Context())
+	handler.Start()
 
-	bus.PublishPlaybackFinished(PlaybackFinishedEvent{
+	bus.PublishPlaybackFinished(domain.PlaybackFinishedEvent{
 		GuildID:               snowflake.ID(1),
 		NotificationChannelID: snowflake.ID(200),
 		LastMessageID:         nil,
 	})
 
-	// Wait for event processing and stop handler to ensure all events are processed
+	// Wait for event processing
 	time.Sleep(100 * time.Millisecond)
-	handler.Stop()
 
 	deletedMessages := notifier.getDeletedMessages()
 	if len(deletedMessages) != 0 {
 		t.Error("expected no messages to be deleted when LastMessageID is nil")
-	}
-}
-
-func TestNotificationEventHandler_StopsOnContextCancellation(t *testing.T) {
-	bus := NewBus(10)
-	defer bus.Close()
-
-	repo := newMockRepository()
-	notifier := &mockNotifier{}
-
-	handler := NewNotificationEventHandler(notifier, repo, bus)
-
-	ctx, cancel := context.WithCancel(context.Background())
-	handler.Start(ctx)
-
-	// Cancel context
-	cancel()
-
-	// Handler should stop gracefully
-	done := make(chan struct{})
-	go func() {
-		handler.Stop()
-		close(done)
-	}()
-
-	select {
-	case <-done:
-		// Success
-	case <-time.After(500 * time.Millisecond):
-		t.Error("handler did not stop after context cancellation")
 	}
 }
