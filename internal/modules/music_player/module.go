@@ -8,7 +8,6 @@ import (
 	"github.com/caarlos0/env/v11"
 	"github.com/disgoorg/snowflake/v2"
 	"github.com/sglre6355/sgrbot/internal/bot"
-	"github.com/sglre6355/sgrbot/internal/modules/music_player/application/events"
 	"github.com/sglre6355/sgrbot/internal/modules/music_player/application/usecases"
 	"github.com/sglre6355/sgrbot/internal/modules/music_player/infrastructure"
 	"github.com/sglre6355/sgrbot/internal/modules/music_player/presentation"
@@ -30,9 +29,9 @@ type MusicPlayerModule struct {
 	lavalinkAdapter *infrastructure.LavalinkAdapter
 
 	// Event-driven components
-	eventBus            *events.Bus
-	playbackHandler     *events.PlaybackEventHandler
-	notificationHandler *events.NotificationEventHandler
+	eventBus            *infrastructure.ChannelEventBus
+	playbackHandler     *infrastructure.PlaybackEventHandler
+	notificationHandler *infrastructure.NotificationEventHandler
 
 	// Context for event handlers
 	ctx    context.Context
@@ -132,7 +131,7 @@ func (m *MusicPlayerModule) initWithLavalink(deps bot.ModuleDependencies) error 
 	m.lavalinkAdapter = lavalinkAdapter
 
 	// Create event bus
-	m.eventBus = events.NewBus(events.DefaultEventBufferSize)
+	m.eventBus = infrastructure.NewChannelEventBus(infrastructure.DefaultEventBufferSize)
 
 	// Create infrastructure
 	repo := infrastructure.NewMemoryRepository()
@@ -145,18 +144,19 @@ func (m *MusicPlayerModule) initWithLavalink(deps bot.ModuleDependencies) error 
 	queue := usecases.NewQueueService(repo, m.eventBus)
 	trackLoader := usecases.NewTrackLoaderService(lavalinkAdapter)
 
-	// Create event handlers
-	m.playbackHandler = events.NewPlaybackEventHandler(
+	// Create event handlers with separate subscriber and publisher dependencies
+	m.playbackHandler = infrastructure.NewPlaybackEventHandler(
 		playback.PlayNext,
 		lavalinkAdapter.Stop,
 		repo,
-		m.eventBus,
+		m.eventBus, // as EventSubscriber
+		m.eventBus, // as EventPublisher
 	)
-	m.notificationHandler = events.NewNotificationEventHandler(notifier, repo, m.eventBus)
+	m.notificationHandler = infrastructure.NewNotificationEventHandler(notifier, repo, m.eventBus)
 
-	// Start event handlers with cancellable context
-	m.playbackHandler.Start(m.ctx)
-	m.notificationHandler.Start(m.ctx)
+	// Register event handlers
+	m.playbackHandler.Start()
+	m.notificationHandler.Start()
 
 	// Set event publisher on Lavalink adapter for event publishing
 	lavalinkAdapter.SetEventPublisher(m.eventBus)
@@ -181,14 +181,6 @@ func (m *MusicPlayerModule) Shutdown() error {
 	// Cancel context first to signal event handlers to stop
 	if m.cancel != nil {
 		m.cancel()
-	}
-
-	// Stop event handlers
-	if m.playbackHandler != nil {
-		m.playbackHandler.Stop()
-	}
-	if m.notificationHandler != nil {
-		m.notificationHandler.Stop()
 	}
 
 	// Close event bus

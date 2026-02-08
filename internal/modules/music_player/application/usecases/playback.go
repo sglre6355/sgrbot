@@ -151,7 +151,7 @@ func (p *PlaybackService) Skip(ctx context.Context, input SkipInput) (*SkipOutpu
 	// Publish event to delete the "Now Playing" message
 	nowPlayingMsg := state.GetNowPlayingMessage()
 	if nowPlayingMsg != nil && p.publisher != nil {
-		p.publisher.PublishPlaybackFinished(ports.PlaybackFinishedEvent{
+		p.publisher.PublishPlaybackFinished(domain.PlaybackFinishedEvent{
 			GuildID:               input.GuildID,
 			NotificationChannelID: nowPlayingMsg.ChannelID,
 			LastMessageID:         &nowPlayingMsg.MessageID,
@@ -231,7 +231,7 @@ func (p *PlaybackService) PlayNext(
 
 	// Publish event for "Now Playing" notification (async)
 	if p.publisher != nil {
-		p.publisher.PublishPlaybackStarted(ports.PlaybackStartedEvent{
+		p.publisher.PublishPlaybackStarted(domain.PlaybackStartedEvent{
 			GuildID:               guildID,
 			Track:                 nextTrack,
 			NotificationChannelID: state.NotificationChannelID,
