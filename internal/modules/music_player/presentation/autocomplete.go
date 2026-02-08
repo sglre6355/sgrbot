@@ -13,15 +13,18 @@ import (
 
 // AutocompleteHandler handles autocomplete requests.
 type AutocompleteHandler struct {
-	autocomplete *usecases.AutocompleteService
+	queue       *usecases.QueueService
+	trackLoader *usecases.TrackLoaderService
 }
 
 // NewAutocompleteHandler creates a new AutocompleteHandler.
 func NewAutocompleteHandler(
-	autocomplete *usecases.AutocompleteService,
+	queue *usecases.QueueService,
+	trackLoader *usecases.TrackLoaderService,
 ) *AutocompleteHandler {
 	return &AutocompleteHandler{
-		autocomplete: autocomplete,
+		queue:       queue,
+		trackLoader: trackLoader,
 	}
 }
 
@@ -52,10 +55,12 @@ func (h *AutocompleteHandler) handleQueuePositionAutocomplete(
 		return
 	}
 
-	output := h.autocomplete.GetQueueTracks(usecases.GetQueueTracksInput{
-		GuildID: guildID,
+	output, err := h.queue.List(usecases.QueueListInput{
+		GuildID:  guildID,
+		Page:     1,
+		PageSize: 25,
 	})
-	if output.Tracks == nil {
+	if err != nil {
 		_ = s.InteractionRespond(i.Interaction, &discordgo.InteractionResponse{
 			Type: discordgo.InteractionApplicationCommandAutocompleteResult,
 			Data: &discordgo.InteractionResponseData{
@@ -65,11 +70,8 @@ func (h *AutocompleteHandler) handleQueuePositionAutocomplete(
 		return
 	}
 
-	choices := make([]*discordgo.ApplicationCommandOptionChoice, 0, min(len(output.Tracks), 25))
+	choices := make([]*discordgo.ApplicationCommandOptionChoice, 0, len(output.Tracks))
 	for idx, track := range output.Tracks {
-		if idx >= 25 {
-			break
-		}
 		// Use 1-indexed positions to match queue list display
 		displayPos := idx + 1
 		choices = append(choices, &discordgo.ApplicationCommandOptionChoice{
@@ -88,7 +90,7 @@ func (h *AutocompleteHandler) handleQueuePositionAutocomplete(
 
 // HandlePlay handles autocomplete for play command.
 func (h *AutocompleteHandler) HandlePlay(s *discordgo.Session, i *discordgo.InteractionCreate) {
-	if h.autocomplete == nil {
+	if h.trackLoader == nil {
 		return
 	}
 
@@ -114,15 +116,15 @@ func (h *AutocompleteHandler) HandlePlay(s *discordgo.Session, i *discordgo.Inte
 
 	// Check if query is a URL (potential playlist)
 	if _, err := url.ParseRequestURI(query); err == nil {
-		result, err := h.autocomplete.LoadTracksForAutocomplete(
+		result, err := h.trackLoader.ResolveQuery(
 			context.Background(),
-			usecases.LoadTracksForAutocompleteInput{
+			usecases.ResolveQueryInput{
 				Query: query,
 				Limit: 24, // Leave room for playlist option
 			},
 		)
 		if err == nil && result.IsPlaylist && len(result.Tracks) > 0 {
-			choices := buildPlaylistChoices(result)
+			choices := buildPlaylistChoices(result, query)
 			_ = s.InteractionRespond(i.Interaction, &discordgo.InteractionResponse{
 				Type: discordgo.InteractionApplicationCommandAutocompleteResult,
 				Data: &discordgo.InteractionResponseData{
@@ -135,7 +137,7 @@ func (h *AutocompleteHandler) HandlePlay(s *discordgo.Session, i *discordgo.Inte
 	}
 
 	// Search for tracks (regular search behavior)
-	result, err := h.autocomplete.SearchTracks(context.Background(), usecases.SearchTracksInput{
+	result, err := h.trackLoader.SearchTracks(context.Background(), usecases.SearchTracksInput{
 		Query: query,
 		Limit: 10,
 	})
@@ -168,17 +170,18 @@ func (h *AutocompleteHandler) HandlePlay(s *discordgo.Session, i *discordgo.Inte
 
 // buildPlaylistChoices builds autocomplete choices for a playlist result.
 func buildPlaylistChoices(
-	result *usecases.LoadTracksForAutocompleteOutput,
+	result *usecases.ResolveQueryOutput,
+	playlistURL string,
 ) []*discordgo.ApplicationCommandOptionChoice {
 	choices := make([]*discordgo.ApplicationCommandOptionChoice, 0, len(result.Tracks)+1)
 
 	// First choice: entire playlist
 	choices = append(choices, &discordgo.ApplicationCommandOptionChoice{
 		Name: truncate(
-			fmt.Sprintf("📋 %s (%d tracks)", result.PlaylistName, result.TrackCount),
+			fmt.Sprintf("📋 %s (%d tracks)", result.PlaylistName, result.TotalTracks),
 			100,
 		),
-		Value: result.PlaylistURL,
+		Value: playlistURL,
 	})
 
 	// Remaining choices: individual tracks

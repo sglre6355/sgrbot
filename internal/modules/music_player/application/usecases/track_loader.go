@@ -137,6 +137,62 @@ func (s *TrackLoaderService) LoadTracks(
 	}, nil
 }
 
+// ResolveQueryInput contains the input for resolving a query into track info.
+type ResolveQueryInput struct {
+	Query string
+	Limit int // Max individual tracks to return (default 24)
+}
+
+// ResolveQueryOutput contains the result of resolving a query.
+type ResolveQueryOutput struct {
+	Tracks       []*ports.TrackInfo
+	IsPlaylist   bool
+	PlaylistName string
+	TotalTracks  int
+}
+
+// ResolveQuery resolves a query into track information without creating domain tracks.
+// For playlists, returns playlist metadata and a limited list of individual tracks.
+// For non-playlists, returns the tracks normally.
+func (s *TrackLoaderService) ResolveQuery(
+	ctx context.Context,
+	input ResolveQueryInput,
+) (*ResolveQueryOutput, error) {
+	if s.trackResolver == nil {
+		return &ResolveQueryOutput{}, nil
+	}
+
+	query := domain.NewSearchQuery(input.Query)
+	result, err := s.trackResolver.LoadTracks(ctx, query.LavalinkQuery())
+	if err != nil {
+		return nil, err
+	}
+
+	if result.Type == ports.LoadTypeEmpty || result.Type == ports.LoadTypeError ||
+		len(result.Tracks) == 0 {
+		return &ResolveQueryOutput{}, nil
+	}
+
+	// Determine limit (default 24 to leave room for playlist option)
+	limit := input.Limit
+	if limit <= 0 {
+		limit = 24
+	}
+
+	// Limit tracks
+	tracks := result.Tracks
+	if len(tracks) > limit {
+		tracks = tracks[:limit]
+	}
+
+	return &ResolveQueryOutput{
+		IsPlaylist:   result.Type == ports.LoadTypePlaylist,
+		PlaylistName: result.PlaylistID,
+		TotalTracks:  len(result.Tracks),
+		Tracks:       tracks,
+	}, nil
+}
+
 // SearchTracksInput contains the input for the SearchTracks use case.
 type SearchTracksInput struct {
 	Query string
