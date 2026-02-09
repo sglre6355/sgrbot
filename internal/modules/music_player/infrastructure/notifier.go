@@ -98,18 +98,6 @@ func (n *Notifier) DeleteMessage(channelID snowflake.ID, messageID snowflake.ID)
 	return n.session.ChannelMessageDelete(channelID.String(), messageID.String())
 }
 
-// SendQueueAdded sends a "Added to Queue" embed to the channel.
-func (n *Notifier) SendQueueAdded(channelID snowflake.ID, info *ports.QueueAddedInfo) error {
-	description := fmt.Sprintf("Added **%s** to the queue.", info.Title)
-
-	embed := &discordgo.MessageEmbed{
-		Description: description,
-	}
-
-	_, err := n.session.ChannelMessageSendEmbed(channelID.String(), embed)
-	return err
-}
-
 // SendError sends an error message embed to the channel.
 func (n *Notifier) SendError(channelID snowflake.ID, message string) error {
 	embed := &discordgo.MessageEmbed{

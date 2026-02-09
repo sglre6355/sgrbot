@@ -2,6 +2,7 @@ package usecases
 
 import (
 	"context"
+	"fmt"
 	"time"
 
 	"github.com/disgoorg/snowflake/v2"
@@ -31,27 +32,33 @@ func newMockRepository() *mockRepository {
 	}
 }
 
-func (m *mockRepository) Get(guildID snowflake.ID) *domain.PlayerState {
-	return m.states[guildID]
+func (m *mockRepository) Get(_ context.Context, guildID snowflake.ID) (domain.PlayerState, error) {
+	state, ok := m.states[guildID]
+	if !ok {
+		return domain.PlayerState{}, fmt.Errorf("player state not found")
+	}
+	return *state, nil
 }
 
-func (m *mockRepository) Save(state *domain.PlayerState) {
-	m.states[state.GetGuildID()] = state
+func (m *mockRepository) Save(_ context.Context, state domain.PlayerState) error {
+	m.states[state.GetGuildID()] = &state
+	return nil
 }
 
 // createConnectedState creates a PlayerState with the given IDs and saves it to the mock repository.
-// Returns the state for further modification (e.g., adding tracks).
+// Returns the state pointer for further modification (e.g., adding tracks).
 func (m *mockRepository) createConnectedState(
 	guildID, voiceChannelID, notificationChannelID snowflake.ID,
 ) *domain.PlayerState {
 	state := domain.NewPlayerState(guildID, voiceChannelID, notificationChannelID)
-	m.Save(state)
+	m.states[guildID] = state
 	return state
 }
 
-func (m *mockRepository) Delete(guildID snowflake.ID) {
+func (m *mockRepository) Delete(_ context.Context, guildID snowflake.ID) error {
 	m.deleted = append(m.deleted, guildID)
 	delete(m.states, guildID)
+	return nil
 }
 
 type mockAudioPlayer struct {
@@ -142,4 +149,46 @@ func (m *mockEventPublisher) PublishTrackEnded(event domain.TrackEndedEvent) {
 
 func (m *mockEventPublisher) PublishQueueCleared(event domain.QueueClearedEvent) {
 	m.queueCleared = append(m.queueCleared, event)
+}
+
+type mockTrackProvider struct {
+	tracks map[domain.TrackID]*domain.Track
+}
+
+func newMockTrackProvider() *mockTrackProvider {
+	return &mockTrackProvider{
+		tracks: make(map[domain.TrackID]*domain.Track),
+	}
+}
+
+func (m *mockTrackProvider) LoadTrack(id domain.TrackID) (domain.Track, error) {
+	t, ok := m.tracks[id]
+	if !ok {
+		return domain.Track{}, fmt.Errorf("track %q not found", id)
+	}
+	return *t, nil
+}
+
+func (m *mockTrackProvider) LoadTracks(ids ...domain.TrackID) ([]domain.Track, error) {
+	result := make([]domain.Track, 0, len(ids))
+	for _, id := range ids {
+		t, ok := m.tracks[id]
+		if !ok {
+			return nil, fmt.Errorf("track %q not found", id)
+		}
+		result = append(result, *t)
+	}
+	return result, nil
+}
+
+func (m *mockTrackProvider) Store(track *domain.Track) {
+	m.tracks[track.ID] = track
+}
+
+// setupPlaying sets up a PlayerState with a track playing.
+// It stores the track in the track provider, appends it to the queue, and activates playback.
+func setupPlaying(state *domain.PlayerState, tp *mockTrackProvider, track *domain.Track) {
+	tp.Store(track)
+	state.Queue.Append(track.ID)
+	state.SetPlaybackActive(true)
 }

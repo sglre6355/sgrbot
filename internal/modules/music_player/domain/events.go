@@ -29,7 +29,6 @@ func (r TrackEndReason) ShouldAdvanceQueue() bool {
 type TrackEnqueuedEvent struct {
 	GuildID snowflake.ID
 	Track   *Track
-	WasIdle bool // true if no track was playing when this was enqueued
 }
 
 // PlaybackStartedEvent is published when a track starts playing.

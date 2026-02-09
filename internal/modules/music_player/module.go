@@ -105,7 +105,7 @@ func (m *MusicPlayerModule) initWithoutLavalink() error {
 
 	// Create service with nil dependencies
 	// These will fail at runtime if called, but allows the module to load
-	queue := usecases.NewQueueService(repo, nil)
+	queue := usecases.NewQueueService(repo, nil, nil)
 	trackLoader := usecases.NewTrackLoaderService(nil)
 
 	m.handlers = presentation.NewHandlers(nil, nil, queue, nil)
@@ -139,10 +139,16 @@ func (m *MusicPlayerModule) initWithLavalink(deps bot.ModuleDependencies) error 
 	notifier := infrastructure.NewNotifier(deps.Session)
 
 	// Create services with event bus
-	voiceChannel := usecases.NewVoiceChannelService(repo, lavalinkAdapter, voiceState, m.eventBus)
-	playback := usecases.NewPlaybackService(repo, lavalinkAdapter, voiceState, m.eventBus)
-	queue := usecases.NewQueueService(repo, m.eventBus)
 	trackLoader := usecases.NewTrackLoaderService(lavalinkAdapter)
+	voiceChannel := usecases.NewVoiceChannelService(repo, lavalinkAdapter, voiceState, m.eventBus)
+	playback := usecases.NewPlaybackService(
+		repo,
+		lavalinkAdapter,
+		voiceState,
+		m.eventBus,
+		trackLoader,
+	)
+	queue := usecases.NewQueueService(repo, m.eventBus, trackLoader)
 
 	// Create event handlers with separate subscriber and publisher dependencies
 	m.playbackHandler = infrastructure.NewPlaybackEventHandler(

@@ -55,20 +55,11 @@ func (h *PlaybackEventHandler) handleTrackEnqueued(
 	ctx context.Context,
 	event domain.TrackEnqueuedEvent,
 ) {
-	// Only start playback if the player was idle at enqueue time
-	if !event.WasIdle {
-		slog.Debug("track enqueued but player not idle, skipping auto-play",
-			"guild", event.GuildID,
-			"track", event.Track.Title,
-		)
-		return
-	}
-
-	// Re-check current state to avoid race with concurrent enqueues.
-	// Multiple tracks enqueued while idle will all have WasIdle=true,
+	// Check current state to avoid race with concurrent enqueues.
+	// Multiple tracks enqueued while idle may all trigger this handler,
 	// but only the first should trigger playback.
-	state := h.repo.Get(event.GuildID)
-	if state == nil {
+	state, err := h.repo.Get(ctx, event.GuildID)
+	if err != nil {
 		slog.Debug("track enqueued but state not found, skipping auto-play",
 			"guild", event.GuildID,
 		)
@@ -76,8 +67,7 @@ func (h *PlaybackEventHandler) handleTrackEnqueued(
 	}
 
 	// Check if playback is already active (another event already started playback).
-	// IsIdle() now checks playbackActive flag, not queue position.
-	if !state.IsIdle() {
+	if state.IsPlaybackActive() {
 		slog.Debug("track enqueued but playback already active, skipping auto-play",
 			"guild", event.GuildID,
 			"track", event.Track.Title,
@@ -90,7 +80,7 @@ func (h *PlaybackEventHandler) handleTrackEnqueued(
 		"track", event.Track.Title,
 	)
 
-	_, err := h.playNextFunc(ctx, event.GuildID)
+	_, err = h.playNextFunc(ctx, event.GuildID)
 	if err != nil {
 		slog.Error("failed to start playback after track enqueued",
 			"guild", event.GuildID,
@@ -116,8 +106,8 @@ func (h *PlaybackEventHandler) handleQueueCleared(
 	}
 
 	// Delete the "Now Playing" message
-	state := h.repo.Get(event.GuildID)
-	if state != nil {
+	state, err := h.repo.Get(ctx, event.GuildID)
+	if err == nil {
 		nowPlayingMsg := state.GetNowPlayingMessage()
 		if nowPlayingMsg != nil {
 			h.publisher.PublishPlaybackFinished(domain.PlaybackFinishedEvent{
@@ -140,15 +130,15 @@ func (h *PlaybackEventHandler) handleTrackEnded(ctx context.Context, event domai
 	}
 
 	// Get state to check loop mode and notification channel
-	state := h.repo.Get(event.GuildID)
-	if state == nil {
+	state, err := h.repo.Get(ctx, event.GuildID)
+	if err != nil {
 		slog.Debug("track ended but no player state",
 			"guild", event.GuildID,
 		)
 		return
 	}
 
-	loopMode := state.LoopMode()
+	loopMode := state.GetLoopMode()
 
 	slog.Debug("track ended, advancing queue",
 		"guild", event.GuildID,
@@ -179,10 +169,18 @@ func (h *PlaybackEventHandler) handleTrackEnded(ctx context.Context, event domai
 		state.Queue.Advance(advanceMode)
 		state.Queue.RemoveAt(failedIndex)
 	} else {
-		state.SetStopped()
+		state.Queue.Advance(state.GetLoopMode())
 	}
 
-	_, err := h.playNextFunc(ctx, event.GuildID)
+	// Save state after mutations
+	if err := h.repo.Save(ctx, state); err != nil {
+		slog.Error("failed to save state after track ended",
+			"guild", event.GuildID,
+			"error", err,
+		)
+	}
+
+	_, err = h.playNextFunc(ctx, event.GuildID)
 	if err != nil {
 		slog.Error("failed to play next track after track ended",
 			"guild", event.GuildID,
@@ -230,21 +228,21 @@ func (h *NotificationEventHandler) Start() {
 }
 
 func (h *NotificationEventHandler) handlePlaybackStarted(
-	_ context.Context,
+	ctx context.Context,
 	event domain.PlaybackStartedEvent,
 ) {
 	// Check if the track is still current before sending notification.
 	// This prevents sending "Now Playing" for tracks that failed to load,
 	// which would leave orphaned messages since handleTrackEnded already ran.
-	state := h.repo.Get(event.GuildID)
-	if state == nil {
+	state, err := h.repo.Get(ctx, event.GuildID)
+	if err != nil {
 		slog.Debug("skipping now playing notification, state not found",
 			"guild", event.GuildID,
 		)
 		return
 	}
-	currentTrack := state.CurrentTrack()
-	if currentTrack == nil || currentTrack.ID != event.Track.ID {
+	currentTrackID := state.CurrentTrackID()
+	if currentTrackID == nil || *currentTrackID != event.Track.ID {
 		slog.Debug("skipping now playing notification, track no longer current",
 			"guild", event.GuildID,
 			"track", event.Track.Title,
@@ -281,10 +279,16 @@ func (h *NotificationEventHandler) handlePlaybackStarted(
 
 	// Store the message info for later deletion
 	state.SetNowPlayingMessage(event.NotificationChannelID, messageID)
+	if err := h.repo.Save(ctx, state); err != nil {
+		slog.Error("failed to save state after setting now playing message",
+			"guild", event.GuildID,
+			"error", err,
+		)
+	}
 }
 
 func (h *NotificationEventHandler) handlePlaybackFinished(
-	_ context.Context,
+	ctx context.Context,
 	event domain.PlaybackFinishedEvent,
 ) {
 	// Delete the "Now Playing" message if it exists
@@ -310,11 +314,12 @@ func (h *NotificationEventHandler) handlePlaybackFinished(
 	// Only clear the message info if it matches the one we just deleted.
 	// This prevents a race condition where a new track's message info
 	// could be cleared if events are processed out of order.
-	state := h.repo.Get(event.GuildID)
-	if state != nil {
+	state, err := h.repo.Get(ctx, event.GuildID)
+	if err == nil {
 		currentMsg := state.GetNowPlayingMessage()
 		if currentMsg != nil && currentMsg.MessageID == *event.LastMessageID {
 			state.ClearNowPlayingMessage()
+			_ = h.repo.Save(ctx, state)
 		}
 	}
 }

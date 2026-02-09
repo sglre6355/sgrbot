@@ -1,121 +1,48 @@
 package domain
 
-import "sync"
-
-// Queue is a thread-safe queue for managing tracks using an index-based model.
+// Queue is a queue for managing tracks using an index-based model.
 // Instead of removing tracks when they finish, we maintain a currentIndex
 // that advances through the track list, enabling loop functionality.
 type Queue struct {
-	mu           sync.RWMutex
-	tracks       []*Track
-	currentIndex int // -1 when empty or before first track, 0+ when playing
+	trackIDs     []TrackID
+	currentIndex int
 }
 
 // NewQueue creates a new empty Queue.
-func NewQueue() *Queue {
-	return &Queue{
-		tracks:       make([]*Track, 0),
-		currentIndex: -1,
+func NewQueue() Queue {
+	return Queue{
+		trackIDs:     make([]TrackID, 0),
+		currentIndex: 0,
 	}
 }
 
-// Add adds a track to the end of the queue.
-// Returns true if the player was idle (no current track), to trigger auto-play.
-func (q *Queue) Add(track *Track) (wasIdle bool) {
-	q.mu.Lock()
-	defer q.mu.Unlock()
-
-	wasIdle = q.currentIndex < 0 || q.currentIndex >= len(q.tracks)
-	q.tracks = append(q.tracks, track)
-	return wasIdle
+// IsEmpty returns true if the queue has no track IDs.
+func (q *Queue) IsEmpty() bool {
+	return q.Len() == 0
 }
 
-// AddMultiple adds multiple tracks to the end of the queue atomically.
-// Returns true if the player was idle (no current track), to trigger auto-play.
-// This is more efficient than calling Add() multiple times as it only locks once.
-func (q *Queue) AddMultiple(tracks []*Track) (wasIdle bool) {
-	q.mu.Lock()
-	defer q.mu.Unlock()
-
-	wasIdle = q.currentIndex < 0 || q.currentIndex >= len(q.tracks)
-	q.tracks = append(q.tracks, tracks...)
-	return wasIdle
+// IsAtLast returns true if the current track is the last in the queue.
+func (q *Queue) IsAtLast() bool {
+	return q.Len() <= q.currentIndex+1
 }
 
-// Current returns the track at currentIndex, or nil if no current track.
-func (q *Queue) Current() *Track {
-	q.mu.RLock()
-	defer q.mu.RUnlock()
-
-	if q.currentIndex < 0 || q.currentIndex >= len(q.tracks) {
-		return nil
-	}
-	return q.tracks[q.currentIndex]
+func (q *Queue) isValidIndex(index int) bool {
+	return 0 <= index && index < q.Len()
 }
 
-// Peek returns the current track without changing position.
-// This is an alias for Current() for backward compatibility.
-func (q *Queue) Peek() *Track {
-	return q.Current()
+// Len returns the total number of track IDs in the queue.
+func (q *Queue) Len() int {
+	return len(q.trackIDs)
 }
 
-// Start sets currentIndex to 0 if the queue has tracks.
-// Returns the first track, or nil if queue is empty.
-// Used when playback should begin from the start.
-func (q *Queue) Start() *Track {
-	q.mu.Lock()
-	defer q.mu.Unlock()
-
-	if len(q.tracks) == 0 {
-		return nil
-	}
-	q.currentIndex = 0
-	return q.tracks[0]
-}
-
-// Advance moves to the next track based on loop mode.
-// Returns the new current track, or nil if queue ended.
-//   - LoopModeNone: advance index, return nil if past end
-//   - LoopModeTrack: don't advance, return same track
-//   - LoopModeQueue: advance, wrap to 0 if past end
-func (q *Queue) Advance(mode LoopMode) *Track {
-	q.mu.Lock()
-	defer q.mu.Unlock()
-
-	if len(q.tracks) == 0 || q.currentIndex < 0 {
-		return nil
-	}
-
-	switch mode {
-	case LoopModeTrack:
-		// Don't advance, return same track
-		return q.tracks[q.currentIndex]
-
-	case LoopModeQueue:
-		// Advance with wrap-around
-		q.currentIndex++
-		if q.currentIndex >= len(q.tracks) {
-			q.currentIndex = 0
-		}
-		return q.tracks[q.currentIndex]
-
-	default: // LoopModeNone
-		// Advance without wrap
-		q.currentIndex++
-		if q.currentIndex >= len(q.tracks) {
-			return nil
-		}
-		return q.tracks[q.currentIndex]
-	}
+// CurrentIndex returns the current track index.
+func (q *Queue) CurrentIndex() int {
+	return q.currentIndex
 }
 
 // HasNext returns true if there's a next track available (considering loop mode).
 func (q *Queue) HasNext(mode LoopMode) bool {
-	q.mu.RLock()
-	defer q.mu.RUnlock()
-
-	// No next if queue is empty or idle (not started or past end)
-	if len(q.tracks) == 0 || q.currentIndex < 0 || q.currentIndex >= len(q.tracks) {
+	if q.IsEmpty() {
 		return false
 	}
 
@@ -124,160 +51,127 @@ func (q *Queue) HasNext(mode LoopMode) bool {
 		// Always has next when looping (as long as queue isn't empty and not idle)
 		return true
 	default: // LoopModeNone
-		return q.currentIndex+1 < len(q.tracks)
+		return !q.IsAtLast()
 	}
 }
 
-// Upcoming returns tracks after the current index (for queue display).
-// Returns empty slice if no tracks or no current track.
-func (q *Queue) Upcoming() []*Track {
-	q.mu.RLock()
-	defer q.mu.RUnlock()
-
-	if q.currentIndex < 0 || q.currentIndex >= len(q.tracks)-1 {
-		return make([]*Track, 0)
+// Current returns the track ID at currentIndex, or nil if the queue is empty.
+func (q *Queue) Current() *TrackID {
+	if q.IsEmpty() {
+		return nil
 	}
+	return &q.trackIDs[q.currentIndex]
+}
 
-	upcoming := q.tracks[q.currentIndex+1:]
-	result := make([]*Track, len(upcoming))
+// Upcoming returns track IDs after the current index (for queue display).
+// Returns empty slice if no track IDs or no current track.
+func (q *Queue) Upcoming() []TrackID {
+	upcoming := q.trackIDs[q.currentIndex+1:]
+	result := make([]TrackID, len(upcoming))
 	copy(result, upcoming)
 	return result
 }
 
-// CurrentIndex returns the current track index (-1 if not started or empty).
-func (q *Queue) CurrentIndex() int {
-	q.mu.RLock()
-	defer q.mu.RUnlock()
-	return q.currentIndex
+// List returns a copy of all track IDs in the queue.
+func (q *Queue) List() []TrackID {
+	result := make([]TrackID, q.Len())
+	copy(result, q.trackIDs)
+	return result
 }
 
-// RemoveAt removes and returns the track at the given index (0-indexed).
+// Append adds track ID(s) to the end of the queue.
+func (q *Queue) Append(trackIDs ...TrackID) {
+	q.trackIDs = append(q.trackIDs, trackIDs...)
+}
+
+// Prepend adds track ID(s) to the front of the queue.
+func (q *Queue) Prepend(trackIDs ...TrackID) {
+	q.trackIDs = append(trackIDs, q.trackIDs...)
+}
+
+// GetAt returns the track ID at the given index without removing it.
+// Returns nil if the index is out of bounds.
+func (q *Queue) GetAt(index int) *TrackID {
+	if !q.isValidIndex(index) {
+		return nil
+	}
+	return &q.trackIDs[index]
+}
+
+// RemoveAt removes and returns the track at the given index.
 // Returns nil if the index is out of bounds.
 // Adjusts currentIndex if removing a track before the current position.
-func (q *Queue) RemoveAt(index int) *Track {
-	q.mu.Lock()
-	defer q.mu.Unlock()
-
-	if index < 0 || index >= len(q.tracks) {
+func (q *Queue) RemoveAt(index int) *TrackID {
+	if !q.isValidIndex(index) {
 		return nil
 	}
 
-	track := q.tracks[index]
-	q.tracks = append(q.tracks[:index], q.tracks[index+1:]...)
+	trackID := q.trackIDs[index]
+	q.trackIDs = append(q.trackIDs[:index], q.trackIDs[index+1:]...)
 
 	// Adjust currentIndex if we removed a track before or at current position
+	// TODO: refactor this logic
 	if index < q.currentIndex {
 		q.currentIndex--
 	} else if index == q.currentIndex {
 		// Removed current track; index now points to the next track (or past end)
 		// Keep index as-is; caller should handle this case
-		if q.currentIndex >= len(q.tracks) && len(q.tracks) > 0 {
-			// If we removed the last track and there are still tracks, adjust
-			q.currentIndex = len(q.tracks) - 1
+		if q.currentIndex >= len(q.trackIDs) && len(q.trackIDs) > 0 {
+			// If we removed the last track and there are still trackIDs, adjust
+			q.currentIndex = len(q.trackIDs) - 1
 		}
 	}
 
-	return track
+	return &trackID
 }
 
-// Clear removes all tracks from the queue and resets the index.
-// Returns the number of tracks that were removed.
-func (q *Queue) Clear() int {
-	q.mu.Lock()
-	defer q.mu.Unlock()
-
-	count := len(q.tracks)
-	q.tracks = make([]*Track, 0)
-	q.currentIndex = -1
-	return count
-}
-
-// List returns a copy of all tracks in the queue.
-func (q *Queue) List() []*Track {
-	q.mu.RLock()
-	defer q.mu.RUnlock()
-
-	result := make([]*Track, len(q.tracks))
-	copy(result, q.tracks)
-	return result
-}
-
-// Len returns the total number of tracks in the queue.
-func (q *Queue) Len() int {
-	q.mu.RLock()
-	defer q.mu.RUnlock()
-
-	return len(q.tracks)
-}
-
-// IsEmpty returns true if the queue has no tracks.
-func (q *Queue) IsEmpty() bool {
-	return q.Len() == 0
-}
-
-// IsIdle returns true if there is no current track (not started or past end).
-func (q *Queue) IsIdle() bool {
-	q.mu.RLock()
-	defer q.mu.RUnlock()
-	return q.currentIndex < 0 || q.currentIndex >= len(q.tracks)
-}
-
-// GetAt returns the track at the given index without removing it.
-// Returns nil if the index is out of bounds.
-func (q *Queue) GetAt(index int) *Track {
-	q.mu.RLock()
-	defer q.mu.RUnlock()
-
-	if index < 0 || index >= len(q.tracks) {
+// Seek sets the currentIndex to the specified index.
+// Returns the track at that index, or nil if index is out of bounds.
+// Does not change currentIndex if index is invalid.
+func (q *Queue) Seek(index int) *TrackID {
+	if !q.isValidIndex(index) {
 		return nil
 	}
-	return q.tracks[index]
+
+	q.currentIndex = index
+	return &q.trackIDs[index]
 }
 
-// Prepend adds a track to the front of the queue (index 0) and sets currentIndex to 0.
-// This is used when starting playback of a new track immediately.
-func (q *Queue) Prepend(track *Track) {
-	q.mu.Lock()
-	defer q.mu.Unlock()
+// Advance moves to the next track based on loop mode.
+// Returns the new current track, or nil if queue ended.
+//   - LoopModeNone: advance index, return nil if past end
+//   - LoopModeTrack: don't advance, return same track
+//   - LoopModeQueue: advance, wrap to 0 if past end
+func (q *Queue) Advance(mode LoopMode) *TrackID {
+	if q.IsEmpty() {
+		return nil
+	}
 
-	q.tracks = append([]*Track{track}, q.tracks...)
+	switch mode {
+	case LoopModeTrack:
+		// Don't modify currentIndex, return same track
+
+	case LoopModeQueue:
+		// Advance with wrap-around
+		if q.IsAtLast() {
+			q.currentIndex = 0
+		} else {
+			q.currentIndex++
+		}
+
+	default: // LoopModeNone
+		// Advance if current track is not the last in the queue
+		if q.IsAtLast() {
+			return nil
+		}
+		q.currentIndex++
+	}
+
+	return &q.trackIDs[q.currentIndex]
+}
+
+// Clear removes all track IDs from the queue and resets the index.
+func (q *Queue) Clear() {
+	q.trackIDs = make([]TrackID, 0)
 	q.currentIndex = 0
-}
-
-// ClearAfterCurrent removes all tracks after the current track.
-// Returns the number of tracks removed.
-func (q *Queue) ClearAfterCurrent() int {
-	q.mu.Lock()
-	defer q.mu.Unlock()
-
-	if q.currentIndex < 0 || q.currentIndex >= len(q.tracks)-1 {
-		return 0
-	}
-
-	count := len(q.tracks) - q.currentIndex - 1
-	q.tracks = q.tracks[:q.currentIndex+1]
-	return count
-}
-
-// ResetToIdle resets the queue to idle state (before first track).
-// Used when playback fails to start or when restarting the queue.
-func (q *Queue) ResetToIdle() {
-	q.mu.Lock()
-	defer q.mu.Unlock()
-	q.currentIndex = -1
-}
-
-// Seek sets the currentIndex to the specified position (0-indexed).
-// Returns the track at that position, or nil if position is out of bounds.
-// Does not change currentIndex if position is invalid.
-func (q *Queue) Seek(position int) *Track {
-	q.mu.Lock()
-	defer q.mu.Unlock()
-
-	if position < 0 || position >= len(q.tracks) {
-		return nil
-	}
-
-	q.currentIndex = position
-	return q.tracks[position]
 }

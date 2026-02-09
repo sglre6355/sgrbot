@@ -1,6 +1,8 @@
 package infrastructure
 
 import (
+	"context"
+	"errors"
 	"sync"
 	"testing"
 
@@ -9,102 +11,132 @@ import (
 )
 
 func TestMemoryRepository_Get(t *testing.T) {
+	ctx := context.Background()
 	repo := NewMemoryRepository()
 	guildID := snowflake.ID(123)
 
-	// Get should return nil if state doesn't exist
-	state := repo.Get(guildID)
-	if state != nil {
-		t.Fatal("expected nil for non-existent state")
+	// Get should return error if state doesn't exist
+	_, err := repo.Get(ctx, guildID)
+	if err == nil {
+		t.Fatal("expected error for non-existent state")
+	}
+	if !errors.Is(err, ErrPlayerStateNotFound) {
+		t.Errorf("expected ErrPlayerStateNotFound, got %v", err)
 	}
 
 	// Save a state
 	newState := domain.NewPlayerState(guildID, snowflake.ID(100), snowflake.ID(200))
-	repo.Save(newState)
+	if err := repo.Save(ctx, *newState); err != nil {
+		t.Fatalf("unexpected error saving state: %v", err)
+	}
 
 	// Get should return the saved state
-	state = repo.Get(guildID)
-	if state == nil {
-		t.Fatal("expected state after save")
+	state, err := repo.Get(ctx, guildID)
+	if err != nil {
+		t.Fatalf("unexpected error getting state: %v", err)
 	}
-	if state != newState {
-		t.Error("expected same state instance")
+	if state.GetGuildID() != guildID {
+		t.Error("expected same guild ID")
 	}
 
-	// Different guild should return nil
+	// Different guild should return error
 	otherGuildID := snowflake.ID(456)
-	otherState := repo.Get(otherGuildID)
-	if otherState != nil {
-		t.Error("expected nil for different guild")
+	_, err = repo.Get(ctx, otherGuildID)
+	if err == nil {
+		t.Error("expected error for different guild")
 	}
 }
 
 func TestMemoryRepository_Save(t *testing.T) {
+	ctx := context.Background()
 	repo := NewMemoryRepository()
 	guildID := snowflake.ID(123)
 
 	// Save a state
 	state := domain.NewPlayerState(guildID, snowflake.ID(100), snowflake.ID(200))
-	repo.Save(state)
+	if err := repo.Save(ctx, *state); err != nil {
+		t.Fatalf("unexpected error saving state: %v", err)
+	}
 
 	// Get should return it
-	retrieved := repo.Get(guildID)
-	if retrieved != state {
-		t.Error("expected same state instance after save")
+	retrieved, err := repo.Get(ctx, guildID)
+	if err != nil {
+		t.Fatalf("unexpected error getting state: %v", err)
+	}
+	if retrieved.GetGuildID() != guildID {
+		t.Error("expected same guild ID after save")
 	}
 
 	// Save again should overwrite
 	newState := domain.NewPlayerState(guildID, snowflake.ID(300), snowflake.ID(400))
-	repo.Save(newState)
+	if err := repo.Save(ctx, *newState); err != nil {
+		t.Fatalf("unexpected error saving state: %v", err)
+	}
 
-	retrieved = repo.Get(guildID)
-	if retrieved != newState {
-		t.Error("expected new state after overwrite")
+	retrieved, err = repo.Get(ctx, guildID)
+	if err != nil {
+		t.Fatalf("unexpected error getting state: %v", err)
+	}
+	if retrieved.GetVoiceChannelID() != snowflake.ID(300) {
+		t.Error("expected new voice channel ID after overwrite")
 	}
 }
 
 func TestMemoryRepository_Delete(t *testing.T) {
+	ctx := context.Background()
 	repo := NewMemoryRepository()
 	guildID := snowflake.ID(123)
 
 	// Save a state
 	state := domain.NewPlayerState(guildID, snowflake.ID(100), snowflake.ID(200))
-	repo.Save(state)
+	if err := repo.Save(ctx, *state); err != nil {
+		t.Fatalf("unexpected error saving state: %v", err)
+	}
 
 	// Delete it
-	repo.Delete(guildID)
+	if err := repo.Delete(ctx, guildID); err != nil {
+		t.Fatalf("unexpected error deleting state: %v", err)
+	}
 
-	// Get should return nil
-	retrieved := repo.Get(guildID)
-	if retrieved != nil {
-		t.Error("expected nil after delete")
+	// Get should return error
+	_, err := repo.Get(ctx, guildID)
+	if err == nil {
+		t.Error("expected error after delete")
 	}
 }
 
 func TestMemoryRepository_Count(t *testing.T) {
+	ctx := context.Background()
 	repo := NewMemoryRepository()
 
 	if repo.Count() != 0 {
 		t.Errorf("expected count 0, got %d", repo.Count())
 	}
 
-	repo.Save(domain.NewPlayerState(snowflake.ID(1), snowflake.ID(100), snowflake.ID(200)))
+	_ = repo.Save(
+		ctx,
+		*domain.NewPlayerState(snowflake.ID(1), snowflake.ID(100), snowflake.ID(200)),
+	)
 	if repo.Count() != 1 {
 		t.Errorf("expected count 1, got %d", repo.Count())
 	}
 
-	repo.Save(domain.NewPlayerState(snowflake.ID(2), snowflake.ID(100), snowflake.ID(200)))
+	_ = repo.Save(
+		ctx,
+		*domain.NewPlayerState(snowflake.ID(2), snowflake.ID(100), snowflake.ID(200)),
+	)
 	if repo.Count() != 2 {
 		t.Errorf("expected count 2, got %d", repo.Count())
 	}
 
-	repo.Delete(snowflake.ID(1))
+	_ = repo.Delete(ctx, snowflake.ID(1))
 	if repo.Count() != 1 {
 		t.Errorf("expected count 1 after delete, got %d", repo.Count())
 	}
 }
 
 func TestMemoryRepository_ConcurrentAccess(t *testing.T) {
+	ctx := context.Background()
 	repo := NewMemoryRepository()
 	var wg sync.WaitGroup
 
@@ -115,7 +147,7 @@ func TestMemoryRepository_ConcurrentAccess(t *testing.T) {
 			defer wg.Done()
 			guildID := snowflake.ID(id)
 			state := domain.NewPlayerState(guildID, snowflake.ID(100), snowflake.ID(200))
-			repo.Save(state)
+			_ = repo.Save(ctx, *state)
 		}(i)
 	}
 
@@ -132,9 +164,9 @@ func TestMemoryRepository_ConcurrentAccess(t *testing.T) {
 		go func(id int) {
 			defer wg.Done()
 			guildID := snowflake.ID(id)
-			state := repo.Get(guildID)
-			if state == nil {
-				t.Errorf("expected non-nil state for guild %d", id)
+			_, err := repo.Get(ctx, guildID)
+			if err != nil {
+				t.Errorf("expected no error for guild %d, got %v", id, err)
 			}
 		}(i)
 	}

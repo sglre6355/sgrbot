@@ -94,8 +94,8 @@ func TestVoiceChannelService_Join(t *testing.T) {
 			setupRepo: func(m *mockRepository) {
 				state := m.createConnectedState(guildID, voiceChannelID, notificationChannelID)
 				// Add tracks to queue
-				state.Queue.Add(mockTrack("track-1"))
-				state.Queue.Add(mockTrack("track-2"))
+				state.Queue.Append(mockTrack("track-1").ID)
+				state.Queue.Append(mockTrack("track-2").ID)
 			},
 			wantVoiceChannelID: snowflake.ID(999),
 		},
@@ -145,8 +145,8 @@ func TestVoiceChannelService_Join(t *testing.T) {
 			}
 
 			// Verify state was created
-			state := repo.Get(guildID)
-			if state == nil {
+			state, err := repo.Get(context.Background(), guildID)
+			if err != nil {
 				t.Fatal("expected state to exist")
 			}
 			if state.GetVoiceChannelID() != tt.wantVoiceChannelID {
@@ -172,8 +172,8 @@ func TestVoiceChannelService_Join_PreservesQueueOnMove(t *testing.T) {
 
 	// Create existing state with tracks in queue
 	state := repo.createConnectedState(guildID, oldVoiceChannel, notificationChannelID)
-	state.Queue.Add(mockTrack("track-1"))
-	state.Queue.Add(mockTrack("track-2"))
+	state.Queue.Append(mockTrack("track-1").ID)
+	state.Queue.Append(mockTrack("track-2").ID)
 
 	service := NewVoiceChannelService(repo, connection, nil, nil)
 
@@ -193,8 +193,8 @@ func TestVoiceChannelService_Join_PreservesQueueOnMove(t *testing.T) {
 	}
 
 	// Verify state was updated, not recreated
-	updatedState := repo.Get(guildID)
-	if updatedState == nil {
+	updatedState, err := repo.Get(context.Background(), guildID)
+	if err != nil {
 		t.Fatal("expected state to exist")
 	}
 
@@ -213,11 +213,11 @@ func TestVoiceChannelService_Join_PreservesQueueOnMove(t *testing.T) {
 	}
 
 	tracks := updatedState.Queue.List()
-	if tracks[0].ID != "track-1" {
-		t.Errorf("expected first track ID 'track-1', got %q", tracks[0].ID)
+	if tracks[0] != "track-1" {
+		t.Errorf("expected first track ID 'track-1', got %q", tracks[0])
 	}
-	if tracks[1].ID != "track-2" {
-		t.Errorf("expected second track ID 'track-2', got %q", tracks[1].ID)
+	if tracks[1] != "track-2" {
+		t.Errorf("expected second track ID 'track-2', got %q", tracks[1])
 	}
 }
 
@@ -269,8 +269,8 @@ func TestVoiceChannelService_Leave(t *testing.T) {
 			},
 			setupRepo: func(m *mockRepository) {
 				state := m.createConnectedState(guildID, voiceChannelID, notificationChannelID)
-				state.Queue.Add(mockTrack("track-1"))
-				state.Queue.Add(mockTrack("track-2"))
+				state.Queue.Append(mockTrack("track-1").ID)
+				state.Queue.Append(mockTrack("track-2").ID)
 			},
 		},
 	}
@@ -392,7 +392,8 @@ func TestVoiceChannelService_HandleBotVoiceStateChange_Disconnected(t *testing.T
 	}
 
 	// Verify state was deleted
-	if repo.Get(guildID) != nil {
+	_, err := repo.Get(context.Background(), guildID)
+	if err == nil {
 		t.Error("expected state to be deleted")
 	}
 }
@@ -417,8 +418,8 @@ func TestVoiceChannelService_HandleBotVoiceStateChange_Moved(t *testing.T) {
 	})
 
 	// Verify voice channel was updated
-	state := repo.Get(guildID)
-	if state == nil {
+	state, err := repo.Get(context.Background(), guildID)
+	if err != nil {
 		t.Fatal("expected state to exist")
 	}
 	if state.GetVoiceChannelID() != newVoiceChannel {
@@ -470,7 +471,8 @@ func TestVoiceChannelService_HandleBotVoiceStateChange_DisconnectedNoMessage(t *
 	}
 
 	// Verify state was deleted
-	if repo.Get(guildID) != nil {
+	_, err := repo.Get(context.Background(), guildID)
+	if err == nil {
 		t.Error("expected state to be deleted")
 	}
 }

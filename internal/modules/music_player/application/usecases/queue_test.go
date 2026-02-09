@@ -5,6 +5,7 @@ import (
 	"testing"
 
 	"github.com/disgoorg/snowflake/v2"
+	"github.com/sglre6355/sgrbot/internal/modules/music_player/domain"
 )
 
 func TestQueueService_List(t *testing.T) {
@@ -15,7 +16,7 @@ func TestQueueService_List(t *testing.T) {
 	tests := []struct {
 		name             string
 		input            QueueListInput
-		setupRepo        func(*mockRepository)
+		setupRepo        func(*mockRepository, *mockTrackProvider)
 		wantTotalTracks  int // total tracks in queue
 		wantPageTracks   int // tracks on current page
 		wantPage         int
@@ -29,7 +30,7 @@ func TestQueueService_List(t *testing.T) {
 				GuildID: guildID,
 				Page:    1,
 			},
-			setupRepo: func(m *mockRepository) {
+			setupRepo: func(m *mockRepository, _ *mockTrackProvider) {
 				m.createConnectedState(guildID, voiceChannelID, notificationChannelID)
 			},
 			wantTotalTracks:  0,
@@ -40,38 +41,19 @@ func TestQueueService_List(t *testing.T) {
 			wantPageStart:    0,
 		},
 		{
-			name: "single page with tracks - idle (not started)",
+			name: "single page with tracks - active",
 			input: QueueListInput{
 				GuildID: guildID,
 				Page:    1,
 			},
-			setupRepo: func(m *mockRepository) {
+			setupRepo: func(m *mockRepository, tp *mockTrackProvider) {
 				state := m.createConnectedState(guildID, voiceChannelID, notificationChannelID)
-				// Add 5 tracks without starting playback
 				for i := range 5 {
-					state.Queue.Add(mockTrack("track-" + string(rune('0'+i))))
+					track := mockTrack("track-" + string(rune('0'+i)))
+					tp.Store(track)
+					state.Queue.Append(track.ID)
 				}
-			},
-			wantTotalTracks:  5,
-			wantPageTracks:   5,
-			wantPage:         1,
-			wantTotalPages:   1,
-			wantCurrentIndex: -1, // not started
-			wantPageStart:    0,
-		},
-		{
-			name: "single page with tracks - playing (started)",
-			input: QueueListInput{
-				GuildID: guildID,
-				Page:    1,
-			},
-			setupRepo: func(m *mockRepository) {
-				state := m.createConnectedState(guildID, voiceChannelID, notificationChannelID)
-				// Add 5 tracks and start playback
-				for i := range 5 {
-					state.Queue.Add(mockTrack("track-" + string(rune('0'+i))))
-				}
-				state.Queue.Start()
+				state.SetPlaybackActive(true)
 			},
 			wantTotalTracks:  5,
 			wantPageTracks:   5,
@@ -87,13 +69,14 @@ func TestQueueService_List(t *testing.T) {
 				Page:     1,
 				PageSize: 3,
 			},
-			setupRepo: func(m *mockRepository) {
+			setupRepo: func(m *mockRepository, tp *mockTrackProvider) {
 				state := m.createConnectedState(guildID, voiceChannelID, notificationChannelID)
-				// Add 8 tracks and start playback
 				for i := range 8 {
-					state.Queue.Add(mockTrack("track-" + string(rune('0'+i))))
+					track := mockTrack("track-" + string(rune('0'+i)))
+					tp.Store(track)
+					state.Queue.Append(track.ID)
 				}
-				state.Queue.Start()
+				state.SetPlaybackActive(true)
 			},
 			wantTotalTracks:  8,
 			wantPageTracks:   3,
@@ -109,13 +92,14 @@ func TestQueueService_List(t *testing.T) {
 				Page:     3,
 				PageSize: 3,
 			},
-			setupRepo: func(m *mockRepository) {
+			setupRepo: func(m *mockRepository, tp *mockTrackProvider) {
 				state := m.createConnectedState(guildID, voiceChannelID, notificationChannelID)
-				// Add 8 tracks and start playback
 				for i := range 8 {
-					state.Queue.Add(mockTrack("track-" + string(rune('0'+i))))
+					track := mockTrack("track-" + string(rune('0'+i)))
+					tp.Store(track)
+					state.Queue.Append(track.ID)
 				}
-				state.Queue.Start()
+				state.SetPlaybackActive(true)
 			},
 			wantTotalTracks:  8,
 			wantPageTracks:   2, // 8 tracks, page 3 with size 3 = tracks 6-7
@@ -131,13 +115,14 @@ func TestQueueService_List(t *testing.T) {
 				Page:     10,
 				PageSize: 3,
 			},
-			setupRepo: func(m *mockRepository) {
+			setupRepo: func(m *mockRepository, tp *mockTrackProvider) {
 				state := m.createConnectedState(guildID, voiceChannelID, notificationChannelID)
-				// Add 5 tracks and start playback
 				for i := range 5 {
-					state.Queue.Add(mockTrack("track-" + string(rune('0'+i))))
+					track := mockTrack("track-" + string(rune('0'+i)))
+					tp.Store(track)
+					state.Queue.Append(track.ID)
 				}
-				state.Queue.Start()
+				state.SetPlaybackActive(true)
 			},
 			wantTotalTracks:  5,
 			wantPageTracks:   2, // 5 tracks, page 2 (clamped) with size 3 = tracks 3-4
@@ -153,15 +138,17 @@ func TestQueueService_List(t *testing.T) {
 				Page:     1,
 				PageSize: 5,
 			},
-			setupRepo: func(m *mockRepository) {
+			setupRepo: func(m *mockRepository, tp *mockTrackProvider) {
 				state := m.createConnectedState(guildID, voiceChannelID, notificationChannelID)
 				// Add 5 tracks and advance to index 2
 				for i := range 5 {
-					state.Queue.Add(mockTrack("track-" + string(rune('0'+i))))
+					track := mockTrack("track-" + string(rune('0'+i)))
+					tp.Store(track)
+					state.Queue.Append(track.ID)
 				}
-				state.Queue.Start()
 				state.Queue.Advance(0)
 				state.Queue.Advance(0)
+				state.SetPlaybackActive(true)
 			},
 			wantTotalTracks:  5,
 			wantPageTracks:   5,
@@ -171,15 +158,16 @@ func TestQueueService_List(t *testing.T) {
 			wantPageStart:    0,
 		},
 		{
-			name: "with SetPlaying - prepends track",
+			name: "with setupPlaying - prepends track",
 			input: QueueListInput{
 				GuildID: guildID,
 				Page:    1,
 			},
-			setupRepo: func(m *mockRepository) {
+			setupRepo: func(m *mockRepository, tp *mockTrackProvider) {
 				state := m.createConnectedState(guildID, voiceChannelID, notificationChannelID)
-				state.SetPlaying(mockTrack("current"))
-				state.Queue.Add(mockTrack("queued"))
+				setupPlaying(state, tp, mockTrack("current"))
+				tp.Store(mockTrack("queued"))
+				state.Queue.Append(mockTrack("queued").ID)
 			},
 			wantTotalTracks:  2, // current + queued
 			wantPageTracks:   2,
@@ -195,16 +183,18 @@ func TestQueueService_List(t *testing.T) {
 				Page:     0, // No page specified
 				PageSize: 3,
 			},
-			setupRepo: func(m *mockRepository) {
+			setupRepo: func(m *mockRepository, tp *mockTrackProvider) {
 				state := m.createConnectedState(guildID, voiceChannelID, notificationChannelID)
 				// Add 10 tracks and advance to index 7 (page 3 with size 3)
 				for i := range 10 {
-					state.Queue.Add(mockTrack("track-" + string(rune('0'+i))))
+					track := mockTrack("track-" + string(rune('0'+i)))
+					tp.Store(track)
+					state.Queue.Append(track.ID)
 				}
-				state.Queue.Start()
 				for range 7 {
 					state.Queue.Advance(0)
 				}
+				state.SetPlaybackActive(true)
 			},
 			wantTotalTracks:  10,
 			wantPageTracks:   3, // tracks 6, 7, 8 on page 3
@@ -220,11 +210,17 @@ func TestQueueService_List(t *testing.T) {
 				Page:     0, // No page specified
 				PageSize: 3,
 			},
-			setupRepo: func(m *mockRepository) {
+			setupRepo: func(m *mockRepository, tp *mockTrackProvider) {
 				state := m.createConnectedState(guildID, voiceChannelID, notificationChannelID)
-				// Add 10 tracks but don't start playback
+				// Add 10 tracks and advance past end to become idle
 				for i := range 10 {
-					state.Queue.Add(mockTrack("track-" + string(rune('0'+i))))
+					track := mockTrack("track-" + string(rune('0'+i)))
+					tp.Store(track)
+					state.Queue.Append(track.ID)
+				}
+				// Advance past end: 10 advances from index 0
+				for range 10 {
+					state.Queue.Advance(domain.LoopModeNone)
 				}
 			},
 			wantTotalTracks:  10,
@@ -239,13 +235,14 @@ func TestQueueService_List(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			repo := newMockRepository()
+			tp := newMockTrackProvider()
 
 			if tt.setupRepo != nil {
-				tt.setupRepo(repo)
+				tt.setupRepo(repo, tp)
 			}
 
-			service := NewQueueService(repo, nil)
-			output, err := service.List(tt.input)
+			service := NewQueueService(repo, nil, tp)
+			output, err := service.List(context.Background(), tt.input)
 			if err != nil {
 				t.Errorf("unexpected error: %v", err)
 				return
@@ -281,7 +278,7 @@ func TestQueueService_Remove(t *testing.T) {
 	tests := []struct {
 		name      string
 		input     QueueRemoveInput
-		setupRepo func(*mockRepository)
+		setupRepo func(*mockRepository, *mockTrackProvider)
 		wantErr   error
 		wantID    string
 	}{
@@ -291,13 +288,16 @@ func TestQueueService_Remove(t *testing.T) {
 				GuildID:  guildID,
 				Position: 2,
 			},
-			setupRepo: func(m *mockRepository) {
+			setupRepo: func(m *mockRepository, tp *mockTrackProvider) {
 				state := m.createConnectedState(guildID, voiceChannelID, notificationChannelID)
 				// Queue: [0:current, 1:track-1, 2:track-2, 3:track-3], currentIndex=0
-				state.SetPlaying(mockTrack("current"))
-				state.Queue.Add(mockTrack("track-1"))
-				state.Queue.Add(mockTrack("track-2"))
-				state.Queue.Add(mockTrack("track-3"))
+				setupPlaying(state, tp, mockTrack("current"))
+				tp.Store(mockTrack("track-1"))
+				tp.Store(mockTrack("track-2"))
+				tp.Store(mockTrack("track-3"))
+				state.Queue.Append(mockTrack("track-1").ID)
+				state.Queue.Append(mockTrack("track-2").ID)
+				state.Queue.Append(mockTrack("track-3").ID)
 			},
 			wantID: "track-2",
 		},
@@ -307,15 +307,17 @@ func TestQueueService_Remove(t *testing.T) {
 				GuildID:  guildID,
 				Position: 0,
 			},
-			setupRepo: func(m *mockRepository) {
+			setupRepo: func(m *mockRepository, tp *mockTrackProvider) {
 				state := m.createConnectedState(guildID, voiceChannelID, notificationChannelID)
 				// Add tracks and advance to index 2
 				for i := range 5 {
-					state.Queue.Add(mockTrack("track-" + string(rune('0'+i))))
+					track := mockTrack("track-" + string(rune('0'+i)))
+					tp.Store(track)
+					state.Queue.Append(track.ID)
 				}
-				state.Queue.Start()
 				state.Queue.Advance(0)
 				state.Queue.Advance(0) // currentIndex=2
+				state.SetPlaybackActive(true)
 			},
 			wantID: "track-0", // played track at index 0
 		},
@@ -325,7 +327,7 @@ func TestQueueService_Remove(t *testing.T) {
 				GuildID:  guildID,
 				Position: 0,
 			},
-			setupRepo: func(m *mockRepository) {
+			setupRepo: func(m *mockRepository, _ *mockTrackProvider) {
 				m.createConnectedState(guildID, voiceChannelID, notificationChannelID)
 			},
 			wantErr: ErrQueueEmpty,
@@ -336,10 +338,11 @@ func TestQueueService_Remove(t *testing.T) {
 				GuildID:  guildID,
 				Position: 10,
 			},
-			setupRepo: func(m *mockRepository) {
+			setupRepo: func(m *mockRepository, tp *mockTrackProvider) {
 				state := m.createConnectedState(guildID, voiceChannelID, notificationChannelID)
-				state.SetPlaying(mockTrack("current"))
-				state.Queue.Add(mockTrack("track-1"))
+				setupPlaying(state, tp, mockTrack("current"))
+				tp.Store(mockTrack("track-1"))
+				state.Queue.Append(mockTrack("track-1").ID)
 			},
 			wantErr: ErrInvalidPosition,
 		},
@@ -349,11 +352,12 @@ func TestQueueService_Remove(t *testing.T) {
 				GuildID:  guildID,
 				Position: 0,
 			},
-			setupRepo: func(m *mockRepository) {
+			setupRepo: func(m *mockRepository, tp *mockTrackProvider) {
 				state := m.createConnectedState(guildID, voiceChannelID, notificationChannelID)
-				// currentIndex=0 after SetPlaying
-				state.SetPlaying(mockTrack("current"))
-				state.Queue.Add(mockTrack("track-1"))
+				// currentIndex=0 after setupPlaying
+				setupPlaying(state, tp, mockTrack("current"))
+				tp.Store(mockTrack("track-1"))
+				state.Queue.Append(mockTrack("track-1").ID)
 			},
 			wantErr: ErrIsCurrentTrack,
 		},
@@ -363,15 +367,17 @@ func TestQueueService_Remove(t *testing.T) {
 				GuildID:  guildID,
 				Position: 2,
 			},
-			setupRepo: func(m *mockRepository) {
+			setupRepo: func(m *mockRepository, tp *mockTrackProvider) {
 				state := m.createConnectedState(guildID, voiceChannelID, notificationChannelID)
 				// Add tracks and advance to index 2
 				for i := range 5 {
-					state.Queue.Add(mockTrack("track-" + string(rune('0'+i))))
+					track := mockTrack("track-" + string(rune('0'+i)))
+					tp.Store(track)
+					state.Queue.Append(track.ID)
 				}
-				state.Queue.Start()
 				state.Queue.Advance(0)
 				state.Queue.Advance(0) // currentIndex=2
+				state.SetPlaybackActive(true)
 			},
 			wantErr: ErrIsCurrentTrack,
 		},
@@ -381,10 +387,11 @@ func TestQueueService_Remove(t *testing.T) {
 				GuildID:  guildID,
 				Position: -1,
 			},
-			setupRepo: func(m *mockRepository) {
+			setupRepo: func(m *mockRepository, tp *mockTrackProvider) {
 				state := m.createConnectedState(guildID, voiceChannelID, notificationChannelID)
-				state.SetPlaying(mockTrack("current"))
-				state.Queue.Add(mockTrack("track-1"))
+				setupPlaying(state, tp, mockTrack("current"))
+				tp.Store(mockTrack("track-1"))
+				state.Queue.Append(mockTrack("track-1").ID)
 			},
 			wantErr: ErrInvalidPosition,
 		},
@@ -393,13 +400,14 @@ func TestQueueService_Remove(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			repo := newMockRepository()
+			tp := newMockTrackProvider()
 
 			if tt.setupRepo != nil {
-				tt.setupRepo(repo)
+				tt.setupRepo(repo, tp)
 			}
 
-			service := NewQueueService(repo, nil)
-			output, err := service.Remove(tt.input)
+			service := NewQueueService(repo, nil, tp)
+			output, err := service.Remove(context.Background(), tt.input)
 
 			if tt.wantErr != nil {
 				if err == nil {
@@ -432,21 +440,19 @@ func TestQueueService_Add(t *testing.T) {
 	tests := []struct {
 		name         string
 		input        QueueAddInput
-		setupRepo    func(*mockRepository)
+		setupRepo    func(*mockRepository, *mockTrackProvider)
 		wantPosition int
-		wantWasIdle  bool
 	}{
 		{
-			name: "add to empty queue - connected, publishes with wasIdle=true",
+			name: "add to empty queue - connected",
 			input: QueueAddInput{
 				GuildID: guildID,
 				Track:   mockTrack("track-1"),
 			},
-			setupRepo: func(m *mockRepository) {
+			setupRepo: func(m *mockRepository, _ *mockTrackProvider) {
 				m.createConnectedState(guildID, voiceChannelID, notificationChannelID)
 			},
-			wantPosition: 0, // becomes current (wasIdle)
-			wantWasIdle:  true,
+			wantPosition: 0,
 		},
 		{
 			name: "add to non-empty queue - position 1",
@@ -454,12 +460,11 @@ func TestQueueService_Add(t *testing.T) {
 				GuildID: guildID,
 				Track:   mockTrack("track-2"),
 			},
-			setupRepo: func(m *mockRepository) {
+			setupRepo: func(m *mockRepository, tp *mockTrackProvider) {
 				state := m.createConnectedState(guildID, voiceChannelID, notificationChannelID)
-				state.SetPlaying(mockTrack("track-1")) // Already playing
+				setupPlaying(state, tp, mockTrack("track-1")) // Already playing
 			},
 			wantPosition: 1,
-			wantWasIdle:  false,
 		},
 		{
 			name: "add multiple tracks - position increases",
@@ -467,14 +472,15 @@ func TestQueueService_Add(t *testing.T) {
 				GuildID: guildID,
 				Track:   mockTrack("track-3"),
 			},
-			setupRepo: func(m *mockRepository) {
+			setupRepo: func(m *mockRepository, tp *mockTrackProvider) {
 				state := m.createConnectedState(guildID, voiceChannelID, notificationChannelID)
-				state.SetPlaying(mockTrack("current"))
-				state.Queue.Add(mockTrack("track-1"))
-				state.Queue.Add(mockTrack("track-2"))
+				setupPlaying(state, tp, mockTrack("current"))
+				tp.Store(mockTrack("track-1"))
+				tp.Store(mockTrack("track-2"))
+				state.Queue.Append(mockTrack("track-1").ID)
+				state.Queue.Append(mockTrack("track-2").ID)
 			},
 			wantPosition: 3,
-			wantWasIdle:  false,
 		},
 	}
 
@@ -482,12 +488,13 @@ func TestQueueService_Add(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			repo := newMockRepository()
 			publisher := &mockEventPublisher{}
+			tp := newMockTrackProvider()
 
 			if tt.setupRepo != nil {
-				tt.setupRepo(repo)
+				tt.setupRepo(repo, tp)
 			}
 
-			service := NewQueueService(repo, publisher)
+			service := NewQueueService(repo, publisher, tp)
 			output, err := service.Add(context.Background(), tt.input)
 			if err != nil {
 				t.Errorf("unexpected error: %v", err)
@@ -506,9 +513,6 @@ func TestQueueService_Add(t *testing.T) {
 			if event.GuildID != tt.input.GuildID {
 				t.Errorf("event GuildID = %d, want %d", event.GuildID, tt.input.GuildID)
 			}
-			if event.WasIdle != tt.wantWasIdle {
-				t.Errorf("event WasIdle = %v, want %v", event.WasIdle, tt.wantWasIdle)
-			}
 		})
 	}
 }
@@ -521,7 +525,7 @@ func TestQueueService_Clear(t *testing.T) {
 	tests := []struct {
 		name          string
 		input         QueueClearInput
-		setupRepo     func(*mockRepository)
+		setupRepo     func(*mockRepository, *mockTrackProvider)
 		wantErr       error
 		wantCount     int
 		wantRemaining int
@@ -532,15 +536,17 @@ func TestQueueService_Clear(t *testing.T) {
 				GuildID:          guildID,
 				KeepCurrentTrack: true,
 			},
-			setupRepo: func(m *mockRepository) {
+			setupRepo: func(m *mockRepository, tp *mockTrackProvider) {
 				state := m.createConnectedState(guildID, voiceChannelID, notificationChannelID)
 				// Add 5 tracks and advance to index 2 (track-2 is current)
 				for i := range 5 {
-					state.Queue.Add(mockTrack("track-" + string(rune('0'+i))))
+					track := mockTrack("track-" + string(rune('0'+i)))
+					tp.Store(track)
+					state.Queue.Append(track.ID)
 				}
-				state.Queue.Start()
 				state.Queue.Advance(0)
 				state.Queue.Advance(0) // currentIndex=2
+				state.SetPlaybackActive(true)
 			},
 			wantCount:     4, // 2 played + 2 upcoming cleared
 			wantRemaining: 1, // only current track remains
@@ -551,9 +557,9 @@ func TestQueueService_Clear(t *testing.T) {
 				GuildID:          guildID,
 				KeepCurrentTrack: true,
 			},
-			setupRepo: func(m *mockRepository) {
+			setupRepo: func(m *mockRepository, tp *mockTrackProvider) {
 				state := m.createConnectedState(guildID, voiceChannelID, notificationChannelID)
-				state.SetPlaying(mockTrack("current"))
+				setupPlaying(state, tp, mockTrack("current"))
 				// No other tracks
 			},
 			wantErr: ErrNothingToClear,
@@ -564,16 +570,17 @@ func TestQueueService_Clear(t *testing.T) {
 				GuildID:          guildID,
 				KeepCurrentTrack: true,
 			},
-			setupRepo: func(m *mockRepository) {
+			setupRepo: func(m *mockRepository, tp *mockTrackProvider) {
 				state := m.createConnectedState(guildID, voiceChannelID, notificationChannelID)
-				// Add 3 tracks, start, then advance past all (idle state)
+				// Add 3 tracks, then advance past all (idle state)
 				for i := range 3 {
-					state.Queue.Add(mockTrack("track-" + string(rune('0'+i))))
+					track := mockTrack("track-" + string(rune('0'+i)))
+					tp.Store(track)
+					state.Queue.Append(track.ID)
 				}
-				state.Queue.Start()
-				state.Queue.Advance(0) // index=1
-				state.Queue.Advance(0) // index=2
-				state.Queue.Advance(0) // index=3 (past end, idle)
+				state.Queue.Advance(0)                   // index=1
+				state.Queue.Advance(0)                   // index=2
+				state.Queue.Advance(domain.LoopModeNone) // past end, idle
 			},
 			wantCount:     3, // all 3 played tracks cleared
 			wantRemaining: 0, // nothing remains
@@ -584,7 +591,7 @@ func TestQueueService_Clear(t *testing.T) {
 				GuildID:          guildID,
 				KeepCurrentTrack: true,
 			},
-			setupRepo: func(m *mockRepository) {
+			setupRepo: func(m *mockRepository, _ *mockTrackProvider) {
 				m.createConnectedState(guildID, voiceChannelID, notificationChannelID)
 				// No tracks at all
 			},
@@ -596,13 +603,14 @@ func TestQueueService_Clear(t *testing.T) {
 				GuildID:          guildID,
 				KeepCurrentTrack: false,
 			},
-			setupRepo: func(m *mockRepository) {
+			setupRepo: func(m *mockRepository, tp *mockTrackProvider) {
 				state := m.createConnectedState(guildID, voiceChannelID, notificationChannelID)
 				// Add 5 tracks and advance to index 2
 				for i := range 5 {
-					state.Queue.Add(mockTrack("track-" + string(rune('0'+i))))
+					track := mockTrack("track-" + string(rune('0'+i)))
+					tp.Store(track)
+					state.Queue.Append(track.ID)
 				}
-				state.Queue.Start()
 				state.Queue.Advance(0)
 				state.Queue.Advance(0)
 			},
@@ -615,7 +623,7 @@ func TestQueueService_Clear(t *testing.T) {
 				GuildID:          guildID,
 				KeepCurrentTrack: false,
 			},
-			setupRepo: func(m *mockRepository) {
+			setupRepo: func(m *mockRepository, _ *mockTrackProvider) {
 				m.createConnectedState(guildID, voiceChannelID, notificationChannelID)
 				// No tracks
 			},
@@ -633,13 +641,14 @@ func TestQueueService_Clear(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			repo := newMockRepository()
+			tp := newMockTrackProvider()
 
 			if tt.setupRepo != nil {
-				tt.setupRepo(repo)
+				tt.setupRepo(repo, tp)
 			}
 
-			service := NewQueueService(repo, nil)
-			output, err := service.Clear(tt.input)
+			service := NewQueueService(repo, nil, tp)
+			output, err := service.Clear(context.Background(), tt.input)
 
 			if tt.wantErr != nil {
 				if err == nil {
@@ -662,7 +671,7 @@ func TestQueueService_Clear(t *testing.T) {
 			}
 
 			// Verify remaining tracks
-			state := repo.Get(guildID)
+			state, _ := repo.Get(context.Background(), guildID)
 			if state.Queue.Len() != tt.wantRemaining {
 				t.Errorf("remaining tracks = %d, want %d", state.Queue.Len(), tt.wantRemaining)
 			}
@@ -678,10 +687,9 @@ func TestQueueService_Restart(t *testing.T) {
 	tests := []struct {
 		name        string
 		input       QueueRestartInput
-		setupRepo   func(*mockRepository)
+		setupRepo   func(*mockRepository, *mockTrackProvider)
 		wantErr     error
 		wantTrackID string
-		wantWasIdle bool
 	}{
 		{
 			name: "restart idle queue after it ended",
@@ -689,19 +697,19 @@ func TestQueueService_Restart(t *testing.T) {
 				GuildID:               guildID,
 				NotificationChannelID: notificationChannelID,
 			},
-			setupRepo: func(m *mockRepository) {
+			setupRepo: func(m *mockRepository, tp *mockTrackProvider) {
 				state := m.createConnectedState(guildID, voiceChannelID, notificationChannelID)
 				// Add 3 tracks and advance past end
-				state.Queue.Add(mockTrack("track-0"))
-				state.Queue.Add(mockTrack("track-1"))
-				state.Queue.Add(mockTrack("track-2"))
-				state.Queue.Start()
-				state.Queue.Advance(0) // index=1
-				state.Queue.Advance(0) // index=2
-				state.Queue.Advance(0) // index=3 (past end, idle)
+				for _, id := range []string{"track-0", "track-1", "track-2"} {
+					track := mockTrack(id)
+					tp.Store(track)
+					state.Queue.Append(track.ID)
+				}
+				state.Queue.Advance(0)                   // index=1
+				state.Queue.Advance(0)                   // index=2
+				state.Queue.Advance(domain.LoopModeNone) // past end, idle
 			},
 			wantTrackID: "track-0",
-			wantWasIdle: true,
 		},
 		{
 			name: "restart while playing (in middle of queue)",
@@ -709,17 +717,17 @@ func TestQueueService_Restart(t *testing.T) {
 				GuildID:               guildID,
 				NotificationChannelID: notificationChannelID,
 			},
-			setupRepo: func(m *mockRepository) {
+			setupRepo: func(m *mockRepository, tp *mockTrackProvider) {
 				state := m.createConnectedState(guildID, voiceChannelID, notificationChannelID)
 				// Add 3 tracks and advance to middle
-				state.Queue.Add(mockTrack("track-0"))
-				state.Queue.Add(mockTrack("track-1"))
-				state.Queue.Add(mockTrack("track-2"))
-				state.Queue.Start()
+				for _, id := range []string{"track-0", "track-1", "track-2"} {
+					track := mockTrack(id)
+					tp.Store(track)
+					state.Queue.Append(track.ID)
+				}
 				state.Queue.Advance(0) // index=1
 			},
 			wantTrackID: "track-0",
-			wantWasIdle: true,
 		},
 		{
 			name: "empty queue",
@@ -727,7 +735,7 @@ func TestQueueService_Restart(t *testing.T) {
 				GuildID:               guildID,
 				NotificationChannelID: notificationChannelID,
 			},
-			setupRepo: func(m *mockRepository) {
+			setupRepo: func(m *mockRepository, _ *mockTrackProvider) {
 				m.createConnectedState(guildID, voiceChannelID, notificationChannelID)
 				// No tracks
 			},
@@ -747,12 +755,13 @@ func TestQueueService_Restart(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			repo := newMockRepository()
 			publisher := &mockEventPublisher{}
+			tp := newMockTrackProvider()
 
 			if tt.setupRepo != nil {
-				tt.setupRepo(repo)
+				tt.setupRepo(repo, tp)
 			}
 
-			service := NewQueueService(repo, publisher)
+			service := NewQueueService(repo, publisher, tp)
 			output, err := service.Restart(context.Background(), tt.input)
 
 			if tt.wantErr != nil {
@@ -783,12 +792,8 @@ func TestQueueService_Restart(t *testing.T) {
 			if event.GuildID != tt.input.GuildID {
 				t.Errorf("event GuildID = %d, want %d", event.GuildID, tt.input.GuildID)
 			}
-			if event.WasIdle != tt.wantWasIdle {
-				t.Errorf("event WasIdle = %v, want %v", event.WasIdle, tt.wantWasIdle)
-			}
-
 			// Verify queue is at position 0 (Restart uses Seek(0))
-			state := repo.Get(guildID)
+			state, _ := repo.Get(context.Background(), guildID)
 			if state.Queue.CurrentIndex() != 0 {
 				t.Errorf(
 					"expected currentIndex 0 after Restart, got %d",
@@ -807,14 +812,16 @@ func TestQueueService_Clear_PublishesQueueClearedEvent(t *testing.T) {
 	t.Run("KeepCurrentTrack=false publishes QueueClearedEvent", func(t *testing.T) {
 		repo := newMockRepository()
 		publisher := &mockEventPublisher{}
+		tp := newMockTrackProvider()
 
 		state := repo.createConnectedState(guildID, voiceChannelID, notificationChannelID)
-		state.Queue.Add(mockTrack("track-1"))
-		state.Queue.Add(mockTrack("track-2"))
-		state.Queue.Start()
+		tp.Store(mockTrack("track-1"))
+		tp.Store(mockTrack("track-2"))
+		state.Queue.Append(mockTrack("track-1").ID)
+		state.Queue.Append(mockTrack("track-2").ID)
 
-		service := NewQueueService(repo, publisher)
-		_, err := service.Clear(QueueClearInput{
+		service := NewQueueService(repo, publisher, tp)
+		_, err := service.Clear(context.Background(), QueueClearInput{
 			GuildID:               guildID,
 			NotificationChannelID: notificationChannelID,
 			KeepCurrentTrack:      false,
@@ -844,15 +851,18 @@ func TestQueueService_Clear_PublishesQueueClearedEvent(t *testing.T) {
 	t.Run("KeepCurrentTrack=true does not publish QueueClearedEvent", func(t *testing.T) {
 		repo := newMockRepository()
 		publisher := &mockEventPublisher{}
+		tp := newMockTrackProvider()
 
 		state := repo.createConnectedState(guildID, voiceChannelID, notificationChannelID)
-		state.Queue.Add(mockTrack("track-1"))
-		state.Queue.Add(mockTrack("track-2"))
-		state.Queue.Add(mockTrack("track-3"))
-		state.Queue.Start()
+		tp.Store(mockTrack("track-1"))
+		tp.Store(mockTrack("track-2"))
+		tp.Store(mockTrack("track-3"))
+		state.Queue.Append(mockTrack("track-1").ID)
+		state.Queue.Append(mockTrack("track-2").ID)
+		state.Queue.Append(mockTrack("track-3").ID)
 
-		service := NewQueueService(repo, publisher)
-		_, err := service.Clear(QueueClearInput{
+		service := NewQueueService(repo, publisher, tp)
+		_, err := service.Clear(context.Background(), QueueClearInput{
 			GuildID:               guildID,
 			NotificationChannelID: notificationChannelID,
 			KeepCurrentTrack:      true,
@@ -876,10 +886,9 @@ func TestQueueService_Seek(t *testing.T) {
 	tests := []struct {
 		name        string
 		input       QueueSeekInput
-		setupRepo   func(*mockRepository)
+		setupRepo   func(*mockRepository, *mockTrackProvider)
 		wantErr     error
 		wantTrackID string
-		wantWasIdle bool
 	}{
 		{
 			name: "seek to middle of queue",
@@ -888,16 +897,16 @@ func TestQueueService_Seek(t *testing.T) {
 				Position:              2,
 				NotificationChannelID: notificationChannelID,
 			},
-			setupRepo: func(m *mockRepository) {
+			setupRepo: func(m *mockRepository, tp *mockTrackProvider) {
 				state := m.createConnectedState(guildID, voiceChannelID, notificationChannelID)
-				// Add 5 tracks and start at index 0
+				// Add 5 tracks (Append auto-activates, at index 0)
 				for i := range 5 {
-					state.Queue.Add(mockTrack("track-" + string(rune('0'+i))))
+					track := mockTrack("track-" + string(rune('0'+i)))
+					tp.Store(track)
+					state.Queue.Append(track.ID)
 				}
-				state.Queue.Start()
 			},
 			wantTrackID: "track-2",
-			wantWasIdle: true,
 		},
 		{
 			name: "seek to played track (before current)",
@@ -906,18 +915,18 @@ func TestQueueService_Seek(t *testing.T) {
 				Position:              0,
 				NotificationChannelID: notificationChannelID,
 			},
-			setupRepo: func(m *mockRepository) {
+			setupRepo: func(m *mockRepository, tp *mockTrackProvider) {
 				state := m.createConnectedState(guildID, voiceChannelID, notificationChannelID)
 				// Add 5 tracks and advance to index 2
 				for i := range 5 {
-					state.Queue.Add(mockTrack("track-" + string(rune('0'+i))))
+					track := mockTrack("track-" + string(rune('0'+i)))
+					tp.Store(track)
+					state.Queue.Append(track.ID)
 				}
-				state.Queue.Start()
 				state.Queue.Advance(0)
 				state.Queue.Advance(0) // currentIndex=2
 			},
 			wantTrackID: "track-0",
-			wantWasIdle: true,
 		},
 		{
 			name: "seek to upcoming track (after current)",
@@ -926,16 +935,16 @@ func TestQueueService_Seek(t *testing.T) {
 				Position:              4,
 				NotificationChannelID: notificationChannelID,
 			},
-			setupRepo: func(m *mockRepository) {
+			setupRepo: func(m *mockRepository, tp *mockTrackProvider) {
 				state := m.createConnectedState(guildID, voiceChannelID, notificationChannelID)
-				// Add 5 tracks and start at index 0
+				// Add 5 tracks (Append auto-activates, at index 0)
 				for i := range 5 {
-					state.Queue.Add(mockTrack("track-" + string(rune('0'+i))))
+					track := mockTrack("track-" + string(rune('0'+i)))
+					tp.Store(track)
+					state.Queue.Append(track.ID)
 				}
-				state.Queue.Start()
 			},
 			wantTrackID: "track-4",
-			wantWasIdle: true,
 		},
 		{
 			name: "seek to current position (restarts current)",
@@ -944,17 +953,17 @@ func TestQueueService_Seek(t *testing.T) {
 				Position:              1,
 				NotificationChannelID: notificationChannelID,
 			},
-			setupRepo: func(m *mockRepository) {
+			setupRepo: func(m *mockRepository, tp *mockTrackProvider) {
 				state := m.createConnectedState(guildID, voiceChannelID, notificationChannelID)
 				// Add 3 tracks and advance to index 1
 				for i := range 3 {
-					state.Queue.Add(mockTrack("track-" + string(rune('0'+i))))
+					track := mockTrack("track-" + string(rune('0'+i)))
+					tp.Store(track)
+					state.Queue.Append(track.ID)
 				}
-				state.Queue.Start()
 				state.Queue.Advance(0) // currentIndex=1
 			},
 			wantTrackID: "track-1",
-			wantWasIdle: true,
 		},
 		{
 			name: "seek from idle state (queue ended)",
@@ -963,17 +972,17 @@ func TestQueueService_Seek(t *testing.T) {
 				Position:              1,
 				NotificationChannelID: notificationChannelID,
 			},
-			setupRepo: func(m *mockRepository) {
+			setupRepo: func(m *mockRepository, tp *mockTrackProvider) {
 				state := m.createConnectedState(guildID, voiceChannelID, notificationChannelID)
 				// Add 2 tracks and advance past end
-				state.Queue.Add(mockTrack("track-0"))
-				state.Queue.Add(mockTrack("track-1"))
-				state.Queue.Start()
-				state.Queue.Advance(0) // index=1
-				state.Queue.Advance(0) // past end, idle
+				tp.Store(mockTrack("track-0"))
+				tp.Store(mockTrack("track-1"))
+				state.Queue.Append(mockTrack("track-0").ID)
+				state.Queue.Append(mockTrack("track-1").ID)
+				state.Queue.Advance(0)                   // index=1
+				state.Queue.Advance(domain.LoopModeNone) // past end, idle
 			},
 			wantTrackID: "track-1",
-			wantWasIdle: true,
 		},
 		{
 			name: "empty queue error",
@@ -982,7 +991,7 @@ func TestQueueService_Seek(t *testing.T) {
 				Position:              0,
 				NotificationChannelID: notificationChannelID,
 			},
-			setupRepo: func(m *mockRepository) {
+			setupRepo: func(m *mockRepository, _ *mockTrackProvider) {
 				m.createConnectedState(guildID, voiceChannelID, notificationChannelID)
 				// No tracks
 			},
@@ -995,11 +1004,12 @@ func TestQueueService_Seek(t *testing.T) {
 				Position:              10,
 				NotificationChannelID: notificationChannelID,
 			},
-			setupRepo: func(m *mockRepository) {
+			setupRepo: func(m *mockRepository, tp *mockTrackProvider) {
 				state := m.createConnectedState(guildID, voiceChannelID, notificationChannelID)
-				state.Queue.Add(mockTrack("track-0"))
-				state.Queue.Add(mockTrack("track-1"))
-				state.Queue.Start()
+				tp.Store(mockTrack("track-0"))
+				tp.Store(mockTrack("track-1"))
+				state.Queue.Append(mockTrack("track-0").ID)
+				state.Queue.Append(mockTrack("track-1").ID)
 			},
 			wantErr: ErrInvalidPosition,
 		},
@@ -1010,10 +1020,10 @@ func TestQueueService_Seek(t *testing.T) {
 				Position:              -1,
 				NotificationChannelID: notificationChannelID,
 			},
-			setupRepo: func(m *mockRepository) {
+			setupRepo: func(m *mockRepository, tp *mockTrackProvider) {
 				state := m.createConnectedState(guildID, voiceChannelID, notificationChannelID)
-				state.Queue.Add(mockTrack("track-0"))
-				state.Queue.Start()
+				tp.Store(mockTrack("track-0"))
+				state.Queue.Append(mockTrack("track-0").ID)
 			},
 			wantErr: ErrInvalidPosition,
 		},
@@ -1032,12 +1042,13 @@ func TestQueueService_Seek(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			repo := newMockRepository()
 			publisher := &mockEventPublisher{}
+			tp := newMockTrackProvider()
 
 			if tt.setupRepo != nil {
-				tt.setupRepo(repo)
+				tt.setupRepo(repo, tp)
 			}
 
-			service := NewQueueService(repo, publisher)
+			service := NewQueueService(repo, publisher, tp)
 			output, err := service.Seek(context.Background(), tt.input)
 
 			if tt.wantErr != nil {
@@ -1068,13 +1079,9 @@ func TestQueueService_Seek(t *testing.T) {
 			if event.GuildID != tt.input.GuildID {
 				t.Errorf("event GuildID = %d, want %d", event.GuildID, tt.input.GuildID)
 			}
-			if event.WasIdle != tt.wantWasIdle {
-				t.Errorf("event WasIdle = %v, want %v", event.WasIdle, tt.wantWasIdle)
-			}
-
-			// Verify queue is at the seeked position (not idle)
-			// PlayNext will see this and play Current() instead of calling Start()
-			state := repo.Get(guildID)
+			// Verify queue is at the seeked position but playback inactive
+			// (Seek sets position then SetPlaybackActive(false))
+			state, _ := repo.Get(context.Background(), guildID)
 			if state.Queue.CurrentIndex() != tt.input.Position {
 				t.Errorf(
 					"expected currentIndex %d after Seek, got %d",
@@ -1094,11 +1101,10 @@ func TestQueueService_AddMultiple(t *testing.T) {
 	tests := []struct {
 		name              string
 		input             QueueAddMultipleInput
-		setupRepo         func(*mockRepository)
+		setupRepo         func(*mockRepository, *mockTrackProvider)
 		wantErr           error
 		wantStartPosition int
 		wantCount         int
-		wantWasIdle       bool
 	}{
 		{
 			name: "add multiple tracks to empty queue",
@@ -1111,12 +1117,11 @@ func TestQueueService_AddMultiple(t *testing.T) {
 					mockTrack("track-3"),
 				},
 			},
-			setupRepo: func(m *mockRepository) {
+			setupRepo: func(m *mockRepository, _ *mockTrackProvider) {
 				m.createConnectedState(guildID, voiceChannelID, notificationChannelID)
 			},
 			wantStartPosition: 0,
 			wantCount:         3,
-			wantWasIdle:       true,
 		},
 		{
 			name: "add multiple tracks to playing queue",
@@ -1128,14 +1133,14 @@ func TestQueueService_AddMultiple(t *testing.T) {
 					mockTrack("new-2"),
 				},
 			},
-			setupRepo: func(m *mockRepository) {
+			setupRepo: func(m *mockRepository, tp *mockTrackProvider) {
 				state := m.createConnectedState(guildID, voiceChannelID, notificationChannelID)
-				state.SetPlaying(mockTrack("current"))
-				state.Queue.Add(mockTrack("queued-1"))
+				setupPlaying(state, tp, mockTrack("current"))
+				tp.Store(mockTrack("queued-1"))
+				state.Queue.Append(mockTrack("queued-1").ID)
 			},
 			wantStartPosition: 2, // after current + queued-1
 			wantCount:         2,
-			wantWasIdle:       false,
 		},
 		{
 			name: "add empty tracks slice",
@@ -1144,12 +1149,11 @@ func TestQueueService_AddMultiple(t *testing.T) {
 				NotificationChannelID: notificationChannelID,
 				Tracks:                []*Track{},
 			},
-			setupRepo: func(m *mockRepository) {
+			setupRepo: func(m *mockRepository, _ *mockTrackProvider) {
 				m.createConnectedState(guildID, voiceChannelID, notificationChannelID)
 			},
 			wantStartPosition: 0,
 			wantCount:         0,
-			wantWasIdle:       false, // no event published for empty
 		},
 		{
 			name: "not connected",
@@ -1165,12 +1169,13 @@ func TestQueueService_AddMultiple(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			repo := newMockRepository()
 			publisher := &mockEventPublisher{}
+			tp := newMockTrackProvider()
 
 			if tt.setupRepo != nil {
-				tt.setupRepo(repo)
+				tt.setupRepo(repo, tp)
 			}
 
-			service := NewQueueService(repo, publisher)
+			service := NewQueueService(repo, publisher, tp)
 			output, err := service.AddMultiple(context.Background(), tt.input)
 
 			if tt.wantErr != nil {
@@ -1215,9 +1220,6 @@ func TestQueueService_AddMultiple(t *testing.T) {
 				if event.GuildID != tt.input.GuildID {
 					t.Errorf("event GuildID = %d, want %d", event.GuildID, tt.input.GuildID)
 				}
-				if event.WasIdle != tt.wantWasIdle {
-					t.Errorf("event WasIdle = %v, want %v", event.WasIdle, tt.wantWasIdle)
-				}
 				// Event should contain the first track
 				if event.Track.ID != tt.input.Tracks[0].ID {
 					t.Errorf("event Track.ID = %q, want %q", event.Track.ID, tt.input.Tracks[0].ID)
@@ -1234,11 +1236,12 @@ func TestQueueService_AddMultiple_TracksOrder(t *testing.T) {
 
 	repo := newMockRepository()
 	publisher := &mockEventPublisher{}
+	tp := newMockTrackProvider()
 
 	state := repo.createConnectedState(guildID, voiceChannelID, notificationChannelID)
-	state.SetPlaying(mockTrack("current"))
+	setupPlaying(state, tp, mockTrack("current"))
 
-	service := NewQueueService(repo, publisher)
+	service := NewQueueService(repo, publisher, tp)
 	_, err := service.AddMultiple(context.Background(), QueueAddMultipleInput{
 		GuildID:               guildID,
 		NotificationChannelID: notificationChannelID,
@@ -1253,15 +1256,16 @@ func TestQueueService_AddMultiple_TracksOrder(t *testing.T) {
 	}
 
 	// Verify tracks are in correct order
-	tracks := state.Queue.List()
+	updatedState, _ := repo.Get(context.Background(), guildID)
+	tracks := updatedState.Queue.List()
 	if len(tracks) != 4 {
 		t.Fatalf("expected 4 tracks in queue, got %d", len(tracks))
 	}
 
 	expectedOrder := []string{"current", "new-1", "new-2", "new-3"}
 	for i, expected := range expectedOrder {
-		if string(tracks[i].ID) != expected {
-			t.Errorf("track[%d].ID = %q, want %q", i, tracks[i].ID, expected)
+		if string(tracks[i]) != expected {
+			t.Errorf("track[%d] = %q, want %q", i, tracks[i], expected)
 		}
 	}
 }

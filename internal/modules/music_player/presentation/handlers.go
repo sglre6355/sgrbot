@@ -149,7 +149,7 @@ func (h *Handlers) HandlePlay(
 	}
 
 	// 2. Load tracks via TrackLoaderService (may be single track or playlist)
-	tracksOutput, err := h.trackLoader.LoadTracks(ctx, usecases.LoadTracksInput{
+	tracksOutput, err := h.trackLoader.ResolveQuery(ctx, usecases.ResolveQueryInput{
 		Query:              query,
 		RequesterID:        userID,
 		RequesterName:      getDisplayName(i.Member),
@@ -206,7 +206,7 @@ func (h *Handlers) HandleStop(
 	ctx := context.Background()
 
 	// Clear the entire queue (ignore error if already empty)
-	_, _ = h.queue.Clear(usecases.QueueClearInput{
+	_, _ = h.queue.Clear(ctx, usecases.QueueClearInput{
 		GuildID:               guildID,
 		KeepCurrentTrack:      false, // Clear everything
 		NotificationChannelID: notificationChannelID,
@@ -367,7 +367,7 @@ func (h *Handlers) handleQueueList(
 		NotificationChannelID: notificationChannelID,
 	}
 
-	output, err := h.queue.List(input)
+	output, err := h.queue.List(context.Background(), input)
 	if err != nil {
 		return respondError(r, err.Error())
 	}
@@ -405,11 +405,13 @@ func (h *Handlers) handleQueueRemove(
 		NotificationChannelID: notificationChannelID,
 	}
 
-	output, err := h.queue.Remove(input)
+	ctx := context.Background()
+
+	output, err := h.queue.Remove(ctx, input)
 	if err != nil {
 		// If trying to remove current track, skip first then remove
 		if errors.Is(err, usecases.ErrIsCurrentTrack) {
-			skipOutput, skipErr := h.playback.Skip(context.Background(), usecases.SkipInput{
+			skipOutput, skipErr := h.playback.Skip(ctx, usecases.SkipInput{
 				GuildID:               guildID,
 				NotificationChannelID: notificationChannelID,
 			})
@@ -418,7 +420,7 @@ func (h *Handlers) handleQueueRemove(
 			}
 			// After skip, currentIndex has advanced, so we can now remove the track
 			// at the original position (which is now in the "played" section)
-			_, _ = h.queue.Remove(usecases.QueueRemoveInput{
+			_, _ = h.queue.Remove(ctx, usecases.QueueRemoveInput{
 				GuildID:               guildID,
 				Position:              position,
 				NotificationChannelID: notificationChannelID,
@@ -452,7 +454,7 @@ func (h *Handlers) handleQueueClear(
 		NotificationChannelID: notificationChannelID,
 	}
 
-	_, err = h.queue.Clear(input)
+	_, err = h.queue.Clear(context.Background(), input)
 	if err != nil {
 		return respondError(r, err.Error())
 	}

@@ -12,9 +12,6 @@ type NotificationSender interface {
 	// DeleteMessage deletes a message from the channel.
 	DeleteMessage(channelID snowflake.ID, messageID snowflake.ID) error
 
-	// SendQueueAdded sends a "Added to Queue" embed to the channel.
-	SendQueueAdded(channelID snowflake.ID, info *QueueAddedInfo) error
-
 	// SendError sends an error message embed to the channel.
 	SendError(channelID snowflake.ID, message string) error
 }

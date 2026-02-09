@@ -103,25 +103,28 @@ type QueueSeekOutput struct {
 
 // QueueService handles queue operations.
 type QueueService struct {
-	repo      domain.PlayerStateRepository
-	publisher ports.EventPublisher
+	repo          domain.PlayerStateRepository
+	publisher     ports.EventPublisher
+	trackProvider ports.TrackProvider
 }
 
 // NewQueueService creates a new QueueService.
 func NewQueueService(
 	repo domain.PlayerStateRepository,
 	publisher ports.EventPublisher,
+	trackProvider ports.TrackProvider,
 ) *QueueService {
 	return &QueueService{
-		repo:      repo,
-		publisher: publisher,
+		repo:          repo,
+		publisher:     publisher,
+		trackProvider: trackProvider,
 	}
 }
 
 // Add adds a track to the queue and publishes an event to trigger playback if idle.
-func (q *QueueService) Add(_ context.Context, input QueueAddInput) (*QueueAddOutput, error) {
-	state := q.repo.Get(input.GuildID)
-	if state == nil {
+func (q *QueueService) Add(ctx context.Context, input QueueAddInput) (*QueueAddOutput, error) {
+	state, err := q.repo.Get(ctx, input.GuildID)
+	if err != nil {
 		return nil, ErrNotConnected
 	}
 
@@ -130,17 +133,19 @@ func (q *QueueService) Add(_ context.Context, input QueueAddInput) (*QueueAddOut
 		state.SetNotificationChannelID(input.NotificationChannelID)
 	}
 
-	wasIdle := state.IsIdle()
-	state.Queue.Add(input.Track)
+	state.Queue.Append(input.Track.ID)
 	// Position is 0-indexed: Queue[0] = position 0, Queue[1] = position 1, etc.
 	position := state.Queue.Len() - 1
 
-	// Publish event - PlaybackEventHandler will start playback if wasIdle
+	if err := q.repo.Save(ctx, state); err != nil {
+		return nil, err
+	}
+
+	// Publish event - PlaybackEventHandler will start playback if idle
 	if q.publisher != nil {
 		q.publisher.PublishTrackEnqueued(domain.TrackEnqueuedEvent{
 			GuildID: input.GuildID,
 			Track:   input.Track,
-			WasIdle: wasIdle,
 		})
 	}
 
@@ -152,7 +157,7 @@ func (q *QueueService) Add(_ context.Context, input QueueAddInput) (*QueueAddOut
 // AddMultiple adds multiple tracks to the queue atomically.
 // Publishes a single TrackEnqueuedEvent for the first track to trigger playback if idle.
 func (q *QueueService) AddMultiple(
-	_ context.Context,
+	ctx context.Context,
 	input QueueAddMultipleInput,
 ) (*QueueAddMultipleOutput, error) {
 	if len(input.Tracks) == 0 {
@@ -162,8 +167,8 @@ func (q *QueueService) AddMultiple(
 		}, nil
 	}
 
-	state := q.repo.Get(input.GuildID)
-	if state == nil {
+	state, err := q.repo.Get(ctx, input.GuildID)
+	if err != nil {
 		return nil, ErrNotConnected
 	}
 
@@ -173,14 +178,23 @@ func (q *QueueService) AddMultiple(
 	}
 
 	startPosition := state.Queue.Len()
-	wasIdle := state.Queue.AddMultiple(input.Tracks)
 
-	// Publish single event for the first track - PlaybackEventHandler will start playback if wasIdle
+	// Collect IDs and append
+	ids := make([]domain.TrackID, 0, len(input.Tracks))
+	for _, track := range input.Tracks {
+		ids = append(ids, track.ID)
+	}
+	state.Queue.Append(ids...)
+
+	if err := q.repo.Save(ctx, state); err != nil {
+		return nil, err
+	}
+
+	// Publish single event for the first track - PlaybackEventHandler will start playback if idle
 	if q.publisher != nil {
 		q.publisher.PublishTrackEnqueued(domain.TrackEnqueuedEvent{
 			GuildID: input.GuildID,
 			Track:   input.Tracks[0],
-			WasIdle: wasIdle,
 		})
 	}
 
@@ -191,15 +205,16 @@ func (q *QueueService) AddMultiple(
 }
 
 // List returns the current queue with pagination.
-func (q *QueueService) List(input QueueListInput) (*QueueListOutput, error) {
-	state := q.repo.Get(input.GuildID)
-	if state == nil {
+func (q *QueueService) List(ctx context.Context, input QueueListInput) (*QueueListOutput, error) {
+	state, err := q.repo.Get(ctx, input.GuildID)
+	if err != nil {
 		return nil, ErrNotConnected
 	}
 
 	// Update notification channel if provided
 	if input.NotificationChannelID != 0 {
 		state.SetNotificationChannelID(input.NotificationChannelID)
+		_ = q.repo.Save(ctx, state)
 	}
 
 	// Validate and set defaults
@@ -208,10 +223,13 @@ func (q *QueueService) List(input QueueListInput) (*QueueListOutput, error) {
 		pageSize = DefaultPageSize
 	}
 
-	// Get all tracks and current index
-	allTracks := state.Queue.List()
-	currentIndex := state.Queue.CurrentIndex()
-	loopMode := state.LoopMode()
+	// Get all track IDs and current index
+	allTrackIDs := state.Queue.List()
+	currentIndex := -1
+	if state.IsPlaybackActive() {
+		currentIndex = state.Queue.CurrentIndex()
+	}
+	loopMode := state.GetLoopMode()
 
 	// Default to page containing the current track (or page 1 if idle)
 	page := input.Page
@@ -224,7 +242,7 @@ func (q *QueueService) List(input QueueListInput) (*QueueListOutput, error) {
 	}
 
 	// Pagination applies to entire queue
-	totalTracks := len(allTracks)
+	totalTracks := len(allTrackIDs)
 	totalPages := (totalTracks + pageSize - 1) / pageSize
 	if totalPages == 0 {
 		totalPages = 1
@@ -242,7 +260,15 @@ func (q *QueueService) List(input QueueListInput) (*QueueListOutput, error) {
 
 	var pageTracks []*domain.Track
 	if start < totalTracks {
-		pageTracks = allTracks[start:end]
+		pageIDs := allTrackIDs[start:end]
+		tracks, err := q.trackProvider.LoadTracks(pageIDs...)
+		if err != nil {
+			return nil, err
+		}
+		pageTracks = make([]*domain.Track, len(tracks))
+		for i := range tracks {
+			pageTracks[i] = &tracks[i]
+		}
 	}
 
 	return &QueueListOutput{
@@ -258,9 +284,12 @@ func (q *QueueService) List(input QueueListInput) (*QueueListOutput, error) {
 
 // Remove removes a track from the queue at the given position (0-indexed).
 // Returns ErrIsCurrentTrack if position is the current track (should use Skip instead).
-func (q *QueueService) Remove(input QueueRemoveInput) (*QueueRemoveOutput, error) {
-	state := q.repo.Get(input.GuildID)
-	if state == nil {
+func (q *QueueService) Remove(
+	ctx context.Context,
+	input QueueRemoveInput,
+) (*QueueRemoveOutput, error) {
+	state, err := q.repo.Get(ctx, input.GuildID)
+	if err != nil {
 		return nil, ErrNotConnected
 	}
 
@@ -279,26 +308,38 @@ func (q *QueueService) Remove(input QueueRemoveInput) (*QueueRemoveOutput, error
 	}
 
 	// Cannot remove current track directly - must use Skip
-	if index == state.Queue.CurrentIndex() {
+	if state.IsPlaybackActive() && index == state.Queue.CurrentIndex() {
 		return nil, ErrIsCurrentTrack
 	}
 
-	track := state.Queue.RemoveAt(index)
-	if track == nil {
+	removedID := state.Queue.RemoveAt(index)
+	if removedID == nil {
 		return nil, ErrInvalidPosition
 	}
 
+	track, err := q.trackProvider.LoadTrack(*removedID)
+	if err != nil {
+		return nil, err
+	}
+
+	if err := q.repo.Save(ctx, state); err != nil {
+		return nil, err
+	}
+
 	return &QueueRemoveOutput{
-		RemovedTrack: track,
+		RemovedTrack: &track,
 	}, nil
 }
 
 // Clear clears the queue.
 // If KeepCurrentTrack is true, clears played + upcoming tracks, keeps only current track.
 // If KeepCurrentTrack is false, clears all tracks.
-func (q *QueueService) Clear(input QueueClearInput) (*QueueClearOutput, error) {
-	state := q.repo.Get(input.GuildID)
-	if state == nil {
+func (q *QueueService) Clear(
+	ctx context.Context,
+	input QueueClearInput,
+) (*QueueClearOutput, error) {
+	state, err := q.repo.Get(ctx, input.GuildID)
+	if err != nil {
 		return nil, ErrNotConnected
 	}
 
@@ -310,29 +351,31 @@ func (q *QueueService) Clear(input QueueClearInput) (*QueueClearOutput, error) {
 	var count int
 	if input.KeepCurrentTrack {
 		// Clear played + upcoming, keep only current track
-		currentTrack := state.Queue.Current()
-		if currentTrack == nil {
+		currentTrackID := state.CurrentTrackID()
+		if currentTrackID == nil {
 			// No current track (idle state) - clear all played tracks
 			if state.Queue.Len() == 0 {
 				return nil, ErrQueueEmpty
 			}
-			count = state.Queue.Clear()
+			count = state.Queue.Len()
+			state.Queue.Clear()
 		} else {
 			count = state.Queue.Len() - 1
 			if count == 0 {
 				return nil, ErrNothingToClear
 			}
-			// Use existing methods: clear all, add back current, start
+			// Use existing methods: clear all, add back current, activate
+			savedID := *currentTrackID
 			state.Queue.Clear()
-			state.Queue.Add(currentTrack)
-			state.Queue.Start()
+			state.Queue.Append(savedID)
 		}
 	} else {
 		// Clear all tracks
 		if state.Queue.Len() == 0 {
 			return nil, ErrQueueEmpty
 		}
-		count = state.Queue.Clear()
+		count = state.Queue.Len()
+		state.Queue.Clear()
 
 		// Publish event to stop playback
 		if q.publisher != nil {
@@ -341,6 +384,10 @@ func (q *QueueService) Clear(input QueueClearInput) (*QueueClearOutput, error) {
 				NotificationChannelID: input.NotificationChannelID,
 			})
 		}
+	}
+
+	if err := q.repo.Save(ctx, state); err != nil {
+		return nil, err
 	}
 
 	return &QueueClearOutput{
@@ -368,11 +415,11 @@ func (q *QueueService) Restart(
 // Seek jumps to a specific position in the queue and triggers playback.
 // Used to immediately play a track at any position (played or upcoming).
 func (q *QueueService) Seek(
-	_ context.Context,
+	ctx context.Context,
 	input QueueSeekInput,
 ) (*QueueSeekOutput, error) {
-	state := q.repo.Get(input.GuildID)
-	if state == nil {
+	state, err := q.repo.Get(ctx, input.GuildID)
+	if err != nil {
 		return nil, ErrNotConnected
 	}
 
@@ -386,9 +433,14 @@ func (q *QueueService) Seek(
 	}
 
 	// Seek to target position (atomic operation with bounds checking)
-	track := state.Queue.Seek(input.Position)
-	if track == nil {
+	trackID := state.Queue.Seek(input.Position)
+	if trackID == nil {
 		return nil, ErrInvalidPosition
+	}
+
+	track, err := q.trackProvider.LoadTrack(*trackID)
+	if err != nil {
+		return nil, err
 	}
 
 	// Delete the old "Now Playing" message before starting the new track
@@ -404,7 +456,11 @@ func (q *QueueService) Seek(
 	}
 
 	// Mark playback as inactive so the event handler will trigger new playback
-	state.StopPlayback()
+	state.SetPlaybackActive(false)
+
+	if err := q.repo.Save(ctx, state); err != nil {
+		return nil, err
+	}
 
 	// Publish event to trigger playback.
 	// PlayNext will see currentIndex >= 0 (not idle) and play Current() directly,
@@ -412,10 +468,9 @@ func (q *QueueService) Seek(
 	if q.publisher != nil {
 		q.publisher.PublishTrackEnqueued(domain.TrackEnqueuedEvent{
 			GuildID: input.GuildID,
-			Track:   track,
-			WasIdle: true,
+			Track:   &track,
 		})
 	}
 
-	return &QueueSeekOutput{Track: track}, nil
+	return &QueueSeekOutput{Track: &track}, nil
 }
