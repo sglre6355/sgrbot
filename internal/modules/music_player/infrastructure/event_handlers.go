@@ -169,7 +169,29 @@ func (h *PlaybackEventHandler) handleTrackEnded(ctx context.Context, event domai
 		state.Queue.Advance(advanceMode)
 		state.Queue.RemoveAt(failedIndex)
 	} else {
-		state.Queue.Advance(state.GetLoopMode())
+		nextTrackID := state.Queue.Advance(state.GetLoopMode())
+		if nextTrackID == nil {
+			state.SetPlaybackActive(false)
+		}
+	}
+
+	if state.IsPlaybackActive() {
+		_, err = h.playNextFunc(ctx, event.GuildID)
+		if err != nil {
+			slog.Error("failed to play next track after track ended",
+				"guild", event.GuildID,
+				"error", err,
+			)
+
+			// Publish error notification if we have a channel
+			if errNowPlayingMsg := state.GetNowPlayingMessage(); errNowPlayingMsg != nil {
+				h.publisher.PublishPlaybackFinished(domain.PlaybackFinishedEvent{
+					GuildID:               event.GuildID,
+					NotificationChannelID: errNowPlayingMsg.ChannelID,
+					LastMessageID:         &errNowPlayingMsg.MessageID,
+				})
+			}
+		}
 	}
 
 	// Save state after mutations
@@ -178,23 +200,6 @@ func (h *PlaybackEventHandler) handleTrackEnded(ctx context.Context, event domai
 			"guild", event.GuildID,
 			"error", err,
 		)
-	}
-
-	_, err = h.playNextFunc(ctx, event.GuildID)
-	if err != nil {
-		slog.Error("failed to play next track after track ended",
-			"guild", event.GuildID,
-			"error", err,
-		)
-
-		// Publish error notification if we have a channel
-		if errNowPlayingMsg := state.GetNowPlayingMessage(); errNowPlayingMsg != nil {
-			h.publisher.PublishPlaybackFinished(domain.PlaybackFinishedEvent{
-				GuildID:               event.GuildID,
-				NotificationChannelID: errNowPlayingMsg.ChannelID,
-				LastMessageID:         &errNowPlayingMsg.MessageID,
-			})
-		}
 	}
 }
 
