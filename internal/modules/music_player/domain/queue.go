@@ -66,6 +66,10 @@ func (q *Queue) Current() *TrackID {
 // Upcoming returns track IDs after the current index (for queue display).
 // Returns empty slice if no track IDs or no current track.
 func (q *Queue) Upcoming() []TrackID {
+	if q.IsEmpty() {
+		return []TrackID{}
+	}
+
 	upcoming := q.trackIDs[q.currentIndex+1:]
 	result := make([]TrackID, len(upcoming))
 	copy(result, upcoming)
