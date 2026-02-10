@@ -109,17 +109,15 @@ func (q *Queue) RemoveAt(index int) *TrackID {
 	trackID := q.trackIDs[index]
 	q.trackIDs = append(q.trackIDs[:index], q.trackIDs[index+1:]...)
 
-	// Adjust currentIndex if we removed a track before or at current position
-	// TODO: refactor this logic
-	if index < q.currentIndex {
+	// Adjust currentIndex if we removed a track before the current position.
+	// If we removed the current track, keep the index pointing at the next track,
+	// unless we removed the last track (then move to the new last index).
+	if q.IsEmpty() {
+		q.currentIndex = 0
+	} else if index < q.currentIndex {
 		q.currentIndex--
-	} else if index == q.currentIndex {
-		// Removed current track; index now points to the next track (or past end)
-		// Keep index as-is; caller should handle this case
-		if q.currentIndex >= len(q.trackIDs) && len(q.trackIDs) > 0 {
-			// If we removed the last track and there are still trackIDs, adjust
-			q.currentIndex = len(q.trackIDs) - 1
-		}
+	} else if index == q.currentIndex && q.currentIndex >= q.Len() {
+		q.currentIndex = q.Len() - 1
 	}
 
 	return &trackID
