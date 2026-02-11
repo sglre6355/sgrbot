@@ -105,9 +105,9 @@ func (h *PlaybackEventHandler) handleQueueCleared(
 		)
 	}
 
-	// Delete the "Now Playing" message
 	state, err := h.repo.Get(ctx, event.GuildID)
 	if err == nil {
+		// Delete the "Now Playing" message
 		nowPlayingMsg := state.GetNowPlayingMessage()
 		if nowPlayingMsg != nil {
 			h.publisher.PublishPlaybackFinished(domain.PlaybackFinishedEvent{
@@ -116,6 +116,8 @@ func (h *PlaybackEventHandler) handleQueueCleared(
 				LastMessageID:         &nowPlayingMsg.MessageID,
 			})
 		}
+
+		state.SetPlaybackActive(false)
 	}
 }
 
