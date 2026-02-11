@@ -150,10 +150,7 @@ func (h *Handlers) HandlePlay(
 
 	// 2. Load tracks via TrackLoaderService (may be single track or playlist)
 	tracksOutput, err := h.trackLoader.ResolveQuery(ctx, usecases.ResolveQueryInput{
-		Query:              query,
-		RequesterID:        userID,
-		RequesterName:      getDisplayName(i.Member),
-		RequesterAvatarURL: i.Member.User.AvatarURL(""),
+		Query: query,
 	})
 	if err != nil {
 		return respondError(r, err.Error())
@@ -164,7 +161,8 @@ func (h *Handlers) HandlePlay(
 		// Single track - use existing Add method
 		_, err = h.queue.Add(ctx, usecases.QueueAddInput{
 			GuildID:               guildID,
-			Track:                 tracksOutput.Tracks[0],
+			TrackID:               tracksOutput.Tracks[0].ID,
+			RequesterID:           userID,
 			NotificationChannelID: notificationChannelID,
 		})
 		if err != nil {
@@ -174,9 +172,14 @@ func (h *Handlers) HandlePlay(
 	}
 
 	// Playlist - use AddMultiple method
+	trackIDs := make([]usecases.TrackID, len(tracksOutput.Tracks))
+	for i, t := range tracksOutput.Tracks {
+		trackIDs[i] = t.ID
+	}
 	output, err := h.queue.AddMultiple(ctx, usecases.QueueAddMultipleInput{
 		GuildID:               guildID,
-		Tracks:                tracksOutput.Tracks,
+		TrackIDs:              trackIDs,
+		RequesterID:           userID,
 		NotificationChannelID: notificationChannelID,
 	})
 	if err != nil {
@@ -909,16 +912,4 @@ func respondQueueList(r bot.Responder, output *usecases.QueueListOutput) error {
 			Embeds: []*discordgo.MessageEmbed{embed},
 		},
 	})
-}
-
-// getDisplayName returns the effective display name for a guild member.
-// Priority: guild nickname > global display name > username.
-func getDisplayName(member *discordgo.Member) string {
-	if member.Nick != "" {
-		return member.Nick
-	}
-	if member.User.GlobalName != "" {
-		return member.User.GlobalName
-	}
-	return member.User.Username
 }

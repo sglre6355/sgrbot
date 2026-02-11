@@ -52,12 +52,3 @@ type NowPlayingInfo struct {
 	RequesterAvatarURL string
 	EnqueuedAt         time.Time
 }
-
-// QueueAddedInfo contains information for the "Added to Queue" notification.
-type QueueAddedInfo struct {
-	Title       string
-	Artist      string
-	Duration    string
-	Position    int
-	RequesterID snowflake.ID
-}

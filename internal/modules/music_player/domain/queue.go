@@ -4,19 +4,19 @@ package domain
 // Instead of removing tracks when they finish, we maintain a currentIndex
 // that advances through the track list, enabling loop functionality.
 type Queue struct {
-	trackIDs     []TrackID
+	entries      []QueueEntry
 	currentIndex int
 }
 
 // NewQueue creates a new empty Queue.
 func NewQueue() Queue {
 	return Queue{
-		trackIDs:     make([]TrackID, 0),
+		entries:      make([]QueueEntry, 0),
 		currentIndex: 0,
 	}
 }
 
-// IsEmpty returns true if the queue has no track IDs.
+// IsEmpty returns true if the queue has no entries.
 func (q *Queue) IsEmpty() bool {
 	return q.Len() == 0
 }
@@ -30,9 +30,9 @@ func (q *Queue) isValidIndex(index int) bool {
 	return 0 <= index && index < q.Len()
 }
 
-// Len returns the total number of track IDs in the queue.
+// Len returns the total number of entries in the queue.
 func (q *Queue) Len() int {
-	return len(q.trackIDs)
+	return len(q.entries)
 }
 
 // CurrentIndex returns the current track index.
@@ -55,67 +55,67 @@ func (q *Queue) HasNext(mode LoopMode) bool {
 	}
 }
 
-// Current returns the track ID at currentIndex, or nil if the queue is empty.
-func (q *Queue) Current() *TrackID {
+// Current returns the entry at currentIndex, or nil if the queue is empty.
+func (q *Queue) Current() *QueueEntry {
 	if q.IsEmpty() {
 		return nil
 	}
-	return &q.trackIDs[q.currentIndex]
+	return &q.entries[q.currentIndex]
 }
 
-// Upcoming returns track IDs after the current index (for queue display).
-// Returns empty slice if no track IDs or no current track.
-func (q *Queue) Upcoming() []TrackID {
+// Upcoming returns entries after the current index (for queue display).
+// Returns empty slice if no entries or no current entry.
+func (q *Queue) Upcoming() []QueueEntry {
 	if q.IsEmpty() {
-		return []TrackID{}
+		return []QueueEntry{}
 	}
 
-	upcoming := q.trackIDs[q.currentIndex+1:]
-	result := make([]TrackID, len(upcoming))
+	upcoming := q.entries[q.currentIndex+1:]
+	result := make([]QueueEntry, len(upcoming))
 	copy(result, upcoming)
 	return result
 }
 
-// List returns a copy of all track IDs in the queue.
-func (q *Queue) List() []TrackID {
-	result := make([]TrackID, q.Len())
-	copy(result, q.trackIDs)
+// List returns a copy of all entries in the queue.
+func (q *Queue) List() []QueueEntry {
+	result := make([]QueueEntry, q.Len())
+	copy(result, q.entries)
 	return result
 }
 
-// Append adds track ID(s) to the end of the queue.
-func (q *Queue) Append(trackIDs ...TrackID) {
-	q.trackIDs = append(q.trackIDs, trackIDs...)
+// Append adds entries to the end of the queue.
+func (q *Queue) Append(entries ...QueueEntry) {
+	q.entries = append(q.entries, entries...)
 }
 
-// Prepend adds track ID(s) to the front of the queue.
-func (q *Queue) Prepend(trackIDs ...TrackID) {
-	q.trackIDs = append(trackIDs, q.trackIDs...)
+// Prepend adds entries to the front of the queue.
+func (q *Queue) Prepend(entries ...QueueEntry) {
+	q.entries = append(entries, q.entries...)
 }
 
-// GetAt returns the track ID at the given index without removing it.
+// GetAt returns the entry at the given index without removing it.
 // Returns nil if the index is out of bounds.
-func (q *Queue) GetAt(index int) *TrackID {
+func (q *Queue) GetAt(index int) *QueueEntry {
 	if !q.isValidIndex(index) {
 		return nil
 	}
-	return &q.trackIDs[index]
+	return &q.entries[index]
 }
 
-// RemoveAt removes and returns the track at the given index.
+// RemoveAt removes and returns the entry at the given index.
 // Returns nil if the index is out of bounds.
-// Adjusts currentIndex if removing a track before the current position.
-func (q *Queue) RemoveAt(index int) *TrackID {
+// Adjusts currentIndex if removing an entry before the current position.
+func (q *Queue) RemoveAt(index int) *QueueEntry {
 	if !q.isValidIndex(index) {
 		return nil
 	}
 
-	trackID := q.trackIDs[index]
-	q.trackIDs = append(q.trackIDs[:index], q.trackIDs[index+1:]...)
+	entry := q.entries[index]
+	q.entries = append(q.entries[:index], q.entries[index+1:]...)
 
-	// Adjust currentIndex if we removed a track before the current position.
-	// If we removed the current track, keep the index pointing at the next track,
-	// unless we removed the last track (then move to the new last index).
+	// Adjust currentIndex if we removed an entry before the current position.
+	// If we removed the current entry, keep the index pointing at the next entry,
+	// unless we removed the last entry (then move to the new last index).
 	if q.IsEmpty() {
 		q.currentIndex = 0
 	} else if index < q.currentIndex {
@@ -124,34 +124,34 @@ func (q *Queue) RemoveAt(index int) *TrackID {
 		q.currentIndex = q.Len() - 1
 	}
 
-	return &trackID
+	return &entry
 }
 
 // Seek sets the currentIndex to the specified index.
-// Returns the track at that index, or nil if index is out of bounds.
+// Returns the entry at that index, or nil if index is out of bounds.
 // Does not change currentIndex if index is invalid.
-func (q *Queue) Seek(index int) *TrackID {
+func (q *Queue) Seek(index int) *QueueEntry {
 	if !q.isValidIndex(index) {
 		return nil
 	}
 
 	q.currentIndex = index
-	return &q.trackIDs[index]
+	return &q.entries[index]
 }
 
 // Advance moves to the next track based on loop mode.
-// Returns the new current track, or nil if queue ended.
+// Returns the new current entry, or nil if queue ended.
 //   - LoopModeNone: advance index, return nil if past end
-//   - LoopModeTrack: don't advance, return same track
+//   - LoopModeTrack: don't advance, return same entry
 //   - LoopModeQueue: advance, wrap to 0 if past end
-func (q *Queue) Advance(mode LoopMode) *TrackID {
+func (q *Queue) Advance(mode LoopMode) *QueueEntry {
 	if q.IsEmpty() {
 		return nil
 	}
 
 	switch mode {
 	case LoopModeTrack:
-		// Don't modify currentIndex, return same track
+		// Don't modify currentIndex, return same entry
 
 	case LoopModeQueue:
 		// Advance with wrap-around
@@ -169,11 +169,11 @@ func (q *Queue) Advance(mode LoopMode) *TrackID {
 		q.currentIndex++
 	}
 
-	return &q.trackIDs[q.currentIndex]
+	return &q.entries[q.currentIndex]
 }
 
-// Clear removes all track IDs from the queue and resets the index.
+// Clear removes all entries from the queue and resets the index.
 func (q *Queue) Clear() {
-	q.trackIDs = make([]TrackID, 0)
+	q.entries = make([]QueueEntry, 0)
 	q.currentIndex = 0
 }

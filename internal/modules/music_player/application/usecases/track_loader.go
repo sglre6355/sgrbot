@@ -5,17 +5,13 @@ import (
 	"fmt"
 	"sync"
 
-	"github.com/disgoorg/snowflake/v2"
 	"github.com/sglre6355/sgrbot/internal/modules/music_player/application/ports"
 	"github.com/sglre6355/sgrbot/internal/modules/music_player/domain"
 )
 
 // ResolveQueryInput contains the input for the ResolveQuery use case.
 type ResolveQueryInput struct {
-	Query              string
-	RequesterID        snowflake.ID
-	RequesterName      string
-	RequesterAvatarURL string
+	Query string
 }
 
 // ResolveQueryOutput contains the result of the ResolveQuery use case.
@@ -114,7 +110,6 @@ func (s *TrackLoaderService) ResolveQuery(
 	for _, trackInfo := range tracksToConvert {
 		track := domain.NewTrack(
 			domain.TrackID(trackInfo.Identifier),
-			trackInfo.Encoded,
 			trackInfo.Title,
 			trackInfo.Artist,
 			trackInfo.Duration,
@@ -122,9 +117,6 @@ func (s *TrackLoaderService) ResolveQuery(
 			trackInfo.ArtworkURL,
 			trackInfo.SourceName,
 			trackInfo.IsStream,
-			input.RequesterID,
-			input.RequesterName,
-			input.RequesterAvatarURL,
 		)
 		tracks = append(tracks, track)
 	}

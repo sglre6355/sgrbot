@@ -4,6 +4,10 @@ import (
 	"testing"
 )
 
+func entry(id TrackID) QueueEntry {
+	return QueueEntry{TrackID: id}
+}
+
 func TestNewQueue(t *testing.T) {
 	q := NewQueue()
 
@@ -21,13 +25,13 @@ func TestQueue_Append(t *testing.T) {
 	trackID2 := TrackID("track-2")
 
 	// Append single track
-	q.Append(trackID1)
+	q.Append(entry(trackID1))
 	if q.Len() != 1 {
 		t.Errorf("expected length 1, got %d", q.Len())
 	}
 
 	// Append another track
-	q.Append(trackID2)
+	q.Append(entry(trackID2))
 	if q.Len() != 2 {
 		t.Errorf("expected length 2, got %d", q.Len())
 	}
@@ -36,9 +40,9 @@ func TestQueue_Append(t *testing.T) {
 func TestQueue_Append_Multiple(t *testing.T) {
 	t.Run("append multiple to empty queue", func(t *testing.T) {
 		q := NewQueue()
-		trackIDs := []TrackID{"track-1", "track-2", "track-3"}
+		entries := []QueueEntry{entry("track-1"), entry("track-2"), entry("track-3")}
 
-		q.Append(trackIDs...)
+		q.Append(entries...)
 		if q.Len() != 3 {
 			t.Errorf("expected length 3, got %d", q.Len())
 		}
@@ -46,9 +50,9 @@ func TestQueue_Append_Multiple(t *testing.T) {
 
 	t.Run("append empty slice", func(t *testing.T) {
 		q := NewQueue()
-		trackIDs := []TrackID{}
+		entries := []QueueEntry{}
 
-		q.Append(trackIDs...)
+		q.Append(entries...)
 		if q.Len() != 0 {
 			t.Errorf("expected length 0, got %d", q.Len())
 		}
@@ -56,16 +60,17 @@ func TestQueue_Append_Multiple(t *testing.T) {
 
 	t.Run("tracks are appended in order", func(t *testing.T) {
 		q := NewQueue()
-		q.Append("track-0")
+		q.Append(entry("track-0"))
 
-		trackIDs := []TrackID{"track-1", "track-2"}
-		q.Append(trackIDs...)
+		entries := []QueueEntry{entry("track-1"), entry("track-2")}
+		q.Append(entries...)
 
 		list := q.List()
 		if len(list) != 3 {
 			t.Fatalf("expected 3 tracks, got %d", len(list))
 		}
-		if list[0] != "track-0" || list[1] != "track-1" || list[2] != "track-2" {
+		if list[0].TrackID != "track-0" || list[1].TrackID != "track-1" ||
+			list[2].TrackID != "track-2" {
 			t.Error("tracks not in expected order")
 		}
 	})
@@ -73,16 +78,17 @@ func TestQueue_Append_Multiple(t *testing.T) {
 
 func TestQueue_Prepend(t *testing.T) {
 	q := NewQueue()
-	q.Append("track-2", "track-3")
+	q.Append(entry("track-2"), entry("track-3"))
 
-	q.Prepend("track-0", "track-1")
+	q.Prepend(entry("track-0"), entry("track-1"))
 
 	list := q.List()
 	if len(list) != 4 {
 		t.Fatalf("expected 4 tracks, got %d", len(list))
 	}
-	if list[0] != "track-0" || list[1] != "track-1" || list[2] != "track-2" ||
-		list[3] != "track-3" {
+	if list[0].TrackID != "track-0" || list[1].TrackID != "track-1" ||
+		list[2].TrackID != "track-2" ||
+		list[3].TrackID != "track-3" {
 		t.Error("tracks not in expected order after prepend")
 	}
 }
@@ -96,15 +102,15 @@ func TestQueue_Current(t *testing.T) {
 		t.Errorf("expected nil from empty queue, got %v", got)
 	}
 
-	q.Append(trackID)
+	q.Append(entry(trackID))
 
 	// After Append, Current returns the first track (queue is active)
 	got := q.Current()
 	if got == nil {
 		t.Fatal("expected track after Append")
 	}
-	if *got != trackID {
-		t.Errorf("expected %s, got %s", trackID, *got)
+	if got.TrackID != trackID {
+		t.Errorf("expected %s, got %s", trackID, got.TrackID)
 	}
 }
 
@@ -118,11 +124,11 @@ func TestQueue_Advance_LoopModeNone(t *testing.T) {
 		t.Errorf("expected nil from empty queue, got %v", got)
 	}
 
-	q.Append(trackID1, trackID2)
+	q.Append(entry(trackID1), entry(trackID2))
 
 	// Advance should return next track
 	got := q.Advance(LoopModeNone)
-	if got == nil || *got != trackID2 {
+	if got == nil || got.TrackID != trackID2 {
 		t.Errorf("expected track2, got %v", got)
 	}
 	if q.CurrentIndex() != 1 {
@@ -146,11 +152,11 @@ func TestQueue_Advance_LoopModeTrack(t *testing.T) {
 	trackID1 := TrackID("track-1")
 	trackID2 := TrackID("track-2")
 
-	q.Append(trackID1, trackID2)
+	q.Append(entry(trackID1), entry(trackID2))
 
 	// Advance with LoopModeTrack should return same track
 	got := q.Advance(LoopModeTrack)
-	if got == nil || *got != trackID1 {
+	if got == nil || got.TrackID != trackID1 {
 		t.Errorf("expected track1, got %v", got)
 	}
 	if q.CurrentIndex() != 0 {
@@ -160,7 +166,7 @@ func TestQueue_Advance_LoopModeTrack(t *testing.T) {
 	// Multiple advances should keep returning same track
 	for i := range 5 {
 		got = q.Advance(LoopModeTrack)
-		if got == nil || *got != trackID1 {
+		if got == nil || got.TrackID != trackID1 {
 			t.Errorf("iteration %d: expected track1, got %v", i, got)
 		}
 	}
@@ -172,19 +178,19 @@ func TestQueue_Advance_LoopModeQueue(t *testing.T) {
 	trackID2 := TrackID("track-2")
 	trackID3 := TrackID("track-3")
 
-	q.Append(trackID1, trackID2, trackID3)
+	q.Append(entry(trackID1), entry(trackID2), entry(trackID3))
 
 	// Advance through all tracks
-	if got := q.Advance(LoopModeQueue); got == nil || *got != trackID2 {
+	if got := q.Advance(LoopModeQueue); got == nil || got.TrackID != trackID2 {
 		t.Errorf("expected track2, got %v", got)
 	}
-	if got := q.Advance(LoopModeQueue); got == nil || *got != trackID3 {
+	if got := q.Advance(LoopModeQueue); got == nil || got.TrackID != trackID3 {
 		t.Errorf("expected track3, got %v", got)
 	}
 
 	// Should wrap to beginning
 	got := q.Advance(LoopModeQueue)
-	if got == nil || *got != trackID1 {
+	if got == nil || got.TrackID != trackID1 {
 		t.Errorf("expected track1 (wrap), got %v", got)
 	}
 	if q.CurrentIndex() != 0 {
@@ -196,12 +202,12 @@ func TestQueue_Advance_LoopModeQueue_SingleTrack(t *testing.T) {
 	q := NewQueue()
 	trackID := TrackID("track-1")
 
-	q.Append(trackID)
+	q.Append(entry(trackID))
 
 	// Single track with LoopModeQueue should keep returning same track
 	for i := range 5 {
 		got := q.Advance(LoopModeQueue)
-		if got == nil || *got != trackID {
+		if got == nil || got.TrackID != trackID {
 			t.Errorf("iteration %d: expected track, got %v", i, got)
 		}
 	}
@@ -217,7 +223,7 @@ func TestQueue_HasNext(t *testing.T) {
 		t.Error("expected HasNext=false for empty queue")
 	}
 
-	q.Append(trackID1, trackID2)
+	q.Append(entry(trackID1), entry(trackID2))
 
 	// HasNext with LoopModeNone should be true when there are more tracks
 	if !q.HasNext(LoopModeNone) {
@@ -249,14 +255,14 @@ func TestQueue_Upcoming(t *testing.T) {
 	trackID2 := TrackID("track-2")
 	trackID3 := TrackID("track-3")
 
-	q.Append(trackID1, trackID2, trackID3)
+	q.Append(entry(trackID1), entry(trackID2), entry(trackID3))
 
 	// Upcoming should return tracks after current
 	upcoming := q.Upcoming()
 	if len(upcoming) != 2 {
 		t.Errorf("expected 2 upcoming, got %d", len(upcoming))
 	}
-	if upcoming[0] != trackID2 || upcoming[1] != trackID3 {
+	if upcoming[0].TrackID != trackID2 || upcoming[1].TrackID != trackID3 {
 		t.Error("unexpected upcoming track order")
 	}
 
@@ -266,7 +272,7 @@ func TestQueue_Upcoming(t *testing.T) {
 	if len(upcoming) != 1 {
 		t.Errorf("expected 1 upcoming, got %d", len(upcoming))
 	}
-	if upcoming[0] != trackID3 {
+	if upcoming[0].TrackID != trackID3 {
 		t.Error("expected track3 as upcoming")
 	}
 
@@ -284,20 +290,20 @@ func TestQueue_RemoveAt(t *testing.T) {
 	trackID2 := TrackID("track-2")
 	trackID3 := TrackID("track-3")
 
-	q.Append(trackID1, trackID2, trackID3)
+	q.Append(entry(trackID1), entry(trackID2), entry(trackID3))
 
 	// Set current to track2 (index 1)
 	q.Advance(LoopModeNone)
 
 	// Remove track before current (should decrement currentIndex)
 	removed := q.RemoveAt(0)
-	if removed == nil || *removed != trackID1 {
+	if removed == nil || removed.TrackID != trackID1 {
 		t.Errorf("expected track1, got %v", removed)
 	}
 	if q.CurrentIndex() != 0 {
 		t.Errorf("expected currentIndex 0 after removing before, got %d", q.CurrentIndex())
 	}
-	if got := q.Current(); got == nil || *got != trackID2 {
+	if got := q.Current(); got == nil || got.TrackID != trackID2 {
 		t.Error("current track should still be track2")
 	}
 
@@ -315,16 +321,16 @@ func TestQueue_RemoveAt_CurrentTrack(t *testing.T) {
 	trackID1 := TrackID("track-1")
 	trackID2 := TrackID("track-2")
 
-	q.Append(trackID1, trackID2)
+	q.Append(entry(trackID1), entry(trackID2))
 
 	// Remove current track
 	removed := q.RemoveAt(0)
-	if removed == nil || *removed != trackID1 {
+	if removed == nil || removed.TrackID != trackID1 {
 		t.Errorf("expected track1, got %v", removed)
 	}
 
 	// Current should now be track2
-	if got := q.Current(); got == nil || *got != trackID2 {
+	if got := q.Current(); got == nil || got.TrackID != trackID2 {
 		t.Error("current track should be track2 after removing track1")
 	}
 	if q.CurrentIndex() != 0 {
@@ -337,12 +343,12 @@ func TestQueue_RemoveAt_AdjustsIndexWhenRemovingLastTrack(t *testing.T) {
 	trackID1 := TrackID("track-1")
 	trackID2 := TrackID("track-2")
 
-	q.Append(trackID1, trackID2)
+	q.Append(entry(trackID1), entry(trackID2))
 	q.Advance(LoopModeNone) // Now at track2 (index 1)
 
 	// Remove current track (which is the last one)
 	removed := q.RemoveAt(1)
-	if removed == nil || *removed != trackID2 {
+	if removed == nil || removed.TrackID != trackID2 {
 		t.Errorf("expected track2, got %v", removed)
 	}
 
@@ -350,7 +356,7 @@ func TestQueue_RemoveAt_AdjustsIndexWhenRemovingLastTrack(t *testing.T) {
 	if q.CurrentIndex() != 0 {
 		t.Errorf("expected currentIndex 0 after removing last, got %d", q.CurrentIndex())
 	}
-	if got := q.Current(); got == nil || *got != trackID1 {
+	if got := q.Current(); got == nil || got.TrackID != trackID1 {
 		t.Error("current track should be track1")
 	}
 }
@@ -360,7 +366,7 @@ func TestQueue_Clear(t *testing.T) {
 	trackID1 := TrackID("track-1")
 	trackID2 := TrackID("track-2")
 
-	q.Append(trackID1, trackID2)
+	q.Append(entry(trackID1), entry(trackID2))
 
 	q.Clear()
 	if q.Len() != 0 {
@@ -382,19 +388,19 @@ func TestQueue_List(t *testing.T) {
 		t.Errorf("expected empty list, got %d items", len(list))
 	}
 
-	q.Append(trackID1, trackID2)
+	q.Append(entry(trackID1), entry(trackID2))
 
 	list = q.List()
 	if len(list) != 2 {
 		t.Errorf("expected 2 items, got %d", len(list))
 	}
-	if list[0] != trackID1 || list[1] != trackID2 {
+	if list[0].TrackID != trackID1 || list[1].TrackID != trackID2 {
 		t.Error("unexpected track order in List")
 	}
 
 	// Verify List returns a copy (modifying it doesn't affect queue)
-	list[0] = "modified"
-	if got := q.Current(); got == nil || *got != trackID1 {
+	list[0].TrackID = "modified"
+	if got := q.Current(); got == nil || got.TrackID != trackID1 {
 		t.Error("modifying List result affected queue")
 	}
 }
@@ -406,7 +412,7 @@ func TestQueue_IsEmpty(t *testing.T) {
 		t.Error("new queue should be empty")
 	}
 
-	q.Append("track-1")
+	q.Append(entry("track-1"))
 	if q.IsEmpty() {
 		t.Error("queue with track should not be empty")
 	}
@@ -427,12 +433,12 @@ func TestQueue_GetAt(t *testing.T) {
 		t.Errorf("expected nil from empty queue, got %v", got)
 	}
 
-	q.Append(trackID1, trackID2)
+	q.Append(entry(trackID1), entry(trackID2))
 
-	if got := q.GetAt(0); got == nil || *got != trackID1 {
+	if got := q.GetAt(0); got == nil || got.TrackID != trackID1 {
 		t.Errorf("expected track1 at index 0, got %v", got)
 	}
-	if got := q.GetAt(1); got == nil || *got != trackID2 {
+	if got := q.GetAt(1); got == nil || got.TrackID != trackID2 {
 		t.Errorf("expected track2 at index 1, got %v", got)
 	}
 	if got := q.GetAt(-1); got != nil {
@@ -450,17 +456,17 @@ func TestQueue_Seek(t *testing.T) {
 		trackID1 := TrackID("track-1")
 		trackID2 := TrackID("track-2")
 
-		q.Append(trackID0, trackID1, trackID2)
+		q.Append(entry(trackID0), entry(trackID1), entry(trackID2))
 
 		// Seek to middle position
 		got := q.Seek(1)
-		if got == nil || *got != trackID1 {
+		if got == nil || got.TrackID != trackID1 {
 			t.Errorf("expected track1, got %v", got)
 		}
 		if q.CurrentIndex() != 1 {
 			t.Errorf("expected currentIndex 1, got %d", q.CurrentIndex())
 		}
-		if got := q.Current(); got == nil || *got != trackID1 {
+		if got := q.Current(); got == nil || got.TrackID != trackID1 {
 			t.Error("Current() should return track1 after seek")
 		}
 	})
@@ -470,12 +476,12 @@ func TestQueue_Seek(t *testing.T) {
 		trackID0 := TrackID("track-0")
 		trackID1 := TrackID("track-1")
 
-		q.Append(trackID0, trackID1)
+		q.Append(entry(trackID0), entry(trackID1))
 		q.Advance(LoopModeNone) // now at index 1
 
 		// Seek back to first position
 		got := q.Seek(0)
-		if got == nil || *got != trackID0 {
+		if got == nil || got.TrackID != trackID0 {
 			t.Errorf("expected track0, got %v", got)
 		}
 		if q.CurrentIndex() != 0 {
@@ -489,11 +495,11 @@ func TestQueue_Seek(t *testing.T) {
 		trackID1 := TrackID("track-1")
 		trackID2 := TrackID("track-2")
 
-		q.Append(trackID0, trackID1, trackID2)
+		q.Append(entry(trackID0), entry(trackID1), entry(trackID2))
 
 		// Seek to last position
 		got := q.Seek(2)
-		if got == nil || *got != trackID2 {
+		if got == nil || got.TrackID != trackID2 {
 			t.Errorf("expected track2, got %v", got)
 		}
 		if q.CurrentIndex() != 2 {
@@ -503,7 +509,7 @@ func TestQueue_Seek(t *testing.T) {
 
 	t.Run("seek to invalid negative position", func(t *testing.T) {
 		q := NewQueue()
-		q.Append("track-0")
+		q.Append(entry("track-0"))
 
 		got := q.Seek(-1)
 		if got != nil {
@@ -517,7 +523,7 @@ func TestQueue_Seek(t *testing.T) {
 
 	t.Run("seek to out of bounds position", func(t *testing.T) {
 		q := NewQueue()
-		q.Append("track-0", "track-1")
+		q.Append(entry("track-0"), entry("track-1"))
 
 		got := q.Seek(10)
 		if got != nil {
@@ -546,13 +552,13 @@ func TestQueue_Seek(t *testing.T) {
 		trackID0 := TrackID("track-0")
 		trackID1 := TrackID("track-1")
 
-		q.Append(trackID0, trackID1)
+		q.Append(entry(trackID0), entry(trackID1))
 		q.Advance(LoopModeNone) // index=1
 		q.Advance(LoopModeNone) // past end
 
 		// Seek should bring us back to a valid position
 		got := q.Seek(0)
-		if got == nil || *got != trackID0 {
+		if got == nil || got.TrackID != trackID0 {
 			t.Errorf("expected track0, got %v", got)
 		}
 		if q.CurrentIndex() != 0 {
@@ -569,7 +575,7 @@ func TestQueue_IsAtLast(t *testing.T) {
 		t.Error("empty queue should be at last")
 	}
 
-	q.Append("track-0", "track-1", "track-2")
+	q.Append(entry("track-0"), entry("track-1"), entry("track-2"))
 
 	// At first track, not at last
 	if q.IsAtLast() {

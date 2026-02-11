@@ -206,9 +206,10 @@ func (h *PlaybackEventHandler) handleTrackEnded(ctx context.Context, event domai
 // NotificationEventHandler handles events related to Discord notifications.
 // It subscribes to PlaybackStarted and PlaybackFinished events to send/delete messages.
 type NotificationEventHandler struct {
-	notifier   ports.NotificationSender
-	repo       domain.PlayerStateRepository
-	subscriber ports.EventSubscriber
+	notifier     ports.NotificationSender
+	repo         domain.PlayerStateRepository
+	subscriber   ports.EventSubscriber
+	userInfoProv ports.UserInfoProvider
 }
 
 // NewNotificationEventHandler creates a new NotificationEventHandler.
@@ -216,11 +217,13 @@ func NewNotificationEventHandler(
 	notifier ports.NotificationSender,
 	repo domain.PlayerStateRepository,
 	subscriber ports.EventSubscriber,
+	userInfoProv ports.UserInfoProvider,
 ) *NotificationEventHandler {
 	return &NotificationEventHandler{
-		notifier:   notifier,
-		repo:       repo,
-		subscriber: subscriber,
+		notifier:     notifier,
+		repo:         repo,
+		subscriber:   subscriber,
+		userInfoProv: userInfoProv,
 	}
 }
 
@@ -246,8 +249,8 @@ func (h *NotificationEventHandler) handlePlaybackStarted(
 		)
 		return
 	}
-	currentTrackID := state.CurrentTrackID()
-	if currentTrackID == nil || *currentTrackID != event.Track.ID {
+	currentEntry := state.CurrentEntry()
+	if currentEntry == nil || currentEntry.TrackID != event.Track.ID {
 		slog.Debug("skipping now playing notification, track no longer current",
 			"guild", event.GuildID,
 			"track", event.Track.Title,
@@ -260,6 +263,23 @@ func (h *NotificationEventHandler) handlePlaybackStarted(
 		"track", event.Track.Title,
 	)
 
+	// Fetch requester display info via port
+	var requesterName, requesterAvatarURL string
+	if h.userInfoProv != nil {
+		userInfo, err := h.userInfoProv.GetUserInfo(event.GuildID, event.RequesterID)
+		if err != nil {
+			slog.Warn("failed to fetch requester info for now playing",
+				"guild", event.GuildID,
+				"requester", event.RequesterID,
+				"error", err,
+			)
+			requesterName = "Unknown"
+		} else {
+			requesterName = userInfo.DisplayName
+			requesterAvatarURL = userInfo.AvatarURL
+		}
+	}
+
 	messageID, err := h.notifier.SendNowPlaying(event.NotificationChannelID, &ports.NowPlayingInfo{
 		Identifier:         string(event.Track.ID),
 		Title:              event.Track.Title,
@@ -269,10 +289,10 @@ func (h *NotificationEventHandler) handlePlaybackStarted(
 		ArtworkURL:         event.Track.ArtworkURL,
 		SourceName:         event.Track.SourceName,
 		IsStream:           event.Track.IsStream,
-		RequesterID:        event.Track.RequesterID,
-		RequesterName:      event.Track.RequesterName,
-		RequesterAvatarURL: event.Track.RequesterAvatarURL,
-		EnqueuedAt:         event.Track.EnqueuedAt,
+		RequesterID:        event.RequesterID,
+		RequesterName:      requesterName,
+		RequesterAvatarURL: requesterAvatarURL,
+		EnqueuedAt:         event.EnqueuedAt,
 	})
 	if err != nil {
 		slog.Error("failed to send now playing notification",

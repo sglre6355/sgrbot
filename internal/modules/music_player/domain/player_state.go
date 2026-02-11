@@ -52,8 +52,8 @@ func (p *PlayerState) IsPaused() bool {
 	return p.isPaused
 }
 
-// CurrentTrackID returns the currently playing track ID, or nil if playback is not active.
-func (p *PlayerState) CurrentTrackID() *TrackID {
+// CurrentEntry returns the currently playing queue entry, or nil if playback is not active.
+func (p *PlayerState) CurrentEntry() *QueueEntry {
 	if !p.isPlaybackActive {
 		return nil
 	}

@@ -16,6 +16,10 @@ func newTestPlayerState() *PlayerState {
 	return NewPlayerState(testGuildID, testVoiceChannelID, testNotifyChannel)
 }
 
+func testEntry(id TrackID) QueueEntry {
+	return QueueEntry{TrackID: id}
+}
+
 func TestNewPlayerState(t *testing.T) {
 	guildID := snowflake.ID(123456789)
 	voiceID := snowflake.ID(111)
@@ -45,7 +49,7 @@ func TestNewPlayerState(t *testing.T) {
 	if state.Queue.Len() != 0 {
 		t.Error("expected Queue to be empty")
 	}
-	if state.CurrentTrackID() != nil {
+	if state.CurrentEntry() != nil {
 		t.Error("expected CurrentTrack to be nil")
 	}
 }
@@ -143,22 +147,22 @@ func TestPlayerState_CurrentTrack(t *testing.T) {
 	state := newTestPlayerState()
 
 	// No current track initially
-	if state.CurrentTrackID() != nil {
+	if state.CurrentEntry() != nil {
 		t.Error("expected no current track initially")
 	}
 
 	// Add a track and activate playback
 	trackID := TrackID("track-1")
-	state.Queue.Append(trackID)
+	state.Queue.Append(testEntry(trackID))
 	state.SetPlaybackActive(true)
 
 	// Now should have a current track
-	current := state.CurrentTrackID()
+	current := state.CurrentEntry()
 	if current == nil {
 		t.Fatal("expected current track after adding")
 	}
-	if *current != trackID {
-		t.Errorf("expected track ID %s, got %s", trackID, *current)
+	if current.TrackID != trackID {
+		t.Errorf("expected track ID %s, got %s", trackID, current.TrackID)
 	}
 }
 

@@ -3,15 +3,11 @@ package domain
 import (
 	"testing"
 	"time"
-
-	"github.com/disgoorg/snowflake/v2"
 )
 
 func TestNewTrack(t *testing.T) {
-	requesterID := snowflake.ID(123456789)
 	track := NewTrack(
 		"track-1",
-		"encoded-data",
 		"Test Song",
 		"Test Artist",
 		3*time.Minute+30*time.Second,
@@ -19,16 +15,10 @@ func TestNewTrack(t *testing.T) {
 		"https://example.com/artwork.jpg",
 		"youtube",
 		false,
-		requesterID,
-		"TestUser",
-		"https://example.com/avatar.png",
 	)
 
 	if track.ID != "track-1" {
 		t.Errorf("expected ID 'track-1', got %q", track.ID)
-	}
-	if track.Encoded != "encoded-data" {
-		t.Errorf("expected Encoded 'encoded-data', got %q", track.Encoded)
 	}
 	if track.Title != "Test Song" {
 		t.Errorf("expected Title 'Test Song', got %q", track.Title)
@@ -51,21 +41,6 @@ func TestNewTrack(t *testing.T) {
 	if track.IsStream {
 		t.Error("expected IsStream false")
 	}
-	if track.RequesterID != requesterID {
-		t.Errorf("expected RequesterID %d, got %d", requesterID, track.RequesterID)
-	}
-	if track.RequesterName != "TestUser" {
-		t.Errorf("expected RequesterName 'TestUser', got %q", track.RequesterName)
-	}
-	if track.RequesterAvatarURL != "https://example.com/avatar.png" {
-		t.Errorf(
-			"expected RequesterAvatarURL 'https://example.com/avatar.png', got %q",
-			track.RequesterAvatarURL,
-		)
-	}
-	if track.EnqueuedAt.IsZero() {
-		t.Error("expected EnqueuedAt to be set")
-	}
 }
 
 func TestTrack_IsValid(t *testing.T) {
@@ -77,33 +52,20 @@ func TestTrack_IsValid(t *testing.T) {
 		{
 			name: "valid track",
 			track: &Track{
-				Encoded: "encoded-data",
-				Title:   "Test Song",
+				Title: "Test Song",
 			},
 			expected: true,
 		},
 		{
-			name: "missing encoded",
-			track: &Track{
-				Encoded: "",
-				Title:   "Test Song",
-			},
-			expected: false,
-		},
-		{
 			name: "missing title",
 			track: &Track{
-				Encoded: "encoded-data",
-				Title:   "",
+				Title: "",
 			},
 			expected: false,
 		},
 		{
-			name: "empty track",
-			track: &Track{
-				Encoded: "",
-				Title:   "",
-			},
+			name:     "empty track",
+			track:    &Track{},
 			expected: false,
 		},
 	}

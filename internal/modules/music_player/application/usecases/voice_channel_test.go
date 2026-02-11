@@ -6,6 +6,7 @@ import (
 	"testing"
 
 	"github.com/disgoorg/snowflake/v2"
+	"github.com/sglre6355/sgrbot/internal/modules/music_player/domain"
 )
 
 func TestVoiceChannelService_Join(t *testing.T) {
@@ -94,8 +95,8 @@ func TestVoiceChannelService_Join(t *testing.T) {
 			setupRepo: func(m *mockRepository) {
 				state := m.createConnectedState(guildID, voiceChannelID, notificationChannelID)
 				// Add tracks to queue
-				state.Queue.Append(mockTrack("track-1").ID)
-				state.Queue.Append(mockTrack("track-2").ID)
+				state.Queue.Append(domain.QueueEntry{TrackID: mockTrack("track-1").ID})
+				state.Queue.Append(domain.QueueEntry{TrackID: mockTrack("track-2").ID})
 			},
 			wantVoiceChannelID: snowflake.ID(999),
 		},
@@ -172,8 +173,8 @@ func TestVoiceChannelService_Join_PreservesQueueOnMove(t *testing.T) {
 
 	// Create existing state with tracks in queue
 	state := repo.createConnectedState(guildID, oldVoiceChannel, notificationChannelID)
-	state.Queue.Append(mockTrack("track-1").ID)
-	state.Queue.Append(mockTrack("track-2").ID)
+	state.Queue.Append(domain.QueueEntry{TrackID: mockTrack("track-1").ID})
+	state.Queue.Append(domain.QueueEntry{TrackID: mockTrack("track-2").ID})
 
 	service := NewVoiceChannelService(repo, connection, nil, nil)
 
@@ -213,11 +214,11 @@ func TestVoiceChannelService_Join_PreservesQueueOnMove(t *testing.T) {
 	}
 
 	tracks := updatedState.Queue.List()
-	if tracks[0] != "track-1" {
-		t.Errorf("expected first track ID 'track-1', got %q", tracks[0])
+	if tracks[0].TrackID != "track-1" {
+		t.Errorf("expected first track ID 'track-1', got %q", tracks[0].TrackID)
 	}
-	if tracks[1] != "track-2" {
-		t.Errorf("expected second track ID 'track-2', got %q", tracks[1])
+	if tracks[1].TrackID != "track-2" {
+		t.Errorf("expected second track ID 'track-2', got %q", tracks[1].TrackID)
 	}
 }
 
@@ -269,8 +270,8 @@ func TestVoiceChannelService_Leave(t *testing.T) {
 			},
 			setupRepo: func(m *mockRepository) {
 				state := m.createConnectedState(guildID, voiceChannelID, notificationChannelID)
-				state.Queue.Append(mockTrack("track-1").ID)
-				state.Queue.Append(mockTrack("track-2").ID)
+				state.Queue.Append(domain.QueueEntry{TrackID: mockTrack("track-1").ID})
+				state.Queue.Append(domain.QueueEntry{TrackID: mockTrack("track-2").ID})
 			},
 		},
 	}

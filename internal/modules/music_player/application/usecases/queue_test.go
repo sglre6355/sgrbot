@@ -51,7 +51,7 @@ func TestQueueService_List(t *testing.T) {
 				for i := range 5 {
 					track := mockTrack("track-" + string(rune('0'+i)))
 					tp.Store(track)
-					state.Queue.Append(track.ID)
+					state.Queue.Append(domain.QueueEntry{TrackID: track.ID})
 				}
 				state.SetPlaybackActive(true)
 			},
@@ -74,7 +74,7 @@ func TestQueueService_List(t *testing.T) {
 				for i := range 8 {
 					track := mockTrack("track-" + string(rune('0'+i)))
 					tp.Store(track)
-					state.Queue.Append(track.ID)
+					state.Queue.Append(domain.QueueEntry{TrackID: track.ID})
 				}
 				state.SetPlaybackActive(true)
 			},
@@ -97,7 +97,7 @@ func TestQueueService_List(t *testing.T) {
 				for i := range 8 {
 					track := mockTrack("track-" + string(rune('0'+i)))
 					tp.Store(track)
-					state.Queue.Append(track.ID)
+					state.Queue.Append(domain.QueueEntry{TrackID: track.ID})
 				}
 				state.SetPlaybackActive(true)
 			},
@@ -120,7 +120,7 @@ func TestQueueService_List(t *testing.T) {
 				for i := range 5 {
 					track := mockTrack("track-" + string(rune('0'+i)))
 					tp.Store(track)
-					state.Queue.Append(track.ID)
+					state.Queue.Append(domain.QueueEntry{TrackID: track.ID})
 				}
 				state.SetPlaybackActive(true)
 			},
@@ -144,10 +144,10 @@ func TestQueueService_List(t *testing.T) {
 				for i := range 5 {
 					track := mockTrack("track-" + string(rune('0'+i)))
 					tp.Store(track)
-					state.Queue.Append(track.ID)
+					state.Queue.Append(domain.QueueEntry{TrackID: track.ID})
 				}
-				state.Queue.Advance(0)
-				state.Queue.Advance(0)
+				state.Queue.Advance(domain.LoopModeNone)
+				state.Queue.Advance(domain.LoopModeNone)
 				state.SetPlaybackActive(true)
 			},
 			wantTotalTracks:  5,
@@ -167,7 +167,7 @@ func TestQueueService_List(t *testing.T) {
 				state := m.createConnectedState(guildID, voiceChannelID, notificationChannelID)
 				setupPlaying(state, tp, mockTrack("current"))
 				tp.Store(mockTrack("queued"))
-				state.Queue.Append(mockTrack("queued").ID)
+				state.Queue.Append(domain.QueueEntry{TrackID: mockTrack("queued").ID})
 			},
 			wantTotalTracks:  2, // current + queued
 			wantPageTracks:   2,
@@ -189,10 +189,10 @@ func TestQueueService_List(t *testing.T) {
 				for i := range 10 {
 					track := mockTrack("track-" + string(rune('0'+i)))
 					tp.Store(track)
-					state.Queue.Append(track.ID)
+					state.Queue.Append(domain.QueueEntry{TrackID: track.ID})
 				}
 				for range 7 {
-					state.Queue.Advance(0)
+					state.Queue.Advance(domain.LoopModeNone)
 				}
 				state.SetPlaybackActive(true)
 			},
@@ -216,7 +216,7 @@ func TestQueueService_List(t *testing.T) {
 				for i := range 10 {
 					track := mockTrack("track-" + string(rune('0'+i)))
 					tp.Store(track)
-					state.Queue.Append(track.ID)
+					state.Queue.Append(domain.QueueEntry{TrackID: track.ID})
 				}
 				// Advance past end: 10 advances from index 0
 				for range 10 {
@@ -295,9 +295,9 @@ func TestQueueService_Remove(t *testing.T) {
 				tp.Store(mockTrack("track-1"))
 				tp.Store(mockTrack("track-2"))
 				tp.Store(mockTrack("track-3"))
-				state.Queue.Append(mockTrack("track-1").ID)
-				state.Queue.Append(mockTrack("track-2").ID)
-				state.Queue.Append(mockTrack("track-3").ID)
+				state.Queue.Append(domain.QueueEntry{TrackID: mockTrack("track-1").ID})
+				state.Queue.Append(domain.QueueEntry{TrackID: mockTrack("track-2").ID})
+				state.Queue.Append(domain.QueueEntry{TrackID: mockTrack("track-3").ID})
 			},
 			wantID: "track-2",
 		},
@@ -313,10 +313,10 @@ func TestQueueService_Remove(t *testing.T) {
 				for i := range 5 {
 					track := mockTrack("track-" + string(rune('0'+i)))
 					tp.Store(track)
-					state.Queue.Append(track.ID)
+					state.Queue.Append(domain.QueueEntry{TrackID: track.ID})
 				}
-				state.Queue.Advance(0)
-				state.Queue.Advance(0) // currentIndex=2
+				state.Queue.Advance(domain.LoopModeNone)
+				state.Queue.Advance(domain.LoopModeNone) // currentIndex=2
 				state.SetPlaybackActive(true)
 			},
 			wantID: "track-0", // played track at index 0
@@ -342,7 +342,7 @@ func TestQueueService_Remove(t *testing.T) {
 				state := m.createConnectedState(guildID, voiceChannelID, notificationChannelID)
 				setupPlaying(state, tp, mockTrack("current"))
 				tp.Store(mockTrack("track-1"))
-				state.Queue.Append(mockTrack("track-1").ID)
+				state.Queue.Append(domain.QueueEntry{TrackID: mockTrack("track-1").ID})
 			},
 			wantErr: ErrInvalidPosition,
 		},
@@ -357,7 +357,7 @@ func TestQueueService_Remove(t *testing.T) {
 				// currentIndex=0 after setupPlaying
 				setupPlaying(state, tp, mockTrack("current"))
 				tp.Store(mockTrack("track-1"))
-				state.Queue.Append(mockTrack("track-1").ID)
+				state.Queue.Append(domain.QueueEntry{TrackID: mockTrack("track-1").ID})
 			},
 			wantErr: ErrIsCurrentTrack,
 		},
@@ -373,10 +373,10 @@ func TestQueueService_Remove(t *testing.T) {
 				for i := range 5 {
 					track := mockTrack("track-" + string(rune('0'+i)))
 					tp.Store(track)
-					state.Queue.Append(track.ID)
+					state.Queue.Append(domain.QueueEntry{TrackID: track.ID})
 				}
-				state.Queue.Advance(0)
-				state.Queue.Advance(0) // currentIndex=2
+				state.Queue.Advance(domain.LoopModeNone)
+				state.Queue.Advance(domain.LoopModeNone) // currentIndex=2
 				state.SetPlaybackActive(true)
 			},
 			wantErr: ErrIsCurrentTrack,
@@ -391,7 +391,7 @@ func TestQueueService_Remove(t *testing.T) {
 				state := m.createConnectedState(guildID, voiceChannelID, notificationChannelID)
 				setupPlaying(state, tp, mockTrack("current"))
 				tp.Store(mockTrack("track-1"))
-				state.Queue.Append(mockTrack("track-1").ID)
+				state.Queue.Append(domain.QueueEntry{TrackID: mockTrack("track-1").ID})
 			},
 			wantErr: ErrInvalidPosition,
 		},
@@ -446,39 +446,45 @@ func TestQueueService_Add(t *testing.T) {
 		{
 			name: "add to empty queue - connected",
 			input: QueueAddInput{
-				GuildID: guildID,
-				Track:   mockTrack("track-1"),
+				GuildID:     guildID,
+				TrackID:     domain.TrackID("track-1"),
+				RequesterID: snowflake.ID(123),
 			},
-			setupRepo: func(m *mockRepository, _ *mockTrackProvider) {
+			setupRepo: func(m *mockRepository, tp *mockTrackProvider) {
 				m.createConnectedState(guildID, voiceChannelID, notificationChannelID)
+				tp.Store(mockTrack("track-1"))
 			},
 			wantPosition: 0,
 		},
 		{
 			name: "add to non-empty queue - position 1",
 			input: QueueAddInput{
-				GuildID: guildID,
-				Track:   mockTrack("track-2"),
+				GuildID:     guildID,
+				TrackID:     domain.TrackID("track-2"),
+				RequesterID: snowflake.ID(123),
 			},
 			setupRepo: func(m *mockRepository, tp *mockTrackProvider) {
 				state := m.createConnectedState(guildID, voiceChannelID, notificationChannelID)
 				setupPlaying(state, tp, mockTrack("track-1")) // Already playing
+				tp.Store(mockTrack("track-2"))
 			},
 			wantPosition: 1,
 		},
 		{
 			name: "add multiple tracks - position increases",
 			input: QueueAddInput{
-				GuildID: guildID,
-				Track:   mockTrack("track-3"),
+				GuildID:     guildID,
+				TrackID:     domain.TrackID("track-3"),
+				RequesterID: snowflake.ID(123),
 			},
 			setupRepo: func(m *mockRepository, tp *mockTrackProvider) {
 				state := m.createConnectedState(guildID, voiceChannelID, notificationChannelID)
 				setupPlaying(state, tp, mockTrack("current"))
 				tp.Store(mockTrack("track-1"))
 				tp.Store(mockTrack("track-2"))
-				state.Queue.Append(mockTrack("track-1").ID)
-				state.Queue.Append(mockTrack("track-2").ID)
+				tp.Store(mockTrack("track-3"))
+				state.Queue.Append(domain.QueueEntry{TrackID: mockTrack("track-1").ID})
+				state.Queue.Append(domain.QueueEntry{TrackID: mockTrack("track-2").ID})
 			},
 			wantPosition: 3,
 		},
@@ -542,10 +548,10 @@ func TestQueueService_Clear(t *testing.T) {
 				for i := range 5 {
 					track := mockTrack("track-" + string(rune('0'+i)))
 					tp.Store(track)
-					state.Queue.Append(track.ID)
+					state.Queue.Append(domain.QueueEntry{TrackID: track.ID})
 				}
-				state.Queue.Advance(0)
-				state.Queue.Advance(0) // currentIndex=2
+				state.Queue.Advance(domain.LoopModeNone)
+				state.Queue.Advance(domain.LoopModeNone) // currentIndex=2
 				state.SetPlaybackActive(true)
 			},
 			wantCount:     4, // 2 played + 2 upcoming cleared
@@ -576,10 +582,10 @@ func TestQueueService_Clear(t *testing.T) {
 				for i := range 3 {
 					track := mockTrack("track-" + string(rune('0'+i)))
 					tp.Store(track)
-					state.Queue.Append(track.ID)
+					state.Queue.Append(domain.QueueEntry{TrackID: track.ID})
 				}
-				state.Queue.Advance(0)                   // index=1
-				state.Queue.Advance(0)                   // index=2
+				state.Queue.Advance(domain.LoopModeNone) // index=1
+				state.Queue.Advance(domain.LoopModeNone) // index=2
 				state.Queue.Advance(domain.LoopModeNone) // past end, idle
 			},
 			wantCount:     3, // all 3 played tracks cleared
@@ -609,10 +615,10 @@ func TestQueueService_Clear(t *testing.T) {
 				for i := range 5 {
 					track := mockTrack("track-" + string(rune('0'+i)))
 					tp.Store(track)
-					state.Queue.Append(track.ID)
+					state.Queue.Append(domain.QueueEntry{TrackID: track.ID})
 				}
-				state.Queue.Advance(0)
-				state.Queue.Advance(0)
+				state.Queue.Advance(domain.LoopModeNone)
+				state.Queue.Advance(domain.LoopModeNone)
 			},
 			wantCount:     5, // all 5 tracks cleared
 			wantRemaining: 0, // nothing remains
@@ -703,10 +709,10 @@ func TestQueueService_Restart(t *testing.T) {
 				for _, id := range []string{"track-0", "track-1", "track-2"} {
 					track := mockTrack(id)
 					tp.Store(track)
-					state.Queue.Append(track.ID)
+					state.Queue.Append(domain.QueueEntry{TrackID: track.ID})
 				}
-				state.Queue.Advance(0)                   // index=1
-				state.Queue.Advance(0)                   // index=2
+				state.Queue.Advance(domain.LoopModeNone) // index=1
+				state.Queue.Advance(domain.LoopModeNone) // index=2
 				state.Queue.Advance(domain.LoopModeNone) // past end, idle
 			},
 			wantTrackID: "track-0",
@@ -723,9 +729,9 @@ func TestQueueService_Restart(t *testing.T) {
 				for _, id := range []string{"track-0", "track-1", "track-2"} {
 					track := mockTrack(id)
 					tp.Store(track)
-					state.Queue.Append(track.ID)
+					state.Queue.Append(domain.QueueEntry{TrackID: track.ID})
 				}
-				state.Queue.Advance(0) // index=1
+				state.Queue.Advance(domain.LoopModeNone) // index=1
 			},
 			wantTrackID: "track-0",
 		},
@@ -817,8 +823,8 @@ func TestQueueService_Clear_PublishesQueueClearedEvent(t *testing.T) {
 		state := repo.createConnectedState(guildID, voiceChannelID, notificationChannelID)
 		tp.Store(mockTrack("track-1"))
 		tp.Store(mockTrack("track-2"))
-		state.Queue.Append(mockTrack("track-1").ID)
-		state.Queue.Append(mockTrack("track-2").ID)
+		state.Queue.Append(domain.QueueEntry{TrackID: mockTrack("track-1").ID})
+		state.Queue.Append(domain.QueueEntry{TrackID: mockTrack("track-2").ID})
 
 		service := NewQueueService(repo, publisher, tp)
 		_, err := service.Clear(context.Background(), QueueClearInput{
@@ -857,9 +863,9 @@ func TestQueueService_Clear_PublishesQueueClearedEvent(t *testing.T) {
 		tp.Store(mockTrack("track-1"))
 		tp.Store(mockTrack("track-2"))
 		tp.Store(mockTrack("track-3"))
-		state.Queue.Append(mockTrack("track-1").ID)
-		state.Queue.Append(mockTrack("track-2").ID)
-		state.Queue.Append(mockTrack("track-3").ID)
+		state.Queue.Append(domain.QueueEntry{TrackID: mockTrack("track-1").ID})
+		state.Queue.Append(domain.QueueEntry{TrackID: mockTrack("track-2").ID})
+		state.Queue.Append(domain.QueueEntry{TrackID: mockTrack("track-3").ID})
 
 		service := NewQueueService(repo, publisher, tp)
 		_, err := service.Clear(context.Background(), QueueClearInput{
@@ -903,7 +909,7 @@ func TestQueueService_Seek(t *testing.T) {
 				for i := range 5 {
 					track := mockTrack("track-" + string(rune('0'+i)))
 					tp.Store(track)
-					state.Queue.Append(track.ID)
+					state.Queue.Append(domain.QueueEntry{TrackID: track.ID})
 				}
 			},
 			wantTrackID: "track-2",
@@ -921,10 +927,10 @@ func TestQueueService_Seek(t *testing.T) {
 				for i := range 5 {
 					track := mockTrack("track-" + string(rune('0'+i)))
 					tp.Store(track)
-					state.Queue.Append(track.ID)
+					state.Queue.Append(domain.QueueEntry{TrackID: track.ID})
 				}
-				state.Queue.Advance(0)
-				state.Queue.Advance(0) // currentIndex=2
+				state.Queue.Advance(domain.LoopModeNone)
+				state.Queue.Advance(domain.LoopModeNone) // currentIndex=2
 			},
 			wantTrackID: "track-0",
 		},
@@ -941,7 +947,7 @@ func TestQueueService_Seek(t *testing.T) {
 				for i := range 5 {
 					track := mockTrack("track-" + string(rune('0'+i)))
 					tp.Store(track)
-					state.Queue.Append(track.ID)
+					state.Queue.Append(domain.QueueEntry{TrackID: track.ID})
 				}
 			},
 			wantTrackID: "track-4",
@@ -959,9 +965,9 @@ func TestQueueService_Seek(t *testing.T) {
 				for i := range 3 {
 					track := mockTrack("track-" + string(rune('0'+i)))
 					tp.Store(track)
-					state.Queue.Append(track.ID)
+					state.Queue.Append(domain.QueueEntry{TrackID: track.ID})
 				}
-				state.Queue.Advance(0) // currentIndex=1
+				state.Queue.Advance(domain.LoopModeNone) // currentIndex=1
 			},
 			wantTrackID: "track-1",
 		},
@@ -977,9 +983,9 @@ func TestQueueService_Seek(t *testing.T) {
 				// Add 2 tracks and advance past end
 				tp.Store(mockTrack("track-0"))
 				tp.Store(mockTrack("track-1"))
-				state.Queue.Append(mockTrack("track-0").ID)
-				state.Queue.Append(mockTrack("track-1").ID)
-				state.Queue.Advance(0)                   // index=1
+				state.Queue.Append(domain.QueueEntry{TrackID: mockTrack("track-0").ID})
+				state.Queue.Append(domain.QueueEntry{TrackID: mockTrack("track-1").ID})
+				state.Queue.Advance(domain.LoopModeNone) // index=1
 				state.Queue.Advance(domain.LoopModeNone) // past end, idle
 			},
 			wantTrackID: "track-1",
@@ -1008,8 +1014,8 @@ func TestQueueService_Seek(t *testing.T) {
 				state := m.createConnectedState(guildID, voiceChannelID, notificationChannelID)
 				tp.Store(mockTrack("track-0"))
 				tp.Store(mockTrack("track-1"))
-				state.Queue.Append(mockTrack("track-0").ID)
-				state.Queue.Append(mockTrack("track-1").ID)
+				state.Queue.Append(domain.QueueEntry{TrackID: mockTrack("track-0").ID})
+				state.Queue.Append(domain.QueueEntry{TrackID: mockTrack("track-1").ID})
 			},
 			wantErr: ErrInvalidPosition,
 		},
@@ -1023,7 +1029,7 @@ func TestQueueService_Seek(t *testing.T) {
 			setupRepo: func(m *mockRepository, tp *mockTrackProvider) {
 				state := m.createConnectedState(guildID, voiceChannelID, notificationChannelID)
 				tp.Store(mockTrack("track-0"))
-				state.Queue.Append(mockTrack("track-0").ID)
+				state.Queue.Append(domain.QueueEntry{TrackID: mockTrack("track-0").ID})
 			},
 			wantErr: ErrInvalidPosition,
 		},
@@ -1111,14 +1117,14 @@ func TestQueueService_AddMultiple(t *testing.T) {
 			input: QueueAddMultipleInput{
 				GuildID:               guildID,
 				NotificationChannelID: notificationChannelID,
-				Tracks: []*Track{
-					mockTrack("track-1"),
-					mockTrack("track-2"),
-					mockTrack("track-3"),
-				},
+				TrackIDs:              []domain.TrackID{"track-1", "track-2", "track-3"},
+				RequesterID:           snowflake.ID(123),
 			},
-			setupRepo: func(m *mockRepository, _ *mockTrackProvider) {
+			setupRepo: func(m *mockRepository, tp *mockTrackProvider) {
 				m.createConnectedState(guildID, voiceChannelID, notificationChannelID)
+				tp.Store(mockTrack("track-1"))
+				tp.Store(mockTrack("track-2"))
+				tp.Store(mockTrack("track-3"))
 			},
 			wantStartPosition: 0,
 			wantCount:         3,
@@ -1128,16 +1134,16 @@ func TestQueueService_AddMultiple(t *testing.T) {
 			input: QueueAddMultipleInput{
 				GuildID:               guildID,
 				NotificationChannelID: notificationChannelID,
-				Tracks: []*Track{
-					mockTrack("new-1"),
-					mockTrack("new-2"),
-				},
+				TrackIDs:              []domain.TrackID{"new-1", "new-2"},
+				RequesterID:           snowflake.ID(123),
 			},
 			setupRepo: func(m *mockRepository, tp *mockTrackProvider) {
 				state := m.createConnectedState(guildID, voiceChannelID, notificationChannelID)
 				setupPlaying(state, tp, mockTrack("current"))
 				tp.Store(mockTrack("queued-1"))
-				state.Queue.Append(mockTrack("queued-1").ID)
+				tp.Store(mockTrack("new-1"))
+				tp.Store(mockTrack("new-2"))
+				state.Queue.Append(domain.QueueEntry{TrackID: mockTrack("queued-1").ID})
 			},
 			wantStartPosition: 2, // after current + queued-1
 			wantCount:         2,
@@ -1147,7 +1153,8 @@ func TestQueueService_AddMultiple(t *testing.T) {
 			input: QueueAddMultipleInput{
 				GuildID:               guildID,
 				NotificationChannelID: notificationChannelID,
-				Tracks:                []*Track{},
+				TrackIDs:              []domain.TrackID{},
+				RequesterID:           snowflake.ID(123),
 			},
 			setupRepo: func(m *mockRepository, _ *mockTrackProvider) {
 				m.createConnectedState(guildID, voiceChannelID, notificationChannelID)
@@ -1158,8 +1165,9 @@ func TestQueueService_AddMultiple(t *testing.T) {
 		{
 			name: "not connected",
 			input: QueueAddMultipleInput{
-				GuildID: guildID,
-				Tracks:  []*Track{mockTrack("track-1")},
+				GuildID:     guildID,
+				TrackIDs:    []domain.TrackID{"track-1"},
+				RequesterID: snowflake.ID(123),
 			},
 			wantErr: ErrNotConnected,
 		},
@@ -1221,8 +1229,8 @@ func TestQueueService_AddMultiple(t *testing.T) {
 					t.Errorf("event GuildID = %d, want %d", event.GuildID, tt.input.GuildID)
 				}
 				// Event should contain the first track
-				if event.Track.ID != tt.input.Tracks[0].ID {
-					t.Errorf("event Track.ID = %q, want %q", event.Track.ID, tt.input.Tracks[0].ID)
+				if event.Track.ID != tt.input.TrackIDs[0] {
+					t.Errorf("event Track.ID = %q, want %q", event.Track.ID, tt.input.TrackIDs[0])
 				}
 			}
 		})
@@ -1240,16 +1248,16 @@ func TestQueueService_AddMultiple_TracksOrder(t *testing.T) {
 
 	state := repo.createConnectedState(guildID, voiceChannelID, notificationChannelID)
 	setupPlaying(state, tp, mockTrack("current"))
+	tp.Store(mockTrack("new-1"))
+	tp.Store(mockTrack("new-2"))
+	tp.Store(mockTrack("new-3"))
 
 	service := NewQueueService(repo, publisher, tp)
 	_, err := service.AddMultiple(context.Background(), QueueAddMultipleInput{
 		GuildID:               guildID,
 		NotificationChannelID: notificationChannelID,
-		Tracks: []*Track{
-			mockTrack("new-1"),
-			mockTrack("new-2"),
-			mockTrack("new-3"),
-		},
+		TrackIDs:              []domain.TrackID{"new-1", "new-2", "new-3"},
+		RequesterID:           snowflake.ID(123),
 	})
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
@@ -1264,8 +1272,8 @@ func TestQueueService_AddMultiple_TracksOrder(t *testing.T) {
 
 	expectedOrder := []string{"current", "new-1", "new-2", "new-3"}
 	for i, expected := range expectedOrder {
-		if string(tracks[i]) != expected {
-			t.Errorf("track[%d] = %q, want %q", i, tracks[i], expected)
+		if string(tracks[i].TrackID) != expected {
+			t.Errorf("track[%d] = %q, want %q", i, tracks[i].TrackID, expected)
 		}
 	}
 }

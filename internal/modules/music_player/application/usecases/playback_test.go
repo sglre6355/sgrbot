@@ -248,7 +248,7 @@ func TestPlaybackService_Skip(t *testing.T) {
 				state := m.createConnectedState(guildID, voiceChannelID, textChannelID)
 				setupPlaying(state, tp, mockTrack("current"))
 				tp.Store(mockTrack("next"))
-				state.Queue.Append(mockTrack("next").ID)
+				state.Queue.Append(domain.QueueEntry{TrackID: mockTrack("next").ID})
 			},
 			wantNextTrack: true,
 		},
@@ -289,7 +289,7 @@ func TestPlaybackService_Skip(t *testing.T) {
 				state := m.createConnectedState(guildID, voiceChannelID, textChannelID)
 				setupPlaying(state, tp, mockTrack("current"))
 				tp.Store(mockTrack("next"))
-				state.Queue.Append(mockTrack("next").ID)
+				state.Queue.Append(domain.QueueEntry{TrackID: mockTrack("next").ID})
 			},
 			setupPlayer: func(m *mockAudioPlayer) {
 				m.playErr = errors.New("play failed")
@@ -320,8 +320,8 @@ func TestPlaybackService_Skip(t *testing.T) {
 				state := m.createConnectedState(guildID, voiceChannelID, textChannelID)
 				tp.Store(mockTrack("first"))
 				tp.Store(mockTrack("last"))
-				state.Queue.Append(mockTrack("first").ID)
-				state.Queue.Append(mockTrack("last").ID)
+				state.Queue.Append(domain.QueueEntry{TrackID: mockTrack("first").ID})
+				state.Queue.Append(domain.QueueEntry{TrackID: mockTrack("last").ID})
 				state.Queue.Advance(domain.LoopModeNone) // Move to last
 				state.SetPlaybackActive(true)
 				state.SetLoopMode(domain.LoopModeQueue)
@@ -425,7 +425,7 @@ func TestPlaybackService_PlayNext(t *testing.T) {
 			setupRepo: func(m *mockRepository, tp *mockTrackProvider) {
 				state := m.createConnectedState(guildID, voiceChannelID, textChannelID)
 				tp.Store(mockTrack("track-1"))
-				state.Queue.Append(mockTrack("track-1").ID)
+				state.Queue.Append(domain.QueueEntry{TrackID: mockTrack("track-1").ID})
 			},
 			wantTrack: true,
 		},
@@ -446,7 +446,7 @@ func TestPlaybackService_PlayNext(t *testing.T) {
 			setupRepo: func(m *mockRepository, tp *mockTrackProvider) {
 				state := m.createConnectedState(guildID, voiceChannelID, textChannelID)
 				tp.Store(mockTrack("track-1"))
-				state.Queue.Append(mockTrack("track-1").ID)
+				state.Queue.Append(domain.QueueEntry{TrackID: mockTrack("track-1").ID})
 			},
 			setupPlayer: func(m *mockAudioPlayer) {
 				m.playErr = errors.New("play failed")
@@ -517,7 +517,7 @@ func TestPlaybackService_PlayNext_PreservesQueuePositionOnPlayFailure(t *testing
 
 	state := repo.createConnectedState(guildID, voiceChannelID, textChannelID)
 	tp.Store(mockTrack("track-1"))
-	state.Queue.Append(mockTrack("track-1").ID)
+	state.Queue.Append(domain.QueueEntry{TrackID: mockTrack("track-1").ID})
 
 	service := NewPlaybackService(repo, player, nil, nil, tp)
 

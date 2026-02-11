@@ -6,16 +6,11 @@ import (
 	"testing"
 	"time"
 
-	"github.com/disgoorg/snowflake/v2"
 	"github.com/sglre6355/sgrbot/internal/modules/music_player/application/ports"
 	"github.com/sglre6355/sgrbot/internal/modules/music_player/domain"
 )
 
 func TestTrackLoaderService_ResolveQuery(t *testing.T) {
-	requesterID := snowflake.ID(123)
-	requesterName := "TestUser"
-	requesterAvatarURL := "https://example.com/avatar.jpg"
-
 	singleTrackResult := &ports.LoadResult{
 		Type: ports.LoadTypeTrack,
 		Tracks: []*ports.TrackInfo{
@@ -63,10 +58,7 @@ func TestTrackLoaderService_ResolveQuery(t *testing.T) {
 		{
 			name: "single track result returns one track",
 			input: ResolveQueryInput{
-				Query:              "https://youtube.com/watch?v=123",
-				RequesterID:        requesterID,
-				RequesterName:      requesterName,
-				RequesterAvatarURL: requesterAvatarURL,
+				Query: "https://youtube.com/watch?v=123",
 			},
 			setupResolver: func(m *mockTrackResolver) {
 				m.loadResult = singleTrackResult
@@ -78,8 +70,7 @@ func TestTrackLoaderService_ResolveQuery(t *testing.T) {
 		{
 			name: "search result returns only first track",
 			input: ResolveQueryInput{
-				Query:       "search query",
-				RequesterID: requesterID,
+				Query: "search query",
 			},
 			setupResolver: func(m *mockTrackResolver) {
 				m.loadResult = searchResult
@@ -91,10 +82,7 @@ func TestTrackLoaderService_ResolveQuery(t *testing.T) {
 		{
 			name: "playlist result returns all tracks",
 			input: ResolveQueryInput{
-				Query:              "https://youtube.com/playlist?list=abc",
-				RequesterID:        requesterID,
-				RequesterName:      requesterName,
-				RequesterAvatarURL: requesterAvatarURL,
+				Query: "https://youtube.com/playlist?list=abc",
 			},
 			setupResolver: func(m *mockTrackResolver) {
 				m.loadResult = playlistResult
@@ -107,8 +95,7 @@ func TestTrackLoaderService_ResolveQuery(t *testing.T) {
 		{
 			name: "no results - empty type",
 			input: ResolveQueryInput{
-				Query:       "nonexistent",
-				RequesterID: requesterID,
+				Query: "nonexistent",
 			},
 			setupResolver: func(m *mockTrackResolver) {
 				m.loadResult = &ports.LoadResult{Type: ports.LoadTypeEmpty}
@@ -118,8 +105,7 @@ func TestTrackLoaderService_ResolveQuery(t *testing.T) {
 		{
 			name: "no results - error type",
 			input: ResolveQueryInput{
-				Query:       "error",
-				RequesterID: requesterID,
+				Query: "error",
 			},
 			setupResolver: func(m *mockTrackResolver) {
 				m.loadResult = &ports.LoadResult{Type: ports.LoadTypeError}
@@ -129,8 +115,7 @@ func TestTrackLoaderService_ResolveQuery(t *testing.T) {
 		{
 			name: "resolver error",
 			input: ResolveQueryInput{
-				Query:       "test",
-				RequesterID: requesterID,
+				Query: "test",
 			},
 			setupResolver: func(m *mockTrackResolver) {
 				m.loadErr = errors.New("connection failed")
@@ -417,63 +402,6 @@ func TestTrackLoaderService_PreviewQuery_DefaultLimit(t *testing.T) {
 	}
 }
 
-func TestTrackLoaderService_ResolveQuery_RequesterInfo(t *testing.T) {
-	requesterID := snowflake.ID(456)
-	requesterName := "TestUser"
-	requesterAvatarURL := "https://example.com/avatar.jpg"
-
-	resolver := &mockTrackResolver{
-		loadResult: &ports.LoadResult{
-			Type:       ports.LoadTypePlaylist,
-			PlaylistID: "Test Playlist",
-			Tracks: []*ports.TrackInfo{
-				{Identifier: "track-1", Title: "Track 1"},
-				{Identifier: "track-2", Title: "Track 2"},
-			},
-		},
-	}
-
-	service := NewTrackLoaderService(resolver)
-	output, err := service.ResolveQuery(context.Background(), ResolveQueryInput{
-		Query:              "https://example.com/playlist",
-		RequesterID:        requesterID,
-		RequesterName:      requesterName,
-		RequesterAvatarURL: requesterAvatarURL,
-	})
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-
-	// Verify requester info is set on all tracks
-	for i, track := range output.Tracks {
-		if track.RequesterID != requesterID {
-			t.Errorf("track %d: RequesterID = %d, want %d", i, track.RequesterID, requesterID)
-		}
-		if track.RequesterName != requesterName {
-			t.Errorf("track %d: RequesterName = %q, want %q", i, track.RequesterName, requesterName)
-		}
-		if track.RequesterAvatarURL != requesterAvatarURL {
-			t.Errorf(
-				"track %d: RequesterAvatarURL = %q, want %q",
-				i,
-				track.RequesterAvatarURL,
-				requesterAvatarURL,
-			)
-		}
-		if track.ID == "" {
-			t.Errorf("track %d: ID should be set", i)
-		}
-		if track.ID != domain.TrackID(resolver.loadResult.Tracks[i].Identifier) {
-			t.Errorf(
-				"track %d: ID = %q, want %q",
-				i,
-				track.ID,
-				resolver.loadResult.Tracks[i].Identifier,
-			)
-		}
-	}
-}
-
 func TestTrackLoaderService_ResolveQuery_PopulatesCache(t *testing.T) {
 	resolver := &mockTrackResolver{
 		loadResult: &ports.LoadResult{
@@ -502,8 +430,7 @@ func TestTrackLoaderService_ResolveQuery_PopulatesCache(t *testing.T) {
 
 	// ResolveQuery should populate cache
 	_, err = service.ResolveQuery(context.Background(), ResolveQueryInput{
-		Query:       "test",
-		RequesterID: snowflake.ID(123),
+		Query: "test",
 	})
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
@@ -541,8 +468,7 @@ func TestTrackLoaderService_LoadTrack_CacheBehavior(t *testing.T) {
 
 	service2 := NewTrackLoaderService(resolver)
 	_, _ = service2.ResolveQuery(context.Background(), ResolveQueryInput{
-		Query:       "test",
-		RequesterID: snowflake.ID(1),
+		Query: "test",
 	})
 
 	track, err := service2.LoadTrack(domain.TrackID("test-id"))
@@ -571,8 +497,7 @@ func TestTrackLoaderService_LoadTracks_CacheBehavior(t *testing.T) {
 
 	// Resolve to populate cache
 	_, err := service.ResolveQuery(context.Background(), ResolveQueryInput{
-		Query:       "test",
-		RequesterID: snowflake.ID(1),
+		Query: "test",
 	})
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)

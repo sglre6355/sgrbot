@@ -13,7 +13,8 @@ const DefaultPageSize = 10
 // QueueAddInput contains the input for the QueueAdd use case.
 type QueueAddInput struct {
 	GuildID               snowflake.ID
-	Track                 *domain.Track
+	TrackID               domain.TrackID
+	RequesterID           snowflake.ID
 	NotificationChannelID snowflake.ID // Optional: updates notification channel if non-zero
 }
 
@@ -25,7 +26,8 @@ type QueueAddOutput struct {
 // QueueAddMultipleInput contains the input for adding multiple tracks.
 type QueueAddMultipleInput struct {
 	GuildID               snowflake.ID
-	Tracks                []*domain.Track
+	TrackIDs              []domain.TrackID
+	RequesterID           snowflake.ID
 	NotificationChannelID snowflake.ID // Optional: updates notification channel if non-zero
 }
 
@@ -133,7 +135,8 @@ func (q *QueueService) Add(ctx context.Context, input QueueAddInput) (*QueueAddO
 		state.SetNotificationChannelID(input.NotificationChannelID)
 	}
 
-	state.Queue.Append(input.Track.ID)
+	entry := domain.NewQueueEntry(input.TrackID, input.RequesterID)
+	state.Queue.Append(entry)
 	// Position is 0-indexed: Queue[0] = position 0, Queue[1] = position 1, etc.
 	position := state.Queue.Len() - 1
 
@@ -143,9 +146,11 @@ func (q *QueueService) Add(ctx context.Context, input QueueAddInput) (*QueueAddO
 
 	// Publish event - PlaybackEventHandler will start playback if idle
 	if q.publisher != nil {
+		track, _ := q.trackProvider.LoadTrack(input.TrackID)
 		q.publisher.PublishTrackEnqueued(domain.TrackEnqueuedEvent{
-			GuildID: input.GuildID,
-			Track:   input.Track,
+			GuildID:     input.GuildID,
+			Track:       &track,
+			RequesterID: input.RequesterID,
 		})
 	}
 
@@ -160,7 +165,7 @@ func (q *QueueService) AddMultiple(
 	ctx context.Context,
 	input QueueAddMultipleInput,
 ) (*QueueAddMultipleOutput, error) {
-	if len(input.Tracks) == 0 {
+	if len(input.TrackIDs) == 0 {
 		return &QueueAddMultipleOutput{
 			StartPosition: 0,
 			Count:         0,
@@ -179,12 +184,12 @@ func (q *QueueService) AddMultiple(
 
 	startPosition := state.Queue.Len()
 
-	// Collect IDs and append
-	ids := make([]domain.TrackID, 0, len(input.Tracks))
-	for _, track := range input.Tracks {
-		ids = append(ids, track.ID)
+	// Create entries and append
+	entries := make([]domain.QueueEntry, 0, len(input.TrackIDs))
+	for _, trackID := range input.TrackIDs {
+		entries = append(entries, domain.NewQueueEntry(trackID, input.RequesterID))
 	}
-	state.Queue.Append(ids...)
+	state.Queue.Append(entries...)
 
 	if err := q.repo.Save(ctx, state); err != nil {
 		return nil, err
@@ -192,15 +197,17 @@ func (q *QueueService) AddMultiple(
 
 	// Publish single event for the first track - PlaybackEventHandler will start playback if idle
 	if q.publisher != nil {
+		track, _ := q.trackProvider.LoadTrack(input.TrackIDs[0])
 		q.publisher.PublishTrackEnqueued(domain.TrackEnqueuedEvent{
-			GuildID: input.GuildID,
-			Track:   input.Tracks[0],
+			GuildID:     input.GuildID,
+			Track:       &track,
+			RequesterID: input.RequesterID,
 		})
 	}
 
 	return &QueueAddMultipleOutput{
 		StartPosition: startPosition,
-		Count:         len(input.Tracks),
+		Count:         len(input.TrackIDs),
 	}, nil
 }
 
@@ -223,8 +230,8 @@ func (q *QueueService) List(ctx context.Context, input QueueListInput) (*QueueLi
 		pageSize = DefaultPageSize
 	}
 
-	// Get all track IDs and current index
-	allTrackIDs := state.Queue.List()
+	// Get all entries and current index
+	allEntries := state.Queue.List()
 	currentIndex := -1
 	if state.IsPlaybackActive() {
 		currentIndex = state.Queue.CurrentIndex()
@@ -242,7 +249,7 @@ func (q *QueueService) List(ctx context.Context, input QueueListInput) (*QueueLi
 	}
 
 	// Pagination applies to entire queue
-	totalTracks := len(allTrackIDs)
+	totalTracks := len(allEntries)
 	totalPages := (totalTracks + pageSize - 1) / pageSize
 	if totalPages == 0 {
 		totalPages = 1
@@ -260,7 +267,11 @@ func (q *QueueService) List(ctx context.Context, input QueueListInput) (*QueueLi
 
 	var pageTracks []*domain.Track
 	if start < totalTracks {
-		pageIDs := allTrackIDs[start:end]
+		pageEntries := allEntries[start:end]
+		pageIDs := make([]domain.TrackID, len(pageEntries))
+		for i, e := range pageEntries {
+			pageIDs[i] = e.TrackID
+		}
 		tracks, err := q.trackProvider.LoadTracks(pageIDs...)
 		if err != nil {
 			return nil, err
@@ -312,12 +323,12 @@ func (q *QueueService) Remove(
 		return nil, ErrIsCurrentTrack
 	}
 
-	removedID := state.Queue.RemoveAt(index)
-	if removedID == nil {
+	removedEntry := state.Queue.RemoveAt(index)
+	if removedEntry == nil {
 		return nil, ErrInvalidPosition
 	}
 
-	track, err := q.trackProvider.LoadTrack(*removedID)
+	track, err := q.trackProvider.LoadTrack(removedEntry.TrackID)
 	if err != nil {
 		return nil, err
 	}
@@ -351,8 +362,8 @@ func (q *QueueService) Clear(
 	var count int
 	if input.KeepCurrentTrack {
 		// Clear played + upcoming, keep only current track
-		currentTrackID := state.CurrentTrackID()
-		if currentTrackID == nil {
+		currentEntry := state.CurrentEntry()
+		if currentEntry == nil {
 			// No current track (idle state) - clear all played tracks
 			if state.Queue.Len() == 0 {
 				return nil, ErrQueueEmpty
@@ -365,9 +376,9 @@ func (q *QueueService) Clear(
 				return nil, ErrNothingToClear
 			}
 			// Use existing methods: clear all, add back current, activate
-			savedID := *currentTrackID
+			savedEntry := *currentEntry
 			state.Queue.Clear()
-			state.Queue.Append(savedID)
+			state.Queue.Append(savedEntry)
 		}
 	} else {
 		// Clear all tracks
@@ -433,12 +444,12 @@ func (q *QueueService) Seek(
 	}
 
 	// Seek to target position (atomic operation with bounds checking)
-	trackID := state.Queue.Seek(input.Position)
-	if trackID == nil {
+	entry := state.Queue.Seek(input.Position)
+	if entry == nil {
 		return nil, ErrInvalidPosition
 	}
 
-	track, err := q.trackProvider.LoadTrack(*trackID)
+	track, err := q.trackProvider.LoadTrack(entry.TrackID)
 	if err != nil {
 		return nil, err
 	}
@@ -467,8 +478,9 @@ func (q *QueueService) Seek(
 	// which is the track we just seeked to.
 	if q.publisher != nil {
 		q.publisher.PublishTrackEnqueued(domain.TrackEnqueuedEvent{
-			GuildID: input.GuildID,
-			Track:   &track,
+			GuildID:     input.GuildID,
+			Track:       &track,
+			RequesterID: entry.RequesterID,
 		})
 	}
 

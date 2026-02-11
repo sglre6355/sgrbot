@@ -122,6 +122,11 @@ type LavalinkAdapter struct {
 	voiceBufferMu sync.Mutex
 	voiceBuffers  map[snowflake.ID]*voiceEventBuffer
 
+	// encodedCache stores Lavalink encoded track data keyed by TrackID.
+	// Populated during LoadTracks/convertTrack, consumed during Play.
+	encodedMu    sync.RWMutex
+	encodedCache map[domain.TrackID]string
+
 	publisher ports.EventPublisher
 }
 
@@ -146,6 +151,7 @@ func NewLavalinkAdapter(
 		botID:        botID,
 		pending:      make(map[snowflake.ID]*pendingVoiceConnection),
 		voiceBuffers: make(map[snowflake.ID]*voiceEventBuffer),
+		encodedCache: make(map[domain.TrackID]string),
 	}
 
 	// Create DisGoLink client
@@ -232,16 +238,24 @@ func (c *LavalinkAdapter) LeaveChannel(ctx context.Context, guildID snowflake.ID
 	return nil
 }
 
-// Play plays a track.
+// Play plays a track by looking up its encoded data from the internal cache.
 func (c *LavalinkAdapter) Play(
 	ctx context.Context,
 	guildID snowflake.ID,
 	track *domain.Track,
 ) error {
+	c.encodedMu.RLock()
+	encodedTrack, ok := c.encodedCache[track.ID]
+	c.encodedMu.RUnlock()
+
+	if !ok {
+		return fmt.Errorf("encoded track data not found for %q", track.ID)
+	}
+
 	player := c.link.Player(guildID)
 
 	// Use WithEncodedTrack to avoid userData:null issue
-	if err := player.Update(ctx, lavalink.WithEncodedTrack(track.Encoded)); err != nil {
+	if err := player.Update(ctx, lavalink.WithEncodedTrack(encodedTrack)); err != nil {
 		return fmt.Errorf("failed to play track: %w", err)
 	}
 
@@ -346,13 +360,18 @@ func (c *LavalinkAdapter) convertLoadResult(result *lavalink.LoadResult) *ports.
 	}
 }
 
-// convertTrack converts a Lavalink track to TrackInfo.
+// convertTrack converts a Lavalink track to TrackInfo and caches its encoded data.
 func (c *LavalinkAdapter) convertTrack(track lavalink.Track) *ports.TrackInfo {
 	info := track.Info
 	artworkURL := ""
 	if info.ArtworkURL != nil {
 		artworkURL = *info.ArtworkURL
 	}
+
+	// Cache encoded track data for later playback
+	c.encodedMu.Lock()
+	c.encodedCache[domain.TrackID(info.Identifier)] = track.Encoded
+	c.encodedMu.Unlock()
 
 	return &ports.TrackInfo{
 		Identifier: info.Identifier,

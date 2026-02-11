@@ -145,12 +145,12 @@ func (p *PlaybackService) Skip(ctx context.Context, input SkipInput) (*SkipOutpu
 		state.SetNotificationChannelID(input.NotificationChannelID)
 	}
 
-	currentTrackID := state.CurrentTrackID()
-	if currentTrackID == nil {
+	currentEntry := state.CurrentEntry()
+	if currentEntry == nil {
 		return nil, ErrNotPlaying
 	}
 
-	skippedTrack, err := p.trackProvider.LoadTrack(*currentTrackID)
+	skippedTrack, err := p.trackProvider.LoadTrack(currentEntry.TrackID)
 	if err != nil {
 		return nil, err
 	}
@@ -167,10 +167,10 @@ func (p *PlaybackService) Skip(ctx context.Context, input SkipInput) (*SkipOutpu
 
 	// Advance to next track, using LoopModeNone to ensure we move forward
 	// (skip should not repeat the same track even in track loop mode)
-	nextTrackID := state.Queue.Advance(domain.LoopModeNone)
+	nextEntry := state.Queue.Advance(domain.LoopModeNone)
 
 	// Check if we've reached the end of the queue
-	if nextTrackID == nil {
+	if nextEntry == nil {
 		// If queue loop mode is enabled, wrap to the beginning
 		if state.GetLoopMode() == domain.LoopModeQueue {
 			state.Queue.Seek(0)
@@ -230,13 +230,13 @@ func (p *PlaybackService) PlayNext(
 		state.SetPlaybackActive(true)
 	}
 
-	trackID := state.Queue.Current()
-	if trackID == nil {
+	entry := state.Queue.Current()
+	if entry == nil {
 		// No tracks
 		return nil, nil
 	}
 
-	nextTrack, err := p.trackProvider.LoadTrack(*trackID)
+	nextTrack, err := p.trackProvider.LoadTrack(entry.TrackID)
 	if err != nil {
 		return nil, err
 	}
@@ -260,6 +260,8 @@ func (p *PlaybackService) PlayNext(
 		p.publisher.PublishPlaybackStarted(domain.PlaybackStartedEvent{
 			GuildID:               guildID,
 			Track:                 &nextTrack,
+			RequesterID:           entry.RequesterID,
+			EnqueuedAt:            entry.EnqueuedAt,
 			NotificationChannelID: state.GetNotificationChannelID(),
 		})
 	}

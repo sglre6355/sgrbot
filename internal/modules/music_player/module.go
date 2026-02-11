@@ -158,7 +158,13 @@ func (m *MusicPlayerModule) initWithLavalink(deps bot.ModuleDependencies) error 
 		m.eventBus, // as EventSubscriber
 		m.eventBus, // as EventPublisher
 	)
-	m.notificationHandler = infrastructure.NewNotificationEventHandler(notifier, repo, m.eventBus)
+	userInfoProv := infrastructure.NewDiscordUserInfoProvider(deps.Session)
+	m.notificationHandler = infrastructure.NewNotificationEventHandler(
+		notifier,
+		repo,
+		m.eventBus,
+		userInfoProv,
+	)
 
 	// Register event handlers
 	m.playbackHandler.Start()

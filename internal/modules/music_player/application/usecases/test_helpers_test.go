@@ -12,12 +12,10 @@ import (
 
 func mockTrack(id string) *domain.Track {
 	return &domain.Track{
-		ID:          domain.TrackID(id),
-		Encoded:     "encoded-" + id,
-		Title:       "Track " + id,
-		Artist:      "Artist",
-		Duration:    3 * time.Minute,
-		RequesterID: snowflake.ID(123),
+		ID:       domain.TrackID(id),
+		Title:    "Track " + id,
+		Artist:   "Artist",
+		Duration: 3 * time.Minute,
 	}
 }
 
@@ -189,6 +187,6 @@ func (m *mockTrackProvider) Store(track *domain.Track) {
 // It stores the track in the track provider, appends it to the queue, and activates playback.
 func setupPlaying(state *domain.PlayerState, tp *mockTrackProvider, track *domain.Track) {
 	tp.Store(track)
-	state.Queue.Append(track.ID)
+	state.Queue.Append(domain.QueueEntry{TrackID: track.ID})
 	state.SetPlaybackActive(true)
 }

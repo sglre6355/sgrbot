@@ -1,6 +1,8 @@
 package domain
 
 import (
+	"time"
+
 	"github.com/disgoorg/snowflake/v2"
 )
 
@@ -27,14 +29,17 @@ func (r TrackEndReason) ShouldAdvanceQueue() bool {
 
 // TrackEnqueuedEvent is published when a track is added to the queue.
 type TrackEnqueuedEvent struct {
-	GuildID snowflake.ID
-	Track   *Track
+	GuildID     snowflake.ID
+	Track       *Track
+	RequesterID snowflake.ID
 }
 
 // PlaybackStartedEvent is published when a track starts playing.
 type PlaybackStartedEvent struct {
 	GuildID               snowflake.ID
 	Track                 *Track
+	RequesterID           snowflake.ID
+	EnqueuedAt            time.Time
 	NotificationChannelID snowflake.ID
 }
 
