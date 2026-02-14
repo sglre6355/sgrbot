@@ -1,4 +1,4 @@
-package presentation
+package discord
 
 import (
 	"context"
@@ -55,7 +55,7 @@ func (h *AutocompleteHandler) handleQueuePositionAutocomplete(
 		return
 	}
 
-	output, err := h.queue.List(usecases.QueueListInput{
+	output, err := h.queue.List(context.Background(), usecases.QueueListInput{
 		GuildID:  guildID,
 		Page:     1,
 		PageSize: 25,
@@ -70,12 +70,24 @@ func (h *AutocompleteHandler) handleQueuePositionAutocomplete(
 		return
 	}
 
-	choices := make([]*discordgo.ApplicationCommandOptionChoice, 0, len(output.Tracks))
-	for idx, track := range output.Tracks {
+	// Combine all track IDs into a flat list for autocomplete choices
+	var allIDs []string
+	allIDs = append(allIDs, output.PlayedTrackIDs...)
+	if output.CurrentTrackID != "" {
+		allIDs = append(allIDs, output.CurrentTrackID)
+	}
+	allIDs = append(allIDs, output.UpcomingTrackIDs...)
+
+	choices := make([]*discordgo.ApplicationCommandOptionChoice, 0, len(allIDs))
+	for idx, id := range allIDs {
 		// Use 1-indexed positions to match queue list display
-		displayPos := idx + 1
+		displayPos := output.PageStart + idx + 1
+		title := id // fallback to ID if track info unavailable
+		if info, err := h.trackLoader.LoadTrack(context.Background(), id); err == nil {
+			title = info.Title
+		}
 		choices = append(choices, &discordgo.ApplicationCommandOptionChoice{
-			Name:  fmt.Sprintf("%d. %s", displayPos, truncate(track.Title, 90)),
+			Name:  fmt.Sprintf("%d. %s", displayPos, truncate(title, 90)),
 			Value: displayPos,
 		})
 	}
@@ -116,9 +128,9 @@ func (h *AutocompleteHandler) HandlePlay(s *discordgo.Session, i *discordgo.Inte
 
 	// Check if query is a URL (potential playlist)
 	if _, err := url.ParseRequestURI(query); err == nil {
-		result, err := h.trackLoader.ResolveQuery(
+		result, err := h.trackLoader.PreviewQuery(
 			context.Background(),
-			usecases.ResolveQueryInput{
+			usecases.PreviewQueryInput{
 				Query: query,
 				Limit: 24, // Leave room for playlist option
 			},
@@ -137,11 +149,11 @@ func (h *AutocompleteHandler) HandlePlay(s *discordgo.Session, i *discordgo.Inte
 	}
 
 	// Search for tracks (regular search behavior)
-	result, err := h.trackLoader.SearchTracks(context.Background(), usecases.SearchTracksInput{
+	result, err := h.trackLoader.PreviewQuery(context.Background(), usecases.PreviewQueryInput{
 		Query: query,
 		Limit: 10,
 	})
-	if err != nil || result.Tracks == nil {
+	if err != nil || len(result.Tracks) == 0 {
 		_ = s.InteractionRespond(i.Interaction, &discordgo.InteractionResponse{
 			Type: discordgo.InteractionApplicationCommandAutocompleteResult,
 			Data: &discordgo.InteractionResponseData{
@@ -170,7 +182,7 @@ func (h *AutocompleteHandler) HandlePlay(s *discordgo.Session, i *discordgo.Inte
 
 // buildPlaylistChoices builds autocomplete choices for a playlist result.
 func buildPlaylistChoices(
-	result *usecases.ResolveQueryOutput,
+	result *usecases.PreviewQueryOutput,
 	playlistURL string,
 ) []*discordgo.ApplicationCommandOptionChoice {
 	choices := make([]*discordgo.ApplicationCommandOptionChoice, 0, len(result.Tracks)+1)

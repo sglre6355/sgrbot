@@ -38,6 +38,7 @@ type VoiceChannelService struct {
 	voiceConnection ports.VoiceConnection
 	voiceState      ports.VoiceStateProvider
 	publisher       ports.EventPublisher
+	notifier        ports.NotificationSender
 }
 
 // NewVoiceChannelService creates a new VoiceChannelService.
@@ -46,18 +47,21 @@ func NewVoiceChannelService(
 	voiceConnection ports.VoiceConnection,
 	voiceState ports.VoiceStateProvider,
 	publisher ports.EventPublisher,
+	notifier ports.NotificationSender,
 ) *VoiceChannelService {
 	return &VoiceChannelService{
 		repo:            repo,
 		voiceConnection: voiceConnection,
 		voiceState:      voiceState,
 		publisher:       publisher,
+		notifier:        notifier,
 	}
 }
 
 // Join joins the bot to a voice channel.
 func (v *VoiceChannelService) Join(ctx context.Context, input JoinInput) (*JoinOutput, error) {
-	existingState := v.repo.Get(input.GuildID)
+	existingState, err := v.repo.Get(ctx, input.GuildID)
+	hasExisting := err == nil
 
 	// Determine which channel to join
 	voiceChannelID := input.VoiceChannelID
@@ -67,15 +71,18 @@ func (v *VoiceChannelService) Join(ctx context.Context, input JoinInput) (*JoinO
 		if err != nil {
 			return nil, err
 		}
-		if userChannel == 0 {
+		if userChannel == nil {
 			return nil, ErrUserNotInVoice
 		}
-		voiceChannelID = userChannel
+		voiceChannelID = *userChannel
 	}
 
 	// Check if already connected to the same channel - just update notification channel
-	if existingState != nil && existingState.VoiceChannelID == voiceChannelID {
-		existingState.SetNotificationChannel(input.NotificationChannelID)
+	if hasExisting && existingState.GetVoiceChannelID() == voiceChannelID {
+		existingState.SetNotificationChannelID(input.NotificationChannelID)
+		if err := v.repo.Save(ctx, existingState); err != nil {
+			return nil, err
+		}
 		return &JoinOutput{VoiceChannelID: voiceChannelID}, nil
 	}
 
@@ -84,14 +91,21 @@ func (v *VoiceChannelService) Join(ctx context.Context, input JoinInput) (*JoinO
 		return nil, err
 	}
 
-	if existingState != nil {
+	if hasExisting {
 		// Moving channels - preserve queue, update channel IDs
-		existingState.SetVoiceChannel(voiceChannelID)
-		existingState.SetNotificationChannel(input.NotificationChannelID)
+		existingState.SetVoiceChannelID(voiceChannelID)
+		existingState.SetNotificationChannelID(input.NotificationChannelID)
+		if err := v.repo.Save(ctx, existingState); err != nil {
+			return nil, err
+		}
 	} else {
 		// Fresh connection - create new state
-		state := domain.NewPlayerState(input.GuildID, voiceChannelID, input.NotificationChannelID)
-		v.repo.Save(state)
+		state := domain.NewPlayerState(input.GuildID, domain.NewQueue())
+		state.SetVoiceChannelID(voiceChannelID)
+		state.SetNotificationChannelID(input.NotificationChannelID)
+		if err := v.repo.Save(ctx, *state); err != nil {
+			return nil, err
+		}
 	}
 
 	return &JoinOutput{VoiceChannelID: voiceChannelID}, nil
@@ -101,50 +115,45 @@ func (v *VoiceChannelService) Join(ctx context.Context, input JoinInput) (*JoinO
 // This should be called when the bot's voice state changes due to external factors
 // (e.g., being moved by a user or disconnected by Discord).
 func (v *VoiceChannelService) HandleBotVoiceStateChange(input BotVoiceStateChangeInput) {
-	state := v.repo.Get(input.GuildID)
-	if state == nil {
+	ctx := context.Background()
+
+	state, err := v.repo.Get(ctx, input.GuildID)
+	if err != nil {
 		// No player state exists, nothing to do
 		return
 	}
 
 	if input.NewChannelID == nil {
 		// Bot was disconnected from voice
-		// Publish event to delete the "Now Playing" message before we lose the state
+		// Delete the "Now Playing" message before we lose the state
 		nowPlayingMsg := state.GetNowPlayingMessage()
-		if nowPlayingMsg != nil && v.publisher != nil {
-			v.publisher.PublishPlaybackFinished(domain.PlaybackFinishedEvent{
-				GuildID:               input.GuildID,
-				NotificationChannelID: nowPlayingMsg.ChannelID,
-				LastMessageID:         &nowPlayingMsg.MessageID,
-			})
+		if nowPlayingMsg != nil && v.notifier != nil {
+			_ = v.notifier.DeleteMessage(nowPlayingMsg.ChannelID, nowPlayingMsg.MessageID)
 		}
 
 		// Delete player state
-		v.repo.Delete(input.GuildID)
+		_ = v.repo.Delete(ctx, input.GuildID)
 		return
 	}
 
 	// Bot was moved to a different channel
 	if *input.NewChannelID != state.GetVoiceChannelID() {
-		state.SetVoiceChannel(*input.NewChannelID)
+		state.SetVoiceChannelID(*input.NewChannelID)
+		_ = v.repo.Save(ctx, state)
 	}
 }
 
 // Leave leaves the voice channel and deletes the player state.
 func (v *VoiceChannelService) Leave(ctx context.Context, input LeaveInput) error {
-	state := v.repo.Get(input.GuildID)
-	if state == nil {
+	state, err := v.repo.Get(ctx, input.GuildID)
+	if err != nil {
 		return ErrNotConnected
 	}
 
-	// Publish event to delete the "Now Playing" message before we lose the state
+	// Delete the "Now Playing" message before we lose the state
 	nowPlayingMsg := state.GetNowPlayingMessage()
-	if nowPlayingMsg != nil && v.publisher != nil {
-		v.publisher.PublishPlaybackFinished(domain.PlaybackFinishedEvent{
-			GuildID:               input.GuildID,
-			NotificationChannelID: nowPlayingMsg.ChannelID,
-			LastMessageID:         &nowPlayingMsg.MessageID,
-		})
+	if nowPlayingMsg != nil && v.notifier != nil {
+		_ = v.notifier.DeleteMessage(nowPlayingMsg.ChannelID, nowPlayingMsg.MessageID)
 	}
 
 	// Leave the channel
@@ -153,7 +162,5 @@ func (v *VoiceChannelService) Leave(ctx context.Context, input LeaveInput) error
 	}
 
 	// Delete the entire player state
-	v.repo.Delete(input.GuildID)
-
-	return nil
+	return v.repo.Delete(ctx, input.GuildID)
 }

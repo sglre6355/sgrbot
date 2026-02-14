@@ -1,4 +1,4 @@
-package presentation
+package discord
 
 import "github.com/bwmarrin/discordgo"
 

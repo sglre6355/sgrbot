@@ -6,6 +6,11 @@ import (
 	"github.com/sglre6355/sgrbot/internal/modules/music_player/application/ports"
 )
 
+// Ensure VoiceStateProvider implements required ports.
+var (
+	_ ports.VoiceStateProvider = (*VoiceStateProvider)(nil)
+)
+
 // VoiceStateProvider provides Discord voice state information.
 type VoiceStateProvider struct {
 	session *discordgo.Session
@@ -19,14 +24,14 @@ func NewVoiceStateProvider(session *discordgo.Session) *VoiceStateProvider {
 }
 
 // GetUserVoiceChannel returns the voice channel ID that the user is currently in.
-// Returns 0 if the user is not in a voice channel.
+// Returns nil if the user is not in a voice channel.
 func (v *VoiceStateProvider) GetUserVoiceChannel(
 	guildID, userID snowflake.ID,
-) (snowflake.ID, error) {
+) (*snowflake.ID, error) {
 	// Get guild from state
 	guild, err := v.session.State.Guild(guildID.String())
 	if err != nil {
-		return 0, err
+		return nil, err
 	}
 
 	// Find user's voice state
@@ -34,14 +39,11 @@ func (v *VoiceStateProvider) GetUserVoiceChannel(
 		if vs.UserID == userID.String() && vs.ChannelID != "" {
 			channelID, err := snowflake.Parse(vs.ChannelID)
 			if err != nil {
-				return 0, err
+				return nil, err
 			}
-			return channelID, nil
+			return &channelID, nil
 		}
 	}
 
-	return 0, nil
+	return nil, nil
 }
-
-// Ensure VoiceStateProvider implements ports.VoiceStateProvider.
-var _ ports.VoiceStateProvider = (*VoiceStateProvider)(nil)

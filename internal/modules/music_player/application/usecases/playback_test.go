@@ -17,7 +17,7 @@ func TestPlaybackService_Pause(t *testing.T) {
 	tests := []struct {
 		name        string
 		input       PauseInput
-		setupRepo   func(*mockRepository)
+		setupRepo   func(*mockRepository, *mockTrackProvider)
 		setupPlayer func(*mockAudioPlayer)
 		wantErr     error
 	}{
@@ -26,9 +26,9 @@ func TestPlaybackService_Pause(t *testing.T) {
 			input: PauseInput{
 				GuildID: guildID,
 			},
-			setupRepo: func(m *mockRepository) {
+			setupRepo: func(m *mockRepository, tp *mockTrackProvider) {
 				state := m.createConnectedState(guildID, voiceChannelID, textChannelID)
-				state.SetPlaying(mockTrack("track-1"))
+				setupPlaying(state, tp, mockTrack("track-1"))
 			},
 		},
 		{
@@ -43,7 +43,7 @@ func TestPlaybackService_Pause(t *testing.T) {
 			input: PauseInput{
 				GuildID: guildID,
 			},
-			setupRepo: func(m *mockRepository) {
+			setupRepo: func(m *mockRepository, _ *mockTrackProvider) {
 				m.createConnectedState(guildID, voiceChannelID, textChannelID)
 			},
 			wantErr: ErrNotPlaying,
@@ -53,10 +53,10 @@ func TestPlaybackService_Pause(t *testing.T) {
 			input: PauseInput{
 				GuildID: guildID,
 			},
-			setupRepo: func(m *mockRepository) {
+			setupRepo: func(m *mockRepository, tp *mockTrackProvider) {
 				state := m.createConnectedState(guildID, voiceChannelID, textChannelID)
-				state.SetPlaying(mockTrack("track-1"))
-				state.SetPaused()
+				setupPlaying(state, tp, mockTrack("track-1"))
+				state.SetPaused(true)
 			},
 			wantErr: ErrAlreadyPaused,
 		},
@@ -65,9 +65,9 @@ func TestPlaybackService_Pause(t *testing.T) {
 			input: PauseInput{
 				GuildID: guildID,
 			},
-			setupRepo: func(m *mockRepository) {
+			setupRepo: func(m *mockRepository, tp *mockTrackProvider) {
 				state := m.createConnectedState(guildID, voiceChannelID, textChannelID)
-				state.SetPlaying(mockTrack("track-1"))
+				setupPlaying(state, tp, mockTrack("track-1"))
 			},
 			setupPlayer: func(m *mockAudioPlayer) {
 				m.pauseErr = errors.New("pause failed")
@@ -80,15 +80,16 @@ func TestPlaybackService_Pause(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			repo := newMockRepository()
 			player := &mockAudioPlayer{}
+			tp := newMockTrackProvider()
 
 			if tt.setupRepo != nil {
-				tt.setupRepo(repo)
+				tt.setupRepo(repo, tp)
 			}
 			if tt.setupPlayer != nil {
 				tt.setupPlayer(player)
 			}
 
-			service := NewPlaybackService(repo, player, nil, nil)
+			service := NewPlaybackService(repo, player, nil, nil, tp, nil)
 			err := service.Pause(context.Background(), tt.input)
 
 			if tt.wantErr != nil {
@@ -108,7 +109,7 @@ func TestPlaybackService_Pause(t *testing.T) {
 			}
 
 			// Verify state was updated
-			state := repo.Get(guildID)
+			state, _ := repo.Get(context.Background(), guildID)
 			if !state.IsPaused() {
 				t.Error("expected status to be paused")
 			}
@@ -124,7 +125,7 @@ func TestPlaybackService_Resume(t *testing.T) {
 	tests := []struct {
 		name        string
 		input       ResumeInput
-		setupRepo   func(*mockRepository)
+		setupRepo   func(*mockRepository, *mockTrackProvider)
 		setupPlayer func(*mockAudioPlayer)
 		wantErr     error
 	}{
@@ -133,10 +134,10 @@ func TestPlaybackService_Resume(t *testing.T) {
 			input: ResumeInput{
 				GuildID: guildID,
 			},
-			setupRepo: func(m *mockRepository) {
+			setupRepo: func(m *mockRepository, tp *mockTrackProvider) {
 				state := m.createConnectedState(guildID, voiceChannelID, textChannelID)
-				state.SetPlaying(mockTrack("track-1"))
-				state.SetPaused()
+				setupPlaying(state, tp, mockTrack("track-1"))
+				state.SetPaused(true)
 			},
 		},
 		{
@@ -151,7 +152,7 @@ func TestPlaybackService_Resume(t *testing.T) {
 			input: ResumeInput{
 				GuildID: guildID,
 			},
-			setupRepo: func(m *mockRepository) {
+			setupRepo: func(m *mockRepository, _ *mockTrackProvider) {
 				m.createConnectedState(guildID, voiceChannelID, textChannelID)
 			},
 			wantErr: ErrNotPlaying,
@@ -161,9 +162,9 @@ func TestPlaybackService_Resume(t *testing.T) {
 			input: ResumeInput{
 				GuildID: guildID,
 			},
-			setupRepo: func(m *mockRepository) {
+			setupRepo: func(m *mockRepository, tp *mockTrackProvider) {
 				state := m.createConnectedState(guildID, voiceChannelID, textChannelID)
-				state.SetPlaying(mockTrack("track-1"))
+				setupPlaying(state, tp, mockTrack("track-1"))
 			},
 			wantErr: ErrNotPaused,
 		},
@@ -172,10 +173,10 @@ func TestPlaybackService_Resume(t *testing.T) {
 			input: ResumeInput{
 				GuildID: guildID,
 			},
-			setupRepo: func(m *mockRepository) {
+			setupRepo: func(m *mockRepository, tp *mockTrackProvider) {
 				state := m.createConnectedState(guildID, voiceChannelID, textChannelID)
-				state.SetPlaying(mockTrack("track-1"))
-				state.SetPaused()
+				setupPlaying(state, tp, mockTrack("track-1"))
+				state.SetPaused(true)
 			},
 			setupPlayer: func(m *mockAudioPlayer) {
 				m.resumeErr = errors.New("resume failed")
@@ -188,15 +189,16 @@ func TestPlaybackService_Resume(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			repo := newMockRepository()
 			player := &mockAudioPlayer{}
+			tp := newMockTrackProvider()
 
 			if tt.setupRepo != nil {
-				tt.setupRepo(repo)
+				tt.setupRepo(repo, tp)
 			}
 			if tt.setupPlayer != nil {
 				tt.setupPlayer(player)
 			}
 
-			service := NewPlaybackService(repo, player, nil, nil)
+			service := NewPlaybackService(repo, player, nil, nil, tp, nil)
 			err := service.Resume(context.Background(), tt.input)
 
 			if tt.wantErr != nil {
@@ -216,8 +218,8 @@ func TestPlaybackService_Resume(t *testing.T) {
 			}
 
 			// Verify state was updated
-			state := repo.Get(guildID)
-			if state.IsIdle() {
+			state, _ := repo.Get(context.Background(), guildID)
+			if !state.IsPlaybackActive() {
 				t.Error("expected playback to be active")
 			}
 		})
@@ -230,35 +232,35 @@ func TestPlaybackService_Skip(t *testing.T) {
 	textChannelID := snowflake.ID(3)
 
 	tests := []struct {
-		name          string
-		input         SkipInput
-		setupRepo     func(*mockRepository)
-		setupPlayer   func(*mockAudioPlayer)
-		wantErr       error
-		wantNextTrack bool
+		name       string
+		input      SkipInput
+		setupRepo  func(*mockRepository, *mockTrackProvider)
+		wantErr    error
+		wantNextID bool // whether NextTrackID should be non-nil
 	}{
 		{
 			name: "skip to next track",
 			input: SkipInput{
 				GuildID: guildID,
 			},
-			setupRepo: func(m *mockRepository) {
+			setupRepo: func(m *mockRepository, tp *mockTrackProvider) {
 				state := m.createConnectedState(guildID, voiceChannelID, textChannelID)
-				state.SetPlaying(mockTrack("current"))
-				state.Queue.Add(mockTrack("next"))
+				setupPlaying(state, tp, mockTrack("current"))
+				tp.Store(mockTrack("next"))
+				state.Append(domain.QueueEntry{TrackID: mockTrack("next").ID})
 			},
-			wantNextTrack: true,
+			wantNextID: true,
 		},
 		{
-			name: "skip with empty queue - stop",
+			name: "skip with empty queue",
 			input: SkipInput{
 				GuildID: guildID,
 			},
-			setupRepo: func(m *mockRepository) {
+			setupRepo: func(m *mockRepository, tp *mockTrackProvider) {
 				state := m.createConnectedState(guildID, voiceChannelID, textChannelID)
-				state.SetPlaying(mockTrack("current"))
+				setupPlaying(state, tp, mockTrack("current"))
 			},
-			wantNextTrack: false,
+			wantNextID: false,
 		},
 		{
 			name: "not connected",
@@ -272,72 +274,41 @@ func TestPlaybackService_Skip(t *testing.T) {
 			input: SkipInput{
 				GuildID: guildID,
 			},
-			setupRepo: func(m *mockRepository) {
+			setupRepo: func(m *mockRepository, _ *mockTrackProvider) {
 				m.createConnectedState(guildID, voiceChannelID, textChannelID)
 			},
 			wantErr: ErrNotPlaying,
-		},
-		{
-			name: "audio player play error",
-			input: SkipInput{
-				GuildID: guildID,
-			},
-			setupRepo: func(m *mockRepository) {
-				state := m.createConnectedState(guildID, voiceChannelID, textChannelID)
-				state.SetPlaying(mockTrack("current"))
-				state.Queue.Add(mockTrack("next"))
-			},
-			setupPlayer: func(m *mockAudioPlayer) {
-				m.playErr = errors.New("play failed")
-			},
-			wantErr: errors.New("play failed"),
-		},
-		{
-			name: "audio player stop error",
-			input: SkipInput{
-				GuildID: guildID,
-			},
-			setupRepo: func(m *mockRepository) {
-				state := m.createConnectedState(guildID, voiceChannelID, textChannelID)
-				state.SetPlaying(mockTrack("current"))
-				// Empty queue
-			},
-			setupPlayer: func(m *mockAudioPlayer) {
-				m.stopErr = errors.New("stop failed")
-			},
-			wantErr: errors.New("stop failed"),
 		},
 		{
 			name: "skip at last track with queue loop wraps to first",
 			input: SkipInput{
 				GuildID: guildID,
 			},
-			setupRepo: func(m *mockRepository) {
+			setupRepo: func(m *mockRepository, tp *mockTrackProvider) {
 				state := m.createConnectedState(guildID, voiceChannelID, textChannelID)
-				state.Queue.Add(mockTrack("first"))
-				state.Queue.Add(mockTrack("last"))
-				state.Queue.Start()                      // Start at first
-				state.Queue.Advance(domain.LoopModeNone) // Move to last
-				state.StartPlayback()
+				tp.Store(mockTrack("first"))
+				tp.Store(mockTrack("last"))
+				state.Append(domain.QueueEntry{TrackID: mockTrack("first").ID})
+				state.Append(domain.QueueEntry{TrackID: mockTrack("last").ID})
+				state.Advance(domain.LoopModeNone) // Move to last
+				state.SetPlaybackActive(true)
 				state.SetLoopMode(domain.LoopModeQueue)
 			},
-			wantNextTrack: true,
+			wantNextID: true,
 		},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			repo := newMockRepository()
-			player := &mockAudioPlayer{}
+			tp := newMockTrackProvider()
+			publisher := &mockEventPublisher{}
 
 			if tt.setupRepo != nil {
-				tt.setupRepo(repo)
-			}
-			if tt.setupPlayer != nil {
-				tt.setupPlayer(player)
+				tt.setupRepo(repo, tp)
 			}
 
-			service := NewPlaybackService(repo, player, nil, nil)
+			service := NewPlaybackService(repo, &mockAudioPlayer{}, publisher, nil, tp, nil)
 			output, err := service.Skip(context.Background(), tt.input)
 
 			if tt.wantErr != nil {
@@ -356,179 +327,27 @@ func TestPlaybackService_Skip(t *testing.T) {
 				return
 			}
 
-			if output.SkippedTrack == nil {
-				t.Error("expected SkippedTrack to be set")
+			if output.SkippedTrackID == "" {
+				t.Error("expected SkippedTrackID to be set")
 			}
 
-			if tt.wantNextTrack {
-				if output.NextTrack == nil {
-					t.Error("expected NextTrack to be set")
-				}
-				state := repo.Get(guildID)
-				if state.IsIdle() {
-					t.Error("expected playback to be active")
+			if tt.wantNextID {
+				if output.NextTrackID == nil {
+					t.Error("expected NextTrackID to be set")
 				}
 			} else {
-				if output.NextTrack != nil {
-					t.Error("expected NextTrack to be nil")
+				if output.NextTrackID != nil {
+					t.Error("expected NextTrackID to be nil")
 				}
-				state := repo.Get(guildID)
-				if !state.IsIdle() {
-					t.Error("expected status to be idle")
-				}
+			}
+
+			// Skip always publishes CurrentTrackChangedEvent
+			if len(publisher.events) != 1 {
+				t.Errorf("expected 1 event, got %d", len(publisher.events))
+			} else if _, ok := publisher.events[0].(domain.CurrentTrackChangedEvent); !ok {
+				t.Errorf("expected CurrentTrackChangedEvent, got %T", publisher.events[0])
 			}
 		})
-	}
-}
-
-func TestTrackEndReason_ShouldAdvanceQueue(t *testing.T) {
-	tests := []struct {
-		reason   domain.TrackEndReason
-		expected bool
-	}{
-		{domain.TrackEndFinished, true},
-		{domain.TrackEndLoadFailed, true},
-		{domain.TrackEndStopped, false},
-		{domain.TrackEndReplaced, false},
-		{domain.TrackEndCleanup, false},
-	}
-
-	for _, tt := range tests {
-		t.Run(string(tt.reason), func(t *testing.T) {
-			if got := tt.reason.ShouldAdvanceQueue(); got != tt.expected {
-				t.Errorf("ShouldAdvanceQueue() = %v, want %v", got, tt.expected)
-			}
-		})
-	}
-}
-
-func TestPlaybackService_PlayNext(t *testing.T) {
-	guildID := snowflake.ID(1)
-	voiceChannelID := snowflake.ID(4)
-	textChannelID := snowflake.ID(3)
-
-	tests := []struct {
-		name        string
-		setupRepo   func(*mockRepository)
-		setupPlayer func(*mockAudioPlayer)
-		wantErr     error
-		wantTrack   bool
-	}{
-		{
-			name: "play next track from queue",
-			setupRepo: func(m *mockRepository) {
-				state := m.createConnectedState(guildID, voiceChannelID, textChannelID)
-				state.Queue.Add(mockTrack("track-1"))
-			},
-			wantTrack: true,
-		},
-		{
-			name: "returns nil when queue is empty",
-			setupRepo: func(m *mockRepository) {
-				m.createConnectedState(guildID, voiceChannelID, textChannelID)
-				// Empty queue
-			},
-			wantTrack: false,
-		},
-		{
-			name:    "returns error when not connected",
-			wantErr: ErrNotConnected,
-		},
-		{
-			name: "audio player error propagates",
-			setupRepo: func(m *mockRepository) {
-				state := m.createConnectedState(guildID, voiceChannelID, textChannelID)
-				state.Queue.Add(mockTrack("track-1"))
-			},
-			setupPlayer: func(m *mockAudioPlayer) {
-				m.playErr = errors.New("play failed")
-			},
-			wantErr: errors.New("play failed"),
-		},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			repo := newMockRepository()
-			player := &mockAudioPlayer{}
-
-			if tt.setupRepo != nil {
-				tt.setupRepo(repo)
-			}
-			if tt.setupPlayer != nil {
-				tt.setupPlayer(player)
-			}
-
-			service := NewPlaybackService(repo, player, nil, nil)
-			track, err := service.PlayNext(context.Background(), guildID)
-
-			if tt.wantErr != nil {
-				if err == nil {
-					t.Errorf("expected error %v, got nil", tt.wantErr)
-					return
-				}
-				if err.Error() != tt.wantErr.Error() {
-					t.Errorf("expected error %v, got %v", tt.wantErr, err)
-				}
-				return
-			}
-
-			if err != nil {
-				t.Errorf("unexpected error: %v", err)
-				return
-			}
-
-			if tt.wantTrack {
-				if track == nil {
-					t.Error("expected track to be set")
-				}
-				state := repo.Get(guildID)
-				if state.IsIdle() {
-					t.Error("expected playback to be active")
-				}
-			} else {
-				if track != nil {
-					t.Error("expected track to be nil")
-				}
-			}
-		})
-	}
-}
-
-func TestPlaybackService_PlayNext_PreservesQueuePositionOnPlayFailure(t *testing.T) {
-	guildID := snowflake.ID(1)
-	voiceChannelID := snowflake.ID(4)
-	textChannelID := snowflake.ID(3)
-
-	repo := newMockRepository()
-	player := &mockAudioPlayer{
-		playErr: errors.New("play failed"),
-	}
-
-	state := repo.createConnectedState(guildID, voiceChannelID, textChannelID)
-	state.Queue.Add(mockTrack("track-1"))
-
-	service := NewPlaybackService(repo, player, nil, nil)
-
-	// Verify queue is idle before PlayNext
-	if !state.Queue.IsIdle() {
-		t.Error("expected queue to be idle before PlayNext")
-	}
-
-	// Call PlayNext - this will call Start() internally, setting index to 0
-	_, err := service.PlayNext(context.Background(), guildID)
-	if err == nil {
-		t.Error("expected error from PlayNext")
-		return
-	}
-
-	// Verify playback is marked as inactive but queue position is preserved
-	if !state.IsIdle() {
-		t.Error("expected playback to be inactive after Play failure")
-	}
-	// Queue position should be preserved (index 0, not -1)
-	if state.Queue.CurrentIndex() != 0 {
-		t.Errorf("expected currentIndex 0 (preserved), got %d", state.Queue.CurrentIndex())
 	}
 }
 
@@ -596,7 +415,14 @@ func TestPlaybackService_SetLoopMode(t *testing.T) {
 				tt.setupRepo(repo)
 			}
 
-			service := NewPlaybackService(repo, &mockAudioPlayer{}, nil, nil)
+			service := NewPlaybackService(
+				repo,
+				&mockAudioPlayer{},
+				nil,
+				nil,
+				newMockTrackProvider(),
+				nil,
+			)
 			err := service.SetLoopMode(context.Background(), tt.input)
 
 			if tt.wantErr != nil {
@@ -615,9 +441,9 @@ func TestPlaybackService_SetLoopMode(t *testing.T) {
 				return
 			}
 
-			state := repo.Get(guildID)
-			if state.LoopMode() != tt.wantMode {
-				t.Errorf("expected loop mode %v, got %v", tt.wantMode, state.LoopMode())
+			state, _ := repo.Get(context.Background(), guildID)
+			if state.GetLoopMode() != tt.wantMode {
+				t.Errorf("expected loop mode %v, got %v", tt.wantMode, state.GetLoopMode())
 			}
 		})
 	}
@@ -688,7 +514,14 @@ func TestPlaybackService_CycleLoopMode(t *testing.T) {
 				tt.setupRepo(repo)
 			}
 
-			service := NewPlaybackService(repo, &mockAudioPlayer{}, nil, nil)
+			service := NewPlaybackService(
+				repo,
+				&mockAudioPlayer{},
+				nil,
+				nil,
+				newMockTrackProvider(),
+				nil,
+			)
 			output, err := service.CycleLoopMode(context.Background(), tt.input)
 
 			if tt.wantErr != nil {
@@ -711,9 +544,13 @@ func TestPlaybackService_CycleLoopMode(t *testing.T) {
 				t.Errorf("expected output mode %v, got %v", tt.wantModeStr, output.NewMode)
 			}
 
-			state := repo.Get(guildID)
-			if state.LoopMode() != tt.wantStateDMode {
-				t.Errorf("expected state loop mode %v, got %v", tt.wantStateDMode, state.LoopMode())
+			state, _ := repo.Get(context.Background(), guildID)
+			if state.GetLoopMode() != tt.wantStateDMode {
+				t.Errorf(
+					"expected state loop mode %v, got %v",
+					tt.wantStateDMode,
+					state.GetLoopMode(),
+				)
 			}
 		})
 	}

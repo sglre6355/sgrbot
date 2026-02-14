@@ -2,7 +2,10 @@ package infrastructure
 
 import (
 	"context"
+	"errors"
+	"fmt"
 	"log/slog"
+	"reflect"
 	"sync"
 
 	"github.com/sglre6355/sgrbot/internal/modules/music_player/application/ports"
@@ -12,7 +15,7 @@ import (
 // DefaultEventBufferSize is the default buffer size for event channels.
 const DefaultEventBufferSize = 100
 
-// Compile-time checks that ChannelEventBus implements ports interfaces.
+// Ensure ChannelEventBus implements required ports.
 var (
 	_ ports.EventPublisher  = (*ChannelEventBus)(nil)
 	_ ports.EventSubscriber = (*ChannelEventBus)(nil)
@@ -21,19 +24,8 @@ var (
 // ChannelEventBus provides a channel-based event bus for async event handling.
 // It implements both EventPublisher and EventSubscriber interfaces.
 type ChannelEventBus struct {
-	// Channels for event delivery
-	trackEnqueued    chan domain.TrackEnqueuedEvent
-	playbackStarted  chan domain.PlaybackStartedEvent
-	playbackFinished chan domain.PlaybackFinishedEvent
-	trackEnded       chan domain.TrackEndedEvent
-	queueCleared     chan domain.QueueClearedEvent
-
-	// Handler slices for callback-based subscription
-	trackEnqueuedHandlers    []func(context.Context, domain.TrackEnqueuedEvent)
-	playbackStartedHandlers  []func(context.Context, domain.PlaybackStartedEvent)
-	playbackFinishedHandlers []func(context.Context, domain.PlaybackFinishedEvent)
-	trackEndedHandlers       []func(context.Context, domain.TrackEndedEvent)
-	queueClearedHandlers     []func(context.Context, domain.QueueClearedEvent)
+	events   chan domain.Event
+	handlers map[reflect.Type][]func(context.Context, domain.Event)
 
 	ctx    context.Context
 	cancel context.CancelFunc
@@ -51,270 +43,28 @@ func NewChannelEventBus(bufferSize int) *ChannelEventBus {
 	ctx, cancel := context.WithCancel(context.Background())
 
 	bus := &ChannelEventBus{
-		trackEnqueued:    make(chan domain.TrackEnqueuedEvent, bufferSize),
-		playbackStarted:  make(chan domain.PlaybackStartedEvent, bufferSize),
-		playbackFinished: make(chan domain.PlaybackFinishedEvent, bufferSize),
-		trackEnded:       make(chan domain.TrackEndedEvent, bufferSize),
-		queueCleared:     make(chan domain.QueueClearedEvent, bufferSize),
-		ctx:              ctx,
-		cancel:           cancel,
+		events:   make(chan domain.Event, bufferSize),
+		handlers: make(map[reflect.Type][]func(context.Context, domain.Event)),
+		ctx:      ctx,
+		cancel:   cancel,
 	}
 
-	// Start dispatcher goroutines
-	bus.startDispatchers()
+	bus.wg.Go(func() {
+		for event := range bus.events {
+			eventType := reflect.TypeOf(event)
+
+			bus.mu.RLock()
+			handlers := make([]func(context.Context, domain.Event), len(bus.handlers[eventType]))
+			copy(handlers, bus.handlers[eventType])
+			bus.mu.RUnlock()
+
+			for _, handler := range handlers {
+				handler(bus.ctx, event)
+			}
+		}
+	})
 
 	return bus
-}
-
-// startDispatchers starts goroutines that dispatch events to registered handlers.
-func (b *ChannelEventBus) startDispatchers() {
-	b.wg.Add(5)
-
-	go b.dispatchTrackEnqueued()
-	go b.dispatchPlaybackStarted()
-	go b.dispatchPlaybackFinished()
-	go b.dispatchTrackEnded()
-	go b.dispatchQueueCleared()
-}
-
-func (b *ChannelEventBus) dispatchTrackEnqueued() {
-	defer b.wg.Done()
-	for {
-		select {
-		case <-b.ctx.Done():
-			return
-		case event, ok := <-b.trackEnqueued:
-			if !ok {
-				return
-			}
-			b.mu.RLock()
-			handlers := b.trackEnqueuedHandlers
-			b.mu.RUnlock()
-			for _, handler := range handlers {
-				handler(b.ctx, event)
-			}
-		}
-	}
-}
-
-func (b *ChannelEventBus) dispatchPlaybackStarted() {
-	defer b.wg.Done()
-	for {
-		select {
-		case <-b.ctx.Done():
-			return
-		case event, ok := <-b.playbackStarted:
-			if !ok {
-				return
-			}
-			b.mu.RLock()
-			handlers := b.playbackStartedHandlers
-			b.mu.RUnlock()
-			for _, handler := range handlers {
-				handler(b.ctx, event)
-			}
-		}
-	}
-}
-
-func (b *ChannelEventBus) dispatchPlaybackFinished() {
-	defer b.wg.Done()
-	for {
-		select {
-		case <-b.ctx.Done():
-			return
-		case event, ok := <-b.playbackFinished:
-			if !ok {
-				return
-			}
-			b.mu.RLock()
-			handlers := b.playbackFinishedHandlers
-			b.mu.RUnlock()
-			for _, handler := range handlers {
-				handler(b.ctx, event)
-			}
-		}
-	}
-}
-
-func (b *ChannelEventBus) dispatchTrackEnded() {
-	defer b.wg.Done()
-	for {
-		select {
-		case <-b.ctx.Done():
-			return
-		case event, ok := <-b.trackEnded:
-			if !ok {
-				return
-			}
-			b.mu.RLock()
-			handlers := b.trackEndedHandlers
-			b.mu.RUnlock()
-			for _, handler := range handlers {
-				handler(b.ctx, event)
-			}
-		}
-	}
-}
-
-func (b *ChannelEventBus) dispatchQueueCleared() {
-	defer b.wg.Done()
-	for {
-		select {
-		case <-b.ctx.Done():
-			return
-		case event, ok := <-b.queueCleared:
-			if !ok {
-				return
-			}
-			b.mu.RLock()
-			handlers := b.queueClearedHandlers
-			b.mu.RUnlock()
-			for _, handler := range handlers {
-				handler(b.ctx, event)
-			}
-		}
-	}
-}
-
-// --- EventPublisher interface ---
-
-// PublishTrackEnqueued publishes a TrackEnqueuedEvent.
-// Non-blocking: if the channel buffer is full, the event is dropped with a warning.
-func (b *ChannelEventBus) PublishTrackEnqueued(event domain.TrackEnqueuedEvent) {
-	b.mu.RLock()
-	defer b.mu.RUnlock()
-
-	if b.closed {
-		slog.Warn("attempted to publish to closed event bus", "type", "TrackEnqueued")
-		return
-	}
-
-	select {
-	case b.trackEnqueued <- event:
-		slog.Debug("published event", "type", "TrackEnqueued", "guild", event.GuildID)
-	default:
-		slog.Warn("event buffer full, dropping event", "type", "TrackEnqueued")
-	}
-}
-
-// PublishPlaybackStarted publishes a PlaybackStartedEvent.
-// Non-blocking: if the channel buffer is full, the event is dropped with a warning.
-func (b *ChannelEventBus) PublishPlaybackStarted(event domain.PlaybackStartedEvent) {
-	b.mu.RLock()
-	defer b.mu.RUnlock()
-
-	if b.closed {
-		slog.Warn("attempted to publish to closed event bus", "type", "PlaybackStarted")
-		return
-	}
-
-	select {
-	case b.playbackStarted <- event:
-		slog.Debug("published event", "type", "PlaybackStarted", "guild", event.GuildID)
-	default:
-		slog.Warn("event buffer full, dropping event", "type", "PlaybackStarted")
-	}
-}
-
-// PublishPlaybackFinished publishes a PlaybackFinishedEvent.
-// Non-blocking: if the channel buffer is full, the event is dropped with a warning.
-func (b *ChannelEventBus) PublishPlaybackFinished(event domain.PlaybackFinishedEvent) {
-	b.mu.RLock()
-	defer b.mu.RUnlock()
-
-	if b.closed {
-		slog.Warn("attempted to publish to closed event bus", "type", "PlaybackFinished")
-		return
-	}
-
-	select {
-	case b.playbackFinished <- event:
-		slog.Debug("published event", "type", "PlaybackFinished", "guild", event.GuildID)
-	default:
-		slog.Warn("event buffer full, dropping event", "type", "PlaybackFinished")
-	}
-}
-
-// PublishTrackEnded publishes a TrackEndedEvent.
-// Non-blocking: if the channel buffer is full, the event is dropped with a warning.
-func (b *ChannelEventBus) PublishTrackEnded(event domain.TrackEndedEvent) {
-	b.mu.RLock()
-	defer b.mu.RUnlock()
-
-	if b.closed {
-		slog.Warn("attempted to publish to closed event bus", "type", "TrackEnded")
-		return
-	}
-
-	select {
-	case b.trackEnded <- event:
-		slog.Debug("published event", "type", "TrackEnded", "guild", event.GuildID)
-	default:
-		slog.Warn("event buffer full, dropping event", "type", "TrackEnded")
-	}
-}
-
-// PublishQueueCleared publishes a QueueClearedEvent.
-// Non-blocking: if the channel buffer is full, the event is dropped with a warning.
-func (b *ChannelEventBus) PublishQueueCleared(event domain.QueueClearedEvent) {
-	b.mu.RLock()
-	defer b.mu.RUnlock()
-
-	if b.closed {
-		slog.Warn("attempted to publish to closed event bus", "type", "QueueCleared")
-		return
-	}
-
-	select {
-	case b.queueCleared <- event:
-		slog.Debug("published event", "type", "QueueCleared", "guild", event.GuildID)
-	default:
-		slog.Warn("event buffer full, dropping event", "type", "QueueCleared")
-	}
-}
-
-// --- EventSubscriber interface ---
-
-// OnTrackEnqueued registers a handler for TrackEnqueuedEvent.
-func (b *ChannelEventBus) OnTrackEnqueued(
-	handler func(context.Context, domain.TrackEnqueuedEvent),
-) {
-	b.mu.Lock()
-	defer b.mu.Unlock()
-	b.trackEnqueuedHandlers = append(b.trackEnqueuedHandlers, handler)
-}
-
-// OnPlaybackStarted registers a handler for PlaybackStartedEvent.
-func (b *ChannelEventBus) OnPlaybackStarted(
-	handler func(context.Context, domain.PlaybackStartedEvent),
-) {
-	b.mu.Lock()
-	defer b.mu.Unlock()
-	b.playbackStartedHandlers = append(b.playbackStartedHandlers, handler)
-}
-
-// OnPlaybackFinished registers a handler for PlaybackFinishedEvent.
-func (b *ChannelEventBus) OnPlaybackFinished(
-	handler func(context.Context, domain.PlaybackFinishedEvent),
-) {
-	b.mu.Lock()
-	defer b.mu.Unlock()
-	b.playbackFinishedHandlers = append(b.playbackFinishedHandlers, handler)
-}
-
-// OnTrackEnded registers a handler for TrackEndedEvent.
-func (b *ChannelEventBus) OnTrackEnded(handler func(context.Context, domain.TrackEndedEvent)) {
-	b.mu.Lock()
-	defer b.mu.Unlock()
-	b.trackEndedHandlers = append(b.trackEndedHandlers, handler)
-}
-
-// OnQueueCleared registers a handler for QueueClearedEvent.
-func (b *ChannelEventBus) OnQueueCleared(handler func(context.Context, domain.QueueClearedEvent)) {
-	b.mu.Lock()
-	defer b.mu.Unlock()
-	b.queueClearedHandlers = append(b.queueClearedHandlers, handler)
 }
 
 // Close closes all event channels and stops dispatchers.
@@ -331,15 +81,46 @@ func (b *ChannelEventBus) Close() {
 	// Cancel context to stop dispatchers
 	b.cancel()
 
-	// Close channels to unblock any pending reads
-	close(b.trackEnqueued)
-	close(b.playbackStarted)
-	close(b.playbackFinished)
-	close(b.trackEnded)
-	close(b.queueCleared)
+	// Close channel to unblock any pending reads
+	close(b.events)
 
 	// Wait for dispatchers to finish
 	b.wg.Wait()
 
 	slog.Debug("channel event bus closed")
+}
+
+func (b *ChannelEventBus) Publish(event domain.Event) error {
+	b.mu.RLock()
+	defer b.mu.RUnlock()
+
+	if b.closed {
+		return errors.New("attempted to publish to closed event bus")
+	}
+
+	select {
+	case b.events <- event:
+		slog.Debug("published event", "type", fmt.Sprintf("%T", event))
+	default:
+		return fmt.Errorf("event buffer full, dropping %T event", event)
+	}
+
+	return nil
+}
+
+func (b *ChannelEventBus) Subscribe(
+	eventType reflect.Type,
+	handler func(context.Context, domain.Event),
+) error {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+
+	eventInterface := reflect.TypeFor[domain.Event]()
+	if !eventType.Implements(eventInterface) {
+		return errors.New("invalid event type provided")
+	}
+
+	b.handlers[eventType] = append(b.handlers[eventType], handler)
+
+	return nil
 }
