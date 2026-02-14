@@ -1,4 +1,4 @@
-package presentation
+package discord
 
 import (
 	"context"
@@ -20,10 +20,11 @@ const (
 
 // Handlers holds all the command handlers.
 type Handlers struct {
-	voiceChannel *usecases.VoiceChannelService
-	playback     *usecases.PlaybackService
-	queue        *usecases.QueueService
-	trackLoader  *usecases.TrackLoaderService
+	voiceChannel        *usecases.VoiceChannelService
+	playback            *usecases.PlaybackService
+	queue               *usecases.QueueService
+	trackLoader         *usecases.TrackLoaderService
+	notificationChannel *usecases.NotificationChannelService
 }
 
 // NewHandlers creates new Handlers.
@@ -32,12 +33,14 @@ func NewHandlers(
 	playback *usecases.PlaybackService,
 	queue *usecases.QueueService,
 	trackLoader *usecases.TrackLoaderService,
+	notificationChannel *usecases.NotificationChannelService,
 ) *Handlers {
 	return &Handlers{
-		voiceChannel: voiceChannel,
-		playback:     playback,
-		queue:        queue,
-		trackLoader:  trackLoader,
+		voiceChannel:        voiceChannel,
+		playback:            playback,
+		queue:               queue,
+		trackLoader:         trackLoader,
+		notificationChannel: notificationChannel,
 	}
 }
 
@@ -156,37 +159,24 @@ func (h *Handlers) HandlePlay(
 		return respondError(r, err.Error())
 	}
 
-	// 3. Add to queue based on result type
-	if len(tracksOutput.Tracks) == 1 {
-		// Single track - use existing Add method
-		_, err = h.queue.Add(ctx, usecases.QueueAddInput{
-			GuildID:               guildID,
-			TrackID:               tracksOutput.Tracks[0].ID,
-			RequesterID:           userID,
-			NotificationChannelID: notificationChannelID,
-		})
-		if err != nil {
-			return respondError(r, err.Error())
-		}
-		return respondQueueAdded(r, tracksOutput.Tracks[0])
-	}
-
-	// Playlist - use AddMultiple method
-	trackIDs := make([]usecases.TrackID, len(tracksOutput.Tracks))
+	// 3. Add to queue
+	trackIDs := make([]string, len(tracksOutput.Tracks))
 	for i, t := range tracksOutput.Tracks {
 		trackIDs[i] = t.ID
 	}
-	output, err := h.queue.AddMultiple(ctx, usecases.QueueAddMultipleInput{
-		GuildID:               guildID,
-		TrackIDs:              trackIDs,
-		RequesterID:           userID,
-		NotificationChannelID: notificationChannelID,
+	output, err := h.queue.Add(ctx, usecases.QueueAddInput{
+		GuildID:     guildID,
+		TrackIDs:    trackIDs,
+		RequesterID: userID,
 	})
 	if err != nil {
 		return respondError(r, err.Error())
 	}
 
-	return respondPlaylistAdded(r, tracksOutput.PlaylistName, output.Count)
+	if tracksOutput.IsPlaylist {
+		return respondPlaylistAdded(r, tracksOutput.PlaylistName, output.Count)
+	}
+	return respondQueueAdded(r, tracksOutput.Tracks[0])
 }
 
 // HandleStop handles the /stop command.
@@ -208,19 +198,18 @@ func (h *Handlers) HandleStop(
 
 	ctx := context.Background()
 
-	// Clear the entire queue (ignore error if already empty)
-	_, _ = h.queue.Clear(ctx, usecases.QueueClearInput{
-		GuildID:               guildID,
-		KeepCurrentTrack:      false, // Clear everything
-		NotificationChannelID: notificationChannelID,
+	// Update notification channel (best-effort)
+	_ = h.notificationChannel.Set(ctx, usecases.SetNotificationChannelInput{
+		GuildID:   guildID,
+		ChannelID: notificationChannelID,
 	})
 
-	// Skip the current track (stops playback since queue is now empty)
-	_, err = h.playback.Skip(ctx, usecases.SkipInput{
-		GuildID:               guildID,
-		NotificationChannelID: notificationChannelID,
+	// Clear the entire queue — the event handler stops playback via CurrentTrackChangedEvent
+	_, err = h.queue.Clear(ctx, usecases.QueueClearInput{
+		GuildID:          guildID,
+		KeepCurrentTrack: false,
 	})
-	if err != nil && !errors.Is(err, usecases.ErrNotPlaying) {
+	if err != nil && !errors.Is(err, usecases.ErrQueueEmpty) {
 		return respondError(r, err.Error())
 	}
 
@@ -243,12 +232,15 @@ func (h *Handlers) HandlePause(
 		return respondError(r, "Invalid channel")
 	}
 
-	input := usecases.PauseInput{
-		GuildID:               guildID,
-		NotificationChannelID: notificationChannelID,
-	}
+	ctx := context.Background()
 
-	if err := h.playback.Pause(context.Background(), input); err != nil {
+	// Update notification channel (best-effort)
+	_ = h.notificationChannel.Set(ctx, usecases.SetNotificationChannelInput{
+		GuildID:   guildID,
+		ChannelID: notificationChannelID,
+	})
+
+	if err := h.playback.Pause(ctx, usecases.PauseInput{GuildID: guildID}); err != nil {
 		return respondError(r, err.Error())
 	}
 
@@ -271,12 +263,15 @@ func (h *Handlers) HandleResume(
 		return respondError(r, "Invalid channel")
 	}
 
-	input := usecases.ResumeInput{
-		GuildID:               guildID,
-		NotificationChannelID: notificationChannelID,
-	}
+	ctx := context.Background()
 
-	if err := h.playback.Resume(context.Background(), input); err != nil {
+	// Update notification channel (best-effort)
+	_ = h.notificationChannel.Set(ctx, usecases.SetNotificationChannelInput{
+		GuildID:   guildID,
+		ChannelID: notificationChannelID,
+	})
+
+	if err := h.playback.Resume(ctx, usecases.ResumeInput{GuildID: guildID}); err != nil {
 		return respondError(r, err.Error())
 	}
 
@@ -299,18 +294,20 @@ func (h *Handlers) HandleSkip(
 		return respondError(r, "Invalid channel")
 	}
 
-	input := usecases.SkipInput{
-		GuildID:               guildID,
-		NotificationChannelID: notificationChannelID,
-	}
+	ctx := context.Background()
 
-	output, err := h.playback.Skip(context.Background(), input)
-	if err != nil {
+	// Update notification channel (best-effort)
+	_ = h.notificationChannel.Set(ctx, usecases.SetNotificationChannelInput{
+		GuildID:   guildID,
+		ChannelID: notificationChannelID,
+	})
+
+	if _, err := h.playback.Skip(ctx, usecases.SkipInput{GuildID: guildID}); err != nil {
 		return respondError(r, err.Error())
 	}
 
-	// Respond with skipped confirmation - "Now Playing" is sent as a separate message by PlaybackService
-	return respondSkipped(r, output.SkippedTrack)
+	// Respond with skipped confirmation - "Now Playing" is sent via CurrentTrackChangedEvent
+	return respondSkipped(r)
 }
 
 // HandleQueue handles the /queue command.
@@ -357,6 +354,14 @@ func (h *Handlers) handleQueueList(
 		return respondError(r, "Invalid channel")
 	}
 
+	ctx := context.Background()
+
+	// Update notification channel (best-effort)
+	_ = h.notificationChannel.Set(ctx, usecases.SetNotificationChannelInput{
+		GuildID:   guildID,
+		ChannelID: notificationChannelID,
+	})
+
 	var page int // let service default to page containing current track
 	for _, opt := range options {
 		if opt.Name == "page" {
@@ -364,18 +369,32 @@ func (h *Handlers) handleQueueList(
 		}
 	}
 
-	input := usecases.QueueListInput{
-		GuildID:               guildID,
-		Page:                  page,
-		NotificationChannelID: notificationChannelID,
-	}
-
-	output, err := h.queue.List(context.Background(), input)
+	output, err := h.queue.List(ctx, usecases.QueueListInput{
+		GuildID: guildID,
+		Page:    page,
+	})
 	if err != nil {
 		return respondError(r, err.Error())
 	}
 
-	return respondQueueList(r, output)
+	// Collect all track IDs and load track info for display
+	var allIDs []string
+	allIDs = append(allIDs, output.PlayedTrackIDs...)
+	if output.CurrentTrackID != "" {
+		allIDs = append(allIDs, output.CurrentTrackID)
+	}
+	allIDs = append(allIDs, output.UpcomingTrackIDs...)
+
+	tracks := make(map[string]*usecases.TrackInfo, len(allIDs))
+	for _, id := range allIDs {
+		info, err := h.trackLoader.LoadTrack(ctx, id)
+		if err != nil {
+			return respondError(r, err.Error())
+		}
+		tracks[id] = info
+	}
+
+	return respondQueueList(r, output, tracks)
 }
 
 func (h *Handlers) handleQueueRemove(
@@ -394,6 +413,14 @@ func (h *Handlers) handleQueueRemove(
 		return respondError(r, "Invalid channel")
 	}
 
+	ctx := context.Background()
+
+	// Update notification channel (best-effort)
+	_ = h.notificationChannel.Set(ctx, usecases.SetNotificationChannelInput{
+		GuildID:   guildID,
+		ChannelID: notificationChannelID,
+	})
+
 	var position int
 	for _, opt := range options {
 		if opt.Name == "position" {
@@ -402,38 +429,42 @@ func (h *Handlers) handleQueueRemove(
 		}
 	}
 
-	input := usecases.QueueRemoveInput{
-		GuildID:               guildID,
-		Position:              position,
-		NotificationChannelID: notificationChannelID,
-	}
-
-	ctx := context.Background()
-
-	output, err := h.queue.Remove(ctx, input)
+	output, err := h.queue.Remove(ctx, usecases.QueueRemoveInput{
+		GuildID:  guildID,
+		Position: position,
+	})
 	if err != nil {
 		// If trying to remove current track, skip first then remove
 		if errors.Is(err, usecases.ErrIsCurrentTrack) {
-			skipOutput, skipErr := h.playback.Skip(ctx, usecases.SkipInput{
-				GuildID:               guildID,
-				NotificationChannelID: notificationChannelID,
-			})
-			if skipErr != nil {
+			if _, skipErr := h.playback.Skip(ctx, usecases.SkipInput{
+				GuildID: guildID,
+			}); skipErr != nil {
 				return respondError(r, skipErr.Error())
 			}
 			// After skip, currentIndex has advanced, so we can now remove the track
 			// at the original position (which is now in the "played" section)
-			_, _ = h.queue.Remove(ctx, usecases.QueueRemoveInput{
-				GuildID:               guildID,
-				Position:              position,
-				NotificationChannelID: notificationChannelID,
+			removeOutput, removeErr := h.queue.Remove(ctx, usecases.QueueRemoveInput{
+				GuildID:  guildID,
+				Position: position,
 			})
-			return respondQueueRemoved(r, skipOutput.SkippedTrack)
+			if removeErr != nil {
+				return respondError(r, removeErr.Error())
+			}
+			track, loadErr := h.trackLoader.LoadTrack(ctx, removeOutput.RemovedTrackID)
+			if loadErr != nil {
+				return respondError(r, loadErr.Error())
+			}
+			return respondQueueRemoved(r, track)
 		}
 		return respondError(r, err.Error())
 	}
 
-	return respondQueueRemoved(r, output.RemovedTrack)
+	track, err := h.trackLoader.LoadTrack(ctx, output.RemovedTrackID)
+	if err != nil {
+		return respondError(r, err.Error())
+	}
+
+	return respondQueueRemoved(r, track)
 }
 
 func (h *Handlers) handleQueueClear(
@@ -451,13 +482,18 @@ func (h *Handlers) handleQueueClear(
 		return respondError(r, "Invalid channel")
 	}
 
-	input := usecases.QueueClearInput{
-		GuildID:               guildID,
-		KeepCurrentTrack:      true, // Clear played + upcoming, keep only current
-		NotificationChannelID: notificationChannelID,
-	}
+	ctx := context.Background()
 
-	_, err = h.queue.Clear(context.Background(), input)
+	// Update notification channel (best-effort)
+	_ = h.notificationChannel.Set(ctx, usecases.SetNotificationChannelInput{
+		GuildID:   guildID,
+		ChannelID: notificationChannelID,
+	})
+
+	_, err = h.queue.Clear(ctx, usecases.QueueClearInput{
+		GuildID:          guildID,
+		KeepCurrentTrack: true, // Clear played + upcoming, keep only current
+	})
 	if err != nil {
 		return respondError(r, err.Error())
 	}
@@ -480,9 +516,16 @@ func (h *Handlers) handleQueueRestart(
 		return respondError(r, "Invalid channel")
 	}
 
-	_, err = h.queue.Restart(context.Background(), usecases.QueueRestartInput{
-		GuildID:               guildID,
-		NotificationChannelID: notificationChannelID,
+	ctx := context.Background()
+
+	// Update notification channel (best-effort)
+	_ = h.notificationChannel.Set(ctx, usecases.SetNotificationChannelInput{
+		GuildID:   guildID,
+		ChannelID: notificationChannelID,
+	})
+
+	_, err = h.queue.Restart(ctx, usecases.QueueRestartInput{
+		GuildID: guildID,
 	})
 	if err != nil {
 		return respondError(r, err.Error())
@@ -507,6 +550,14 @@ func (h *Handlers) handleQueueSeek(
 		return respondError(r, "Invalid channel")
 	}
 
+	ctx := context.Background()
+
+	// Update notification channel (best-effort)
+	_ = h.notificationChannel.Set(ctx, usecases.SetNotificationChannelInput{
+		GuildID:   guildID,
+		ChannelID: notificationChannelID,
+	})
+
 	var position int
 	for _, opt := range options {
 		if opt.Name == "position" {
@@ -515,17 +566,21 @@ func (h *Handlers) handleQueueSeek(
 		}
 	}
 
-	output, err := h.queue.Seek(context.Background(), usecases.QueueSeekInput{
-		GuildID:               guildID,
-		Position:              position,
-		NotificationChannelID: notificationChannelID,
+	output, err := h.queue.Seek(ctx, usecases.QueueSeekInput{
+		GuildID:  guildID,
+		Position: position,
 	})
 	if err != nil {
 		return respondError(r, err.Error())
 	}
 
+	track, err := h.trackLoader.LoadTrack(ctx, output.TrackID)
+	if err != nil {
+		return respondError(r, err.Error())
+	}
+
 	// Convert back to 1-indexed for display
-	return respondQueueSeeked(r, position+1, output.Track)
+	return respondQueueSeeked(r, position+1, track)
 }
 
 // HandleLoop handles the /loop command.
@@ -546,6 +601,12 @@ func (h *Handlers) HandleLoop(
 
 	ctx := context.Background()
 
+	// Update notification channel (best-effort)
+	_ = h.notificationChannel.Set(ctx, usecases.SetNotificationChannelInput{
+		GuildID:   guildID,
+		ChannelID: notificationChannelID,
+	})
+
 	// Check if mode option was provided
 	var modeStr string
 	options := i.ApplicationCommandData().Options
@@ -559,9 +620,8 @@ func (h *Handlers) HandleLoop(
 	if modeStr != "" {
 		// Set specific mode
 		err := h.playback.SetLoopMode(ctx, usecases.SetLoopModeInput{
-			GuildID:               guildID,
-			Mode:                  modeStr,
-			NotificationChannelID: notificationChannelID,
+			GuildID: guildID,
+			Mode:    modeStr,
 		})
 		if err != nil {
 			return respondError(r, err.Error())
@@ -570,8 +630,7 @@ func (h *Handlers) HandleLoop(
 	} else {
 		// Cycle through modes
 		output, err := h.playback.CycleLoopMode(ctx, usecases.CycleLoopModeInput{
-			GuildID:               guildID,
-			NotificationChannelID: notificationChannelID,
+			GuildID: guildID,
 		})
 		if err != nil {
 			return respondError(r, err.Error())
@@ -669,20 +728,13 @@ func respondResumed(r bot.Responder) error {
 	})
 }
 
-func respondSkipped(r bot.Responder, track *usecases.Track) error {
-	var description string
-	if track.URI != "" {
-		description = fmt.Sprintf("Skipped [%s](%s).", track.Title, track.URI)
-	} else {
-		description = fmt.Sprintf("Skipped **%s**.", track.Title)
-	}
-
+func respondSkipped(r bot.Responder) error {
 	return r.Respond(&discordgo.InteractionResponse{
 		Type: discordgo.InteractionResponseChannelMessageWithSource,
 		Data: &discordgo.InteractionResponseData{
 			Embeds: []*discordgo.MessageEmbed{
 				{
-					Description: description,
+					Description: "Skipped.",
 					Color:       colorSuccess,
 				},
 			},
@@ -690,7 +742,7 @@ func respondSkipped(r bot.Responder, track *usecases.Track) error {
 	})
 }
 
-func respondQueueRemoved(r bot.Responder, track *usecases.Track) error {
+func respondQueueRemoved(r bot.Responder, track *usecases.TrackInfo) error {
 	var description string
 	if track.URI != "" {
 		description = fmt.Sprintf("Removed [%s](%s).", track.Title, track.URI)
@@ -739,7 +791,7 @@ func respondQueueRestarted(r bot.Responder) error {
 	})
 }
 
-func respondQueueSeeked(r bot.Responder, position int, track *usecases.Track) error {
+func respondQueueSeeked(r bot.Responder, position int, track *usecases.TrackInfo) error {
 	var description string
 	if track.URI != "" {
 		description = fmt.Sprintf(
@@ -789,7 +841,7 @@ func respondLoopModeChanged(r bot.Responder, mode string) error {
 	})
 }
 
-func respondQueueAdded(r bot.Responder, track *usecases.Track) error {
+func respondQueueAdded(r bot.Responder, track *usecases.TrackInfo) error {
 	var description string
 	if track.URI != "" {
 		description = fmt.Sprintf("Added [%s](%s) to the queue.", track.Title, track.URI)
@@ -830,7 +882,11 @@ func respondPlaylistAdded(r bot.Responder, playlistName string, trackCount int) 
 	})
 }
 
-func respondQueueList(r bot.Responder, output *usecases.QueueListOutput) error {
+func respondQueueList(
+	r bot.Responder,
+	output *usecases.QueueListOutput,
+	tracks map[string]*usecases.TrackInfo,
+) error {
 	// Build title with loop mode indicator
 	title := "Queue"
 	switch output.LoopMode {
@@ -845,7 +901,7 @@ func respondQueueList(r bot.Responder, output *usecases.QueueListOutput) error {
 	}
 
 	// Handle empty queue
-	if len(output.Tracks) == 0 && output.TotalTracks == 0 {
+	if output.TotalTracks == 0 {
 		embed.Description = "Queue is empty."
 		embed.Footer = &discordgo.MessageEmbedFooter{
 			Text: fmt.Sprintf("Page %d/%d", output.CurrentPage, output.TotalPages),
@@ -860,44 +916,27 @@ func respondQueueList(r bot.Responder, output *usecases.QueueListOutput) error {
 
 	// Build description with sections
 	var sb strings.Builder
-	currentIndex := output.CurrentIndex
-	needPlayedHeader := true
-	needUpNextHeader := true
+	displayIndex := output.PageStart + 1 // 1-indexed for display
 
-	for i, track := range output.Tracks {
-		absIndex := output.PageStart + i
-		displayIndex := absIndex + 1 // 1-indexed for display
-
-		// Determine section and write header if needed
-		if currentIndex >= 0 && absIndex < currentIndex {
-			// Played section
-			if needPlayedHeader {
-				sb.WriteString("### Played\n")
-				needPlayedHeader = false
-			}
-		} else if currentIndex >= 0 && absIndex == currentIndex {
-			// Now Playing section
-			sb.WriteString("### Now Playing\n")
-		} else {
-			// Up Next section (absIndex > currentIndex or currentIndex == -1)
-			if needUpNextHeader {
-				sb.WriteString("### Up Next\n")
-				needUpNextHeader = false
-			}
+	if len(output.PlayedTrackIDs) > 0 {
+		sb.WriteString("### Played\n")
+		for _, id := range output.PlayedTrackIDs {
+			writeTrackLine(&sb, displayIndex, tracks[id])
+			displayIndex++
 		}
+	}
 
-		// Write track line (escape period to prevent Discord markdown list formatting)
-		if track.URI != "" {
-			fmt.Fprintf(
-				&sb,
-				"%d\\. [%s](%s) - %s\n",
-				displayIndex,
-				track.Title,
-				track.URI,
-				track.Artist,
-			)
-		} else {
-			fmt.Fprintf(&sb, "%d\\. **%s** - %s\n", displayIndex, track.Title, track.Artist)
+	if output.CurrentTrackID != "" {
+		sb.WriteString("### Now Playing\n")
+		writeTrackLine(&sb, displayIndex, tracks[output.CurrentTrackID])
+		displayIndex++
+	}
+
+	if len(output.UpcomingTrackIDs) > 0 {
+		sb.WriteString("### Up Next\n")
+		for _, id := range output.UpcomingTrackIDs {
+			writeTrackLine(&sb, displayIndex, tracks[id])
+			displayIndex++
 		}
 	}
 
@@ -912,4 +951,21 @@ func respondQueueList(r bot.Responder, output *usecases.QueueListOutput) error {
 			Embeds: []*discordgo.MessageEmbed{embed},
 		},
 	})
+}
+
+// writeTrackLine writes a single track line to the string builder.
+// Escapes period to prevent Discord markdown list formatting.
+func writeTrackLine(sb *strings.Builder, displayIndex int, track *usecases.TrackInfo) {
+	if track.URI != "" {
+		fmt.Fprintf(
+			sb,
+			"%d\\. [%s](%s) - %s\n",
+			displayIndex,
+			track.Title,
+			track.URI,
+			track.Artist,
+		)
+	} else {
+		fmt.Fprintf(sb, "%d\\. **%s** - %s\n", displayIndex, track.Title, track.Artist)
+	}
 }

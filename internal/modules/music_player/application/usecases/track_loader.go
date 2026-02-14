@@ -2,12 +2,59 @@ package usecases
 
 import (
 	"context"
-	"fmt"
-	"sync"
+	"time"
 
 	"github.com/sglre6355/sgrbot/internal/modules/music_player/application/ports"
 	"github.com/sglre6355/sgrbot/internal/modules/music_player/domain"
 )
+
+// TrackInfo is an application-layer DTO for track information.
+// It exposes track data without leaking domain types to the presentation layer.
+type TrackInfo struct {
+	ID         string
+	Title      string
+	Artist     string
+	Duration   time.Duration
+	URI        string
+	ArtworkURL string
+	Source     string
+	IsStream   bool
+}
+
+// toTrackInfo converts a domain.Track to a TrackInfo DTO.
+func toTrackInfo(t *domain.Track) *TrackInfo {
+	return &TrackInfo{
+		ID:         t.ID.String(),
+		Title:      t.Title,
+		Artist:     t.Artist,
+		Duration:   t.Duration,
+		URI:        t.URI,
+		ArtworkURL: t.ArtworkURL,
+		Source:     string(t.Source),
+		IsStream:   t.IsStream,
+	}
+}
+
+// TrackLoaderService handles track loading operations and implements TrackProvider via caching.
+type TrackLoaderService struct {
+	trackResolver ports.TrackProvider
+}
+
+// NewTrackLoaderService creates a new TrackLoaderService.
+func NewTrackLoaderService(trackResolver ports.TrackProvider) *TrackLoaderService {
+	return &TrackLoaderService{
+		trackResolver: trackResolver,
+	}
+}
+
+// LoadTrack loads a single track by ID and returns its info.
+func (s *TrackLoaderService) LoadTrack(ctx context.Context, trackID string) (*TrackInfo, error) {
+	track, err := s.trackResolver.LoadTrack(ctx, domain.TrackID(trackID))
+	if err != nil {
+		return nil, err
+	}
+	return toTrackInfo(&track), nil
+}
 
 // ResolveQueryInput contains the input for the ResolveQuery use case.
 type ResolveQueryInput struct {
@@ -16,9 +63,47 @@ type ResolveQueryInput struct {
 
 // ResolveQueryOutput contains the result of the ResolveQuery use case.
 type ResolveQueryOutput struct {
-	Tracks       []*domain.Track
+	Tracks       []*TrackInfo
 	IsPlaylist   bool
 	PlaylistName string
+}
+
+// ResolveQuery loads tracks from the given query.
+// For playlists, returns all tracks. For single tracks/searches, returns one track.
+func (s *TrackLoaderService) ResolveQuery(
+	ctx context.Context,
+	input ResolveQueryInput,
+) (*ResolveQueryOutput, error) {
+	result, err := s.trackResolver.ResolveQuery(ctx, input.Query)
+	if err != nil {
+		return nil, err
+	}
+
+	if len(result.Tracks) == 0 {
+		return nil, ErrNoResults
+	}
+
+	// For playlists, return all tracks; otherwise just the first one
+	tracks := result.Tracks
+	if result.Type != domain.TrackListTypePlaylist {
+		tracks = tracks[:1]
+	}
+
+	infos := make([]*TrackInfo, len(tracks))
+	for i := range tracks {
+		infos[i] = toTrackInfo(&tracks[i])
+	}
+
+	var playlistName string
+	if result.Name != nil {
+		playlistName = *result.Name
+	}
+
+	return &ResolveQueryOutput{
+		Tracks:       infos,
+		IsPlaylist:   result.Type == domain.TrackListTypePlaylist,
+		PlaylistName: playlistName,
+	}, nil
 }
 
 // PreviewQueryInput contains the input for previewing a query into track info.
@@ -29,110 +114,10 @@ type PreviewQueryInput struct {
 
 // PreviewQueryOutput contains the result of previewing a query.
 type PreviewQueryOutput struct {
-	Tracks       []*ports.TrackInfo
+	Tracks       []TrackInfo
 	IsPlaylist   bool
 	PlaylistName string
 	TotalTracks  int
-}
-
-// TrackLoaderService handles track loading operations and implements TrackProvider via caching.
-type TrackLoaderService struct {
-	trackResolver ports.TrackResolver
-	mu            sync.RWMutex
-	cache         map[domain.TrackID]*domain.Track
-}
-
-// Compile-time check that TrackLoaderService implements TrackProvider.
-var _ ports.TrackProvider = (*TrackLoaderService)(nil)
-
-// NewTrackLoaderService creates a new TrackLoaderService.
-func NewTrackLoaderService(trackResolver ports.TrackResolver) *TrackLoaderService {
-	return &TrackLoaderService{
-		trackResolver: trackResolver,
-		cache:         make(map[domain.TrackID]*domain.Track),
-	}
-}
-
-// LoadTrack returns a Track from the cache by ID.
-func (s *TrackLoaderService) LoadTrack(id domain.TrackID) (domain.Track, error) {
-	s.mu.RLock()
-	defer s.mu.RUnlock()
-
-	track, ok := s.cache[id]
-	if !ok {
-		return domain.Track{}, fmt.Errorf("track %q not found in cache", id)
-	}
-	return *track, nil
-}
-
-// LoadTracks returns multiple Tracks from the cache by IDs.
-func (s *TrackLoaderService) LoadTracks(ids ...domain.TrackID) ([]domain.Track, error) {
-	s.mu.RLock()
-	defer s.mu.RUnlock()
-
-	tracks := make([]domain.Track, 0, len(ids))
-	for _, id := range ids {
-		track, ok := s.cache[id]
-		if !ok {
-			return nil, fmt.Errorf("track %q not found in cache", id)
-		}
-		tracks = append(tracks, *track)
-	}
-	return tracks, nil
-}
-
-// ResolveQuery loads tracks from the given query.
-// For playlists, returns all tracks. For single tracks/searches, returns one track.
-// All resolved tracks are cached for later retrieval via LoadTrack/LoadTracks.
-func (s *TrackLoaderService) ResolveQuery(
-	ctx context.Context,
-	input ResolveQueryInput,
-) (*ResolveQueryOutput, error) {
-	query := domain.NewSearchQuery(input.Query)
-	result, err := s.trackResolver.LoadTracks(ctx, query.LavalinkQuery())
-	if err != nil {
-		return nil, err
-	}
-
-	if result.Type == ports.LoadTypeEmpty || result.Type == ports.LoadTypeError ||
-		len(result.Tracks) == 0 {
-		return nil, ErrNoResults
-	}
-
-	// Determine which tracks to convert
-	// For playlists, convert all tracks; otherwise just the first one
-	tracksToConvert := result.Tracks
-	if result.Type != ports.LoadTypePlaylist {
-		tracksToConvert = result.Tracks[:1]
-	}
-
-	tracks := make([]*domain.Track, 0, len(tracksToConvert))
-	for _, trackInfo := range tracksToConvert {
-		track := domain.NewTrack(
-			domain.TrackID(trackInfo.Identifier),
-			trackInfo.Title,
-			trackInfo.Artist,
-			trackInfo.Duration,
-			trackInfo.URI,
-			trackInfo.ArtworkURL,
-			trackInfo.SourceName,
-			trackInfo.IsStream,
-		)
-		tracks = append(tracks, track)
-	}
-
-	// Cache all resolved tracks
-	s.mu.Lock()
-	for _, track := range tracks {
-		s.cache[track.ID] = track
-	}
-	s.mu.Unlock()
-
-	return &ResolveQueryOutput{
-		Tracks:       tracks,
-		IsPlaylist:   result.Type == ports.LoadTypePlaylist,
-		PlaylistName: result.PlaylistID,
-	}, nil
 }
 
 // PreviewQuery resolves a query into track information without creating domain tracks.
@@ -146,14 +131,12 @@ func (s *TrackLoaderService) PreviewQuery(
 		return &PreviewQueryOutput{}, nil
 	}
 
-	query := domain.NewSearchQuery(input.Query)
-	result, err := s.trackResolver.LoadTracks(ctx, query.LavalinkQuery())
+	result, err := s.trackResolver.ResolveQuery(ctx, input.Query)
 	if err != nil {
-		return nil, err
+		return &PreviewQueryOutput{}, nil
 	}
 
-	if result.Type == ports.LoadTypeEmpty || result.Type == ports.LoadTypeError ||
-		len(result.Tracks) == 0 {
+	if len(result.Tracks) == 0 {
 		return &PreviewQueryOutput{}, nil
 	}
 
@@ -169,10 +152,20 @@ func (s *TrackLoaderService) PreviewQuery(
 		tracks = tracks[:limit]
 	}
 
+	infos := make([]TrackInfo, len(tracks))
+	for i := range tracks {
+		infos[i] = *toTrackInfo(&tracks[i])
+	}
+
+	var playlistName string
+	if result.Name != nil {
+		playlistName = *result.Name
+	}
+
 	return &PreviewQueryOutput{
-		IsPlaylist:   result.Type == ports.LoadTypePlaylist,
-		PlaylistName: result.PlaylistID,
+		IsPlaylist:   result.Type == domain.TrackListTypePlaylist,
+		PlaylistName: playlistName,
 		TotalTracks:  len(result.Tracks),
-		Tracks:       tracks,
+		Tracks:       infos,
 	}, nil
 }

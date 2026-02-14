@@ -2,15 +2,16 @@ package infrastructure
 
 import (
 	"context"
-	"errors"
 	"sync"
 
 	"github.com/disgoorg/snowflake/v2"
 	"github.com/sglre6355/sgrbot/internal/modules/music_player/domain"
 )
 
-// ErrPlayerStateNotFound is returned when a player state is not found.
-var ErrPlayerStateNotFound = errors.New("player state not found")
+// Ensure MemoryRepository implements required ports.
+var (
+	_ domain.PlayerStateRepository = (*MemoryRepository)(nil)
+)
 
 // MemoryRepository is an in-memory implementation of PlayerStateRepository.
 type MemoryRepository struct {
@@ -35,7 +36,7 @@ func (r *MemoryRepository) Get(
 
 	state, ok := r.states[guildID]
 	if !ok {
-		return domain.PlayerState{}, ErrPlayerStateNotFound
+		return domain.PlayerState{}, domain.ErrPlayerStateNotFound
 	}
 	return state, nil
 }
@@ -65,6 +66,3 @@ func (r *MemoryRepository) Count() int {
 
 	return len(r.states)
 }
-
-// Ensure MemoryRepository implements PlayerStateRepository.
-var _ domain.PlayerStateRepository = (*MemoryRepository)(nil)

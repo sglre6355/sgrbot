@@ -3,45 +3,46 @@ package usecases
 import (
 	"context"
 	"errors"
+	"fmt"
 	"testing"
 	"time"
 
-	"github.com/sglre6355/sgrbot/internal/modules/music_player/application/ports"
 	"github.com/sglre6355/sgrbot/internal/modules/music_player/domain"
 )
 
+func strPtr(s string) *string { return &s }
+
 func TestTrackLoaderService_ResolveQuery(t *testing.T) {
-	singleTrackResult := &ports.LoadResult{
-		Type: ports.LoadTypeTrack,
-		Tracks: []*ports.TrackInfo{
+	singleTrackResult := domain.TrackList{
+		Type: domain.TrackListTypeTrack,
+		Tracks: []domain.Track{
 			{
-				Identifier: "track-1",
-				Encoded:    "encoded-1",
-				Title:      "Single Track",
-				Artist:     "Artist 1",
-				Duration:   3 * time.Minute,
-				URI:        "https://example.com/track1",
-				SourceName: "youtube",
+				ID:       "track-1",
+				Title:    "Single Track",
+				Artist:   "Artist 1",
+				Duration: 3 * time.Minute,
+				URI:      "https://example.com/track1",
+				Source:   domain.TrackSourceYouTube,
 			},
 		},
 	}
 
-	searchResult := &ports.LoadResult{
-		Type: ports.LoadTypeSearch,
-		Tracks: []*ports.TrackInfo{
-			{Identifier: "search-1", Title: "Search Result 1"},
-			{Identifier: "search-2", Title: "Search Result 2"},
-			{Identifier: "search-3", Title: "Search Result 3"},
+	searchResult := domain.TrackList{
+		Type: domain.TrackListTypeSearch,
+		Tracks: []domain.Track{
+			{ID: "search-1", Title: "Search Result 1"},
+			{ID: "search-2", Title: "Search Result 2"},
+			{ID: "search-3", Title: "Search Result 3"},
 		},
 	}
 
-	playlistResult := &ports.LoadResult{
-		Type:       ports.LoadTypePlaylist,
-		PlaylistID: "My Awesome Playlist",
-		Tracks: []*ports.TrackInfo{
-			{Identifier: "playlist-1", Title: "Playlist Track 1", Artist: "Artist 1"},
-			{Identifier: "playlist-2", Title: "Playlist Track 2", Artist: "Artist 2"},
-			{Identifier: "playlist-3", Title: "Playlist Track 3", Artist: "Artist 3"},
+	playlistResult := domain.TrackList{
+		Type: domain.TrackListTypePlaylist,
+		Name: strPtr("My Awesome Playlist"),
+		Tracks: []domain.Track{
+			{ID: "playlist-1", Title: "Playlist Track 1", Artist: "Artist 1"},
+			{ID: "playlist-2", Title: "Playlist Track 2", Artist: "Artist 2"},
+			{ID: "playlist-3", Title: "Playlist Track 3", Artist: "Artist 3"},
 		},
 	}
 
@@ -93,24 +94,14 @@ func TestTrackLoaderService_ResolveQuery(t *testing.T) {
 			wantFirstTitle:   "Playlist Track 1",
 		},
 		{
-			name: "no results - empty type",
+			name: "no results from resolver",
 			input: ResolveQueryInput{
 				Query: "nonexistent",
 			},
 			setupResolver: func(m *mockTrackResolver) {
-				m.loadResult = &ports.LoadResult{Type: ports.LoadTypeEmpty}
+				m.loadErr = fmt.Errorf("no results found")
 			},
-			wantErr: ErrNoResults,
-		},
-		{
-			name: "no results - error type",
-			input: ResolveQueryInput{
-				Query: "error",
-			},
-			setupResolver: func(m *mockTrackResolver) {
-				m.loadResult = &ports.LoadResult{Type: ports.LoadTypeError}
-			},
-			wantErr: ErrNoResults,
+			wantErr: fmt.Errorf("no results found"),
 		},
 		{
 			name: "resolver error",
@@ -174,31 +165,31 @@ func TestTrackLoaderService_ResolveQuery(t *testing.T) {
 }
 
 func TestTrackLoaderService_PreviewQuery(t *testing.T) {
-	singleTrackResult := &ports.LoadResult{
-		Type: ports.LoadTypeTrack,
-		Tracks: []*ports.TrackInfo{
-			{Identifier: "track-1", Title: "Single Track", Artist: "Artist"},
+	singleTrackResult := domain.TrackList{
+		Type: domain.TrackListTypeTrack,
+		Tracks: []domain.Track{
+			{ID: "track-1", Title: "Single Track", Artist: "Artist"},
 		},
 	}
 
-	searchResult := &ports.LoadResult{
-		Type: ports.LoadTypeSearch,
-		Tracks: []*ports.TrackInfo{
-			{Identifier: "search-1", Title: "Search Result 1"},
-			{Identifier: "search-2", Title: "Search Result 2"},
-			{Identifier: "search-3", Title: "Search Result 3"},
+	searchResult := domain.TrackList{
+		Type: domain.TrackListTypeSearch,
+		Tracks: []domain.Track{
+			{ID: "search-1", Title: "Search Result 1"},
+			{ID: "search-2", Title: "Search Result 2"},
+			{ID: "search-3", Title: "Search Result 3"},
 		},
 	}
 
-	playlistResult := &ports.LoadResult{
-		Type:       ports.LoadTypePlaylist,
-		PlaylistID: "My Playlist",
-		Tracks: []*ports.TrackInfo{
-			{Identifier: "pl-1", Title: "Playlist Track 1"},
-			{Identifier: "pl-2", Title: "Playlist Track 2"},
-			{Identifier: "pl-3", Title: "Playlist Track 3"},
-			{Identifier: "pl-4", Title: "Playlist Track 4"},
-			{Identifier: "pl-5", Title: "Playlist Track 5"},
+	playlistResult := domain.TrackList{
+		Type: domain.TrackListTypePlaylist,
+		Name: strPtr("My Playlist"),
+		Tracks: []domain.Track{
+			{ID: "pl-1", Title: "Playlist Track 1"},
+			{ID: "pl-2", Title: "Playlist Track 2"},
+			{ID: "pl-3", Title: "Playlist Track 3"},
+			{ID: "pl-4", Title: "Playlist Track 4"},
+			{ID: "pl-5", Title: "Playlist Track 5"},
 		},
 	}
 
@@ -210,7 +201,6 @@ func TestTrackLoaderService_PreviewQuery(t *testing.T) {
 		wantPlaylistName string
 		wantTotalTracks  int
 		wantTracksLen    int
-		wantErr          bool
 	}{
 		{
 			name: "single track result",
@@ -266,38 +256,16 @@ func TestTrackLoaderService_PreviewQuery(t *testing.T) {
 			wantTracksLen:    2, // Limited to 2
 		},
 		{
-			name: "empty result",
+			name: "resolver error returns empty output",
 			input: PreviewQueryInput{
 				Query: "nonexistent",
 			},
 			setupResolver: func(m *mockTrackResolver) {
-				m.loadResult = &ports.LoadResult{Type: ports.LoadTypeEmpty}
+				m.loadErr = fmt.Errorf("no results found")
 			},
 			wantIsPlaylist:  false,
 			wantTotalTracks: 0,
 			wantTracksLen:   0,
-		},
-		{
-			name: "error result",
-			input: PreviewQueryInput{
-				Query: "error",
-			},
-			setupResolver: func(m *mockTrackResolver) {
-				m.loadResult = &ports.LoadResult{Type: ports.LoadTypeError}
-			},
-			wantIsPlaylist:  false,
-			wantTotalTracks: 0,
-			wantTracksLen:   0,
-		},
-		{
-			name: "resolver error",
-			input: PreviewQueryInput{
-				Query: "test",
-			},
-			setupResolver: func(m *mockTrackResolver) {
-				m.loadErr = errors.New("connection failed")
-			},
-			wantErr: true,
 		},
 	}
 
@@ -310,14 +278,6 @@ func TestTrackLoaderService_PreviewQuery(t *testing.T) {
 
 			service := NewTrackLoaderService(resolver)
 			output, err := service.PreviewQuery(context.Background(), tt.input)
-
-			if tt.wantErr {
-				if err == nil {
-					t.Error("expected error, got nil")
-				}
-				return
-			}
-
 			if err != nil {
 				t.Errorf("unexpected error: %v", err)
 				return
@@ -365,19 +325,19 @@ func TestTrackLoaderService_PreviewQuery_NilResolver(t *testing.T) {
 
 func TestTrackLoaderService_PreviewQuery_DefaultLimit(t *testing.T) {
 	// Create a playlist with 30 tracks
-	tracks := make([]*ports.TrackInfo, 30)
+	tracks := make([]domain.Track, 30)
 	for i := range 30 {
-		tracks[i] = &ports.TrackInfo{
-			Identifier: string(rune('a' + i)),
-			Title:      "Track " + string(rune('A'+i)),
+		tracks[i] = domain.Track{
+			ID:    domain.TrackID(fmt.Sprintf("track-%d", i)),
+			Title: fmt.Sprintf("Track %d", i),
 		}
 	}
 
 	resolver := &mockTrackResolver{
-		loadResult: &ports.LoadResult{
-			Type:       ports.LoadTypePlaylist,
-			PlaylistID: "Large Playlist",
-			Tracks:     tracks,
+		loadResult: domain.TrackList{
+			Type:   domain.TrackListTypePlaylist,
+			Name:   strPtr("Large Playlist"),
+			Tracks: tracks,
 		},
 	}
 
@@ -399,129 +359,5 @@ func TestTrackLoaderService_PreviewQuery_DefaultLimit(t *testing.T) {
 
 	if len(output.Tracks) != 24 {
 		t.Errorf("len(Tracks) = %d, want 24 (default limit)", len(output.Tracks))
-	}
-}
-
-func TestTrackLoaderService_ResolveQuery_PopulatesCache(t *testing.T) {
-	resolver := &mockTrackResolver{
-		loadResult: &ports.LoadResult{
-			Type: ports.LoadTypeTrack,
-			Tracks: []*ports.TrackInfo{
-				{
-					Identifier: "cached-track",
-					Encoded:    "encoded-data",
-					Title:      "Cached Track",
-					Artist:     "Artist",
-					Duration:   3 * time.Minute,
-					URI:        "https://example.com/track",
-					SourceName: "youtube",
-				},
-			},
-		},
-	}
-
-	service := NewTrackLoaderService(resolver)
-
-	// Before ResolveQuery, LoadTrack should fail
-	_, err := service.LoadTrack(domain.TrackID("cached-track"))
-	if err == nil {
-		t.Error("expected error before ResolveQuery populates cache")
-	}
-
-	// ResolveQuery should populate cache
-	_, err = service.ResolveQuery(context.Background(), ResolveQueryInput{
-		Query: "test",
-	})
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-
-	// After ResolveQuery, LoadTrack should succeed
-	track, err := service.LoadTrack(domain.TrackID("cached-track"))
-	if err != nil {
-		t.Fatalf("unexpected error after cache populated: %v", err)
-	}
-	if track.Title != "Cached Track" {
-		t.Errorf("Title = %q, want %q", track.Title, "Cached Track")
-	}
-}
-
-func TestTrackLoaderService_LoadTrack_CacheBehavior(t *testing.T) {
-	service := NewTrackLoaderService(nil)
-
-	// LoadTrack on empty cache should return error
-	_, err := service.LoadTrack(domain.TrackID("nonexistent"))
-	if err == nil {
-		t.Error("expected error for non-cached track")
-	}
-
-	// Manually populate cache via a public method (ResolveQuery)
-	// For this test, we test that a resolved track can be loaded
-	resolver := &mockTrackResolver{
-		loadResult: &ports.LoadResult{
-			Type: ports.LoadTypeTrack,
-			Tracks: []*ports.TrackInfo{
-				{Identifier: "test-id", Title: "Test Track"},
-			},
-		},
-	}
-
-	service2 := NewTrackLoaderService(resolver)
-	_, _ = service2.ResolveQuery(context.Background(), ResolveQueryInput{
-		Query: "test",
-	})
-
-	track, err := service2.LoadTrack(domain.TrackID("test-id"))
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-	if track.Title != "Test Track" {
-		t.Errorf("Title = %q, want %q", track.Title, "Test Track")
-	}
-}
-
-func TestTrackLoaderService_LoadTracks_CacheBehavior(t *testing.T) {
-	resolver := &mockTrackResolver{
-		loadResult: &ports.LoadResult{
-			Type:       ports.LoadTypePlaylist,
-			PlaylistID: "Test Playlist",
-			Tracks: []*ports.TrackInfo{
-				{Identifier: "id-1", Title: "Track 1"},
-				{Identifier: "id-2", Title: "Track 2"},
-				{Identifier: "id-3", Title: "Track 3"},
-			},
-		},
-	}
-
-	service := NewTrackLoaderService(resolver)
-
-	// Resolve to populate cache
-	_, err := service.ResolveQuery(context.Background(), ResolveQueryInput{
-		Query: "test",
-	})
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-
-	// LoadTracks should return all cached tracks
-	tracks, err := service.LoadTracks(
-		domain.TrackID("id-1"),
-		domain.TrackID("id-2"),
-		domain.TrackID("id-3"),
-	)
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-	if len(tracks) != 3 {
-		t.Errorf("expected 3 tracks, got %d", len(tracks))
-	}
-
-	// LoadTracks with missing ID should return error
-	_, err = service.LoadTracks(
-		domain.TrackID("id-1"),
-		domain.TrackID("missing"),
-	)
-	if err == nil {
-		t.Error("expected error for missing track ID")
 	}
 }

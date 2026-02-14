@@ -6,7 +6,6 @@ import (
 	"time"
 
 	"github.com/disgoorg/snowflake/v2"
-	"github.com/sglre6355/sgrbot/internal/modules/music_player/application/ports"
 	"github.com/sglre6355/sgrbot/internal/modules/music_player/domain"
 )
 
@@ -48,7 +47,9 @@ func (m *mockRepository) Save(_ context.Context, state domain.PlayerState) error
 func (m *mockRepository) createConnectedState(
 	guildID, voiceChannelID, notificationChannelID snowflake.ID,
 ) *domain.PlayerState {
-	state := domain.NewPlayerState(guildID, voiceChannelID, notificationChannelID)
+	state := domain.NewPlayerState(guildID, domain.NewQueue())
+	state.SetVoiceChannelID(voiceChannelID)
+	state.SetNotificationChannelID(notificationChannelID)
 	m.states[guildID] = state
 	return state
 }
@@ -66,7 +67,7 @@ type mockAudioPlayer struct {
 	resumeErr error
 }
 
-func (m *mockAudioPlayer) Play(_ context.Context, _ snowflake.ID, _ *domain.Track) error {
+func (m *mockAudioPlayer) Play(_ context.Context, _ snowflake.ID, _ domain.TrackID) error {
 	return m.playErr
 }
 
@@ -97,12 +98,23 @@ func (m *mockVoiceConnection) LeaveChannel(_ context.Context, _ snowflake.ID) er
 
 type mockTrackResolver struct {
 	loadErr    error
-	loadResult *ports.LoadResult
+	loadResult domain.TrackList
 }
 
-func (m *mockTrackResolver) LoadTracks(_ context.Context, _ string) (*ports.LoadResult, error) {
+func (m *mockTrackResolver) LoadTrack(_ context.Context, _ domain.TrackID) (domain.Track, error) {
+	return domain.Track{}, nil
+}
+
+func (m *mockTrackResolver) LoadTracks(
+	_ context.Context,
+	_ ...domain.TrackID,
+) ([]domain.Track, error) {
+	return nil, nil
+}
+
+func (m *mockTrackResolver) ResolveQuery(_ context.Context, _ string) (domain.TrackList, error) {
 	if m.loadErr != nil {
-		return nil, m.loadErr
+		return domain.TrackList{}, m.loadErr
 	}
 	return m.loadResult, nil
 }
@@ -113,40 +125,25 @@ type mockVoiceStateProvider struct {
 }
 
 func (m *mockVoiceStateProvider) GetUserVoiceChannel(
-	guildID, userID snowflake.ID,
-) (snowflake.ID, error) {
+	_, userID snowflake.ID,
+) (*snowflake.ID, error) {
 	if m.err != nil {
-		return 0, m.err
+		return nil, m.err
 	}
-	return m.channels[userID], nil
+	ch, ok := m.channels[userID]
+	if !ok {
+		return nil, nil
+	}
+	return &ch, nil
 }
 
 type mockEventPublisher struct {
-	trackEnqueued    []domain.TrackEnqueuedEvent
-	playbackStarted  []domain.PlaybackStartedEvent
-	playbackFinished []domain.PlaybackFinishedEvent
-	trackEnded       []domain.TrackEndedEvent
-	queueCleared     []domain.QueueClearedEvent
+	events []domain.Event
 }
 
-func (m *mockEventPublisher) PublishTrackEnqueued(event domain.TrackEnqueuedEvent) {
-	m.trackEnqueued = append(m.trackEnqueued, event)
-}
-
-func (m *mockEventPublisher) PublishPlaybackStarted(event domain.PlaybackStartedEvent) {
-	m.playbackStarted = append(m.playbackStarted, event)
-}
-
-func (m *mockEventPublisher) PublishPlaybackFinished(event domain.PlaybackFinishedEvent) {
-	m.playbackFinished = append(m.playbackFinished, event)
-}
-
-func (m *mockEventPublisher) PublishTrackEnded(event domain.TrackEndedEvent) {
-	m.trackEnded = append(m.trackEnded, event)
-}
-
-func (m *mockEventPublisher) PublishQueueCleared(event domain.QueueClearedEvent) {
-	m.queueCleared = append(m.queueCleared, event)
+func (m *mockEventPublisher) Publish(event domain.Event) error {
+	m.events = append(m.events, event)
+	return nil
 }
 
 type mockTrackProvider struct {
@@ -159,7 +156,10 @@ func newMockTrackProvider() *mockTrackProvider {
 	}
 }
 
-func (m *mockTrackProvider) LoadTrack(id domain.TrackID) (domain.Track, error) {
+func (m *mockTrackProvider) LoadTrack(
+	_ context.Context,
+	id domain.TrackID,
+) (domain.Track, error) {
 	t, ok := m.tracks[id]
 	if !ok {
 		return domain.Track{}, fmt.Errorf("track %q not found", id)
@@ -167,7 +167,10 @@ func (m *mockTrackProvider) LoadTrack(id domain.TrackID) (domain.Track, error) {
 	return *t, nil
 }
 
-func (m *mockTrackProvider) LoadTracks(ids ...domain.TrackID) ([]domain.Track, error) {
+func (m *mockTrackProvider) LoadTracks(
+	_ context.Context,
+	ids ...domain.TrackID,
+) ([]domain.Track, error) {
 	result := make([]domain.Track, 0, len(ids))
 	for _, id := range ids {
 		t, ok := m.tracks[id]
@@ -179,14 +182,47 @@ func (m *mockTrackProvider) LoadTracks(ids ...domain.TrackID) ([]domain.Track, e
 	return result, nil
 }
 
+func (m *mockTrackProvider) ResolveQuery(
+	_ context.Context,
+	_ string,
+) (domain.TrackList, error) {
+	return domain.TrackList{}, nil
+}
+
 func (m *mockTrackProvider) Store(track *domain.Track) {
 	m.tracks[track.ID] = track
+}
+
+type mockNotificationSender struct {
+	deletedMessages []struct{ ChannelID, MessageID snowflake.ID }
+}
+
+func (m *mockNotificationSender) DeleteMessage(channelID, messageID snowflake.ID) error {
+	m.deletedMessages = append(
+		m.deletedMessages,
+		struct{ ChannelID, MessageID snowflake.ID }{channelID, messageID},
+	)
+	return nil
+}
+
+func (m *mockNotificationSender) SendNowPlaying(
+	_ snowflake.ID,
+	_ snowflake.ID,
+	_ domain.TrackID,
+	_ snowflake.ID,
+	_ time.Time,
+) (snowflake.ID, error) {
+	return 0, nil
+}
+
+func (m *mockNotificationSender) SendError(_ snowflake.ID, _ string) error {
+	return nil
 }
 
 // setupPlaying sets up a PlayerState with a track playing.
 // It stores the track in the track provider, appends it to the queue, and activates playback.
 func setupPlaying(state *domain.PlayerState, tp *mockTrackProvider, track *domain.Track) {
 	tp.Store(track)
-	state.Queue.Append(domain.QueueEntry{TrackID: track.ID})
+	state.Append(domain.QueueEntry{TrackID: track.ID})
 	state.SetPlaybackActive(true)
 }

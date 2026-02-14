@@ -8,9 +8,10 @@ import (
 	"github.com/caarlos0/env/v11"
 	"github.com/disgoorg/snowflake/v2"
 	"github.com/sglre6355/sgrbot/internal/bot"
+	"github.com/sglre6355/sgrbot/internal/modules/music_player/application"
 	"github.com/sglre6355/sgrbot/internal/modules/music_player/application/usecases"
 	"github.com/sglre6355/sgrbot/internal/modules/music_player/infrastructure"
-	"github.com/sglre6355/sgrbot/internal/modules/music_player/presentation"
+	"github.com/sglre6355/sgrbot/internal/modules/music_player/presentation/discord"
 )
 
 func init() {
@@ -23,15 +24,15 @@ var _ bot.ConfigurableModule = (*MusicPlayerModule)(nil)
 // MusicPlayerModule provides music playback commands.
 type MusicPlayerModule struct {
 	config          *Config
-	handlers        *presentation.Handlers
-	autocomplete    *presentation.AutocompleteHandler
-	eventHandlers   *presentation.EventHandlers
+	handlers        *discord.Handlers
+	autocomplete    *discord.AutocompleteHandler
+	eventHandlers   *discord.EventHandlers
 	lavalinkAdapter *infrastructure.LavalinkAdapter
 
 	// Event-driven components
 	eventBus            *infrastructure.ChannelEventBus
-	playbackHandler     *infrastructure.PlaybackEventHandler
-	notificationHandler *infrastructure.NotificationEventHandler
+	playbackHandler     *application.PlaybackEventHandler
+	notificationHandler *application.NotificationEventHandler
 
 	// Context for event handlers
 	ctx    context.Context
@@ -45,7 +46,7 @@ func (m *MusicPlayerModule) Name() string {
 
 // Commands returns the slash commands for this module.
 func (m *MusicPlayerModule) Commands() []*discordgo.ApplicationCommand {
-	return presentation.Commands()
+	return discord.Commands()
 }
 
 // CommandHandlers returns the command handlers for this module.
@@ -105,11 +106,11 @@ func (m *MusicPlayerModule) initWithoutLavalink() error {
 
 	// Create service with nil dependencies
 	// These will fail at runtime if called, but allows the module to load
-	queue := usecases.NewQueueService(repo, nil, nil)
+	queue := usecases.NewQueueService(repo, nil)
 	trackLoader := usecases.NewTrackLoaderService(nil)
 
-	m.handlers = presentation.NewHandlers(nil, nil, queue, nil)
-	m.autocomplete = presentation.NewAutocompleteHandler(queue, trackLoader)
+	m.handlers = discord.NewHandlers(nil, nil, queue, nil, nil)
+	m.autocomplete = discord.NewAutocompleteHandler(queue, trackLoader)
 
 	return nil
 }
@@ -118,69 +119,88 @@ func (m *MusicPlayerModule) initWithLavalink(deps bot.ModuleDependencies) error 
 	// Create cancellable context for event handlers
 	m.ctx, m.cancel = context.WithCancel(context.Background())
 
+	// Create event bus (needed by Lavalink adapter for publishing events)
+	m.eventBus = infrastructure.NewChannelEventBus(infrastructure.DefaultEventBufferSize)
+
 	// Create Lavalink adapter
 	lavalinkConfig := infrastructure.LavalinkConfig{
 		Address:  m.config.LavalinkAddress,
 		Password: m.config.LavalinkPassword,
 	}
 
-	lavalinkAdapter, err := infrastructure.NewLavalinkAdapter(deps.Session, lavalinkConfig)
+	lavalinkAdapter, err := infrastructure.NewLavalinkAdapter(
+		deps.Session,
+		m.eventBus,
+		lavalinkConfig,
+	)
 	if err != nil {
 		return err
 	}
 	m.lavalinkAdapter = lavalinkAdapter
 
-	// Create event bus
-	m.eventBus = infrastructure.NewChannelEventBus(infrastructure.DefaultEventBufferSize)
-
 	// Create infrastructure
 	repo := infrastructure.NewMemoryRepository()
 	voiceState := infrastructure.NewVoiceStateProvider(deps.Session)
-	notifier := infrastructure.NewNotifier(deps.Session)
+	userInfoProv := infrastructure.NewDiscordUserInfoProvider(deps.Session)
+	notifier := infrastructure.NewNotifier(deps.Session, lavalinkAdapter, userInfoProv)
 
 	// Create services with event bus
 	trackLoader := usecases.NewTrackLoaderService(lavalinkAdapter)
-	voiceChannel := usecases.NewVoiceChannelService(repo, lavalinkAdapter, voiceState, m.eventBus)
-	playback := usecases.NewPlaybackService(
+	voiceChannel := usecases.NewVoiceChannelService(
 		repo,
 		lavalinkAdapter,
 		voiceState,
 		m.eventBus,
-		trackLoader,
-	)
-	queue := usecases.NewQueueService(repo, m.eventBus, trackLoader)
-
-	// Create event handlers with separate subscriber and publisher dependencies
-	m.playbackHandler = infrastructure.NewPlaybackEventHandler(
-		playback.PlayNext,
-		lavalinkAdapter.Stop,
-		repo,
-		m.eventBus, // as EventSubscriber
-		m.eventBus, // as EventPublisher
-	)
-	userInfoProv := infrastructure.NewDiscordUserInfoProvider(deps.Session)
-	m.notificationHandler = infrastructure.NewNotificationEventHandler(
 		notifier,
+	)
+	playback := usecases.NewPlaybackService(
+		repo,
+		lavalinkAdapter,
+		m.eventBus,
+		notifier,
+		lavalinkAdapter,
+		voiceState,
+	)
+	queue := usecases.NewQueueService(repo, m.eventBus)
+
+	notificationChannel := usecases.NewNotificationChannelService(repo)
+
+	// Create application event handlers
+	m.playbackHandler = application.NewPlaybackEventHandler(
+		repo,
+		lavalinkAdapter,
+		m.eventBus,
+		m.eventBus,
+	)
+	m.notificationHandler = application.NewNotificationEventHandler(
 		repo,
 		m.eventBus,
+		notifier,
 		userInfoProv,
 	)
 
 	// Register event handlers
-	m.playbackHandler.Start()
-	m.notificationHandler.Start()
-
-	// Set event publisher on Lavalink adapter for event publishing
-	lavalinkAdapter.SetEventPublisher(m.eventBus)
+	if err := m.playbackHandler.Start(); err != nil {
+		return err
+	}
+	if err := m.notificationHandler.Start(); err != nil {
+		return err
+	}
 
 	// Create presentation handlers
 	botID, err := snowflake.Parse(deps.Session.State.User.ID)
 	if err != nil {
 		return err
 	}
-	m.handlers = presentation.NewHandlers(voiceChannel, playback, queue, trackLoader)
-	m.autocomplete = presentation.NewAutocompleteHandler(queue, trackLoader)
-	m.eventHandlers = presentation.NewEventHandlers(botID, voiceChannel)
+	m.handlers = discord.NewHandlers(
+		voiceChannel,
+		playback,
+		queue,
+		trackLoader,
+		notificationChannel,
+	)
+	m.autocomplete = discord.NewAutocompleteHandler(queue, trackLoader)
+	m.eventHandlers = discord.NewEventHandlers(botID, voiceChannel)
 
 	slog.Info("music_player module initialized with Lavalink")
 

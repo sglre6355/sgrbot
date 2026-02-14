@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"log/slog"
+	"strings"
 	"sync"
 	"time"
 
@@ -17,6 +18,13 @@ import (
 
 // voiceConnectionTimeout is the maximum time to wait for voice connection to be established.
 const voiceConnectionTimeout = 10 * time.Second
+
+// Ensure LavalinkAdapter implements port interfaces.
+var (
+	_ ports.AudioPlayer     = (*LavalinkAdapter)(nil)
+	_ ports.VoiceConnection = (*LavalinkAdapter)(nil)
+	_ ports.TrackProvider   = (*LavalinkAdapter)(nil)
+)
 
 // pendingVoiceConnection tracks the state of a pending voice connection.
 type pendingVoiceConnection struct {
@@ -111,9 +119,11 @@ func (b *voiceEventBuffer) getData() (channelID *snowflake.ID, sessionID, token,
 
 // LavalinkAdapter wraps DisGoLink to implement the port interfaces.
 type LavalinkAdapter struct {
-	link    disgolink.Client
-	session *discordgo.Session
-	botID   snowflake.ID
+	link      disgolink.Client
+	session   *discordgo.Session
+	publisher ports.EventPublisher
+
+	botID snowflake.ID
 
 	pendingMu sync.Mutex
 	pending   map[snowflake.ID]*pendingVoiceConnection
@@ -123,11 +133,14 @@ type LavalinkAdapter struct {
 	voiceBuffers  map[snowflake.ID]*voiceEventBuffer
 
 	// encodedCache stores Lavalink encoded track data keyed by TrackID.
-	// Populated during LoadTracks/convertTrack, consumed during Play.
+	// Populated during convertTrack, consumed during Play.
 	encodedMu    sync.RWMutex
 	encodedCache map[domain.TrackID]string
 
-	publisher ports.EventPublisher
+	// trackCache stores domain Track objects keyed by TrackID.
+	// Populated during convertTrack, consumed during LoadTrack/LoadTracks.
+	trackMu    sync.RWMutex
+	trackCache map[domain.TrackID]*domain.Track
 }
 
 // LavalinkConfig contains Lavalink connection configuration.
@@ -139,6 +152,7 @@ type LavalinkConfig struct {
 // NewLavalinkAdapter creates a new LavalinkAdapter.
 func NewLavalinkAdapter(
 	session *discordgo.Session,
+	publisher ports.EventPublisher,
 	config LavalinkConfig,
 ) (*LavalinkAdapter, error) {
 	botID, err := snowflake.Parse(session.State.User.ID)
@@ -148,10 +162,12 @@ func NewLavalinkAdapter(
 
 	adapter := &LavalinkAdapter{
 		session:      session,
+		publisher:    publisher,
 		botID:        botID,
 		pending:      make(map[snowflake.ID]*pendingVoiceConnection),
 		voiceBuffers: make(map[snowflake.ID]*voiceEventBuffer),
 		encodedCache: make(map[domain.TrackID]string),
+		trackCache:   make(map[domain.TrackID]*domain.Track),
 	}
 
 	// Create DisGoLink client
@@ -242,14 +258,14 @@ func (c *LavalinkAdapter) LeaveChannel(ctx context.Context, guildID snowflake.ID
 func (c *LavalinkAdapter) Play(
 	ctx context.Context,
 	guildID snowflake.ID,
-	track *domain.Track,
+	trackID domain.TrackID,
 ) error {
 	c.encodedMu.RLock()
-	encodedTrack, ok := c.encodedCache[track.ID]
+	encodedTrack, ok := c.encodedCache[trackID]
 	c.encodedMu.RUnlock()
 
 	if !ok {
-		return fmt.Errorf("encoded track data not found for %q", track.ID)
+		return fmt.Errorf("encoded track data not found for %q", trackID)
 	}
 
 	player := c.link.Player(guildID)
@@ -295,95 +311,142 @@ func (c *LavalinkAdapter) Resume(ctx context.Context, guildID snowflake.ID) erro
 	return nil
 }
 
-// LoadTracks loads tracks from Lavalink.
+// LoadTrack returns the Track for the given ID from the cache, or error if not found.
+func (c *LavalinkAdapter) LoadTrack(_ context.Context, id domain.TrackID) (domain.Track, error) {
+	c.trackMu.RLock()
+	track, ok := c.trackCache[id]
+	c.trackMu.RUnlock()
+
+	if !ok {
+		return domain.Track{}, fmt.Errorf("track %q not found in cache", id)
+	}
+	return *track, nil
+}
+
+// LoadTracks returns Tracks for the given IDs from the cache, or error if any not found.
 func (c *LavalinkAdapter) LoadTracks(
+	_ context.Context,
+	ids ...domain.TrackID,
+) ([]domain.Track, error) {
+	c.trackMu.RLock()
+	defer c.trackMu.RUnlock()
+
+	tracks := make([]domain.Track, 0, len(ids))
+	for _, id := range ids {
+		track, ok := c.trackCache[id]
+		if !ok {
+			return nil, fmt.Errorf("track %q not found in cache", id)
+		}
+		tracks = append(tracks, *track)
+	}
+	return tracks, nil
+}
+
+// ResolveQuery searches for tracks using the given query.
+// Non-URL queries are prefixed with "ytsearch:" for YouTube search.
+func (c *LavalinkAdapter) ResolveQuery(
 	ctx context.Context,
 	query string,
-) (*ports.LoadResult, error) {
+) (domain.TrackList, error) {
+	if !isURL(query) {
+		query = "ytsearch:" + query
+	}
+
 	node := c.link.BestNode()
 	if node == nil {
-		return nil, fmt.Errorf("no available Lavalink node")
+		return domain.TrackList{}, fmt.Errorf("no available Lavalink node")
 	}
 
 	result, err := node.LoadTracks(ctx, query)
 	if err != nil {
-		return nil, fmt.Errorf("failed to load tracks: %w", err)
+		return domain.TrackList{}, fmt.Errorf("failed to load tracks: %w", err)
 	}
 
-	return c.convertLoadResult(result), nil
+	return c.convertToTrackList(result)
 }
 
-// convertLoadResult converts Lavalink result to ports result.
-func (c *LavalinkAdapter) convertLoadResult(result *lavalink.LoadResult) *ports.LoadResult {
+// isURL checks if the input looks like a URL.
+func isURL(input string) bool {
+	return strings.HasPrefix(input, "http://") ||
+		strings.HasPrefix(input, "https://") ||
+		strings.HasPrefix(input, "www.")
+}
+
+// convertToTrackList converts a Lavalink load result to a domain TrackList.
+// Returns an error for empty results or Lavalink exceptions.
+func (c *LavalinkAdapter) convertToTrackList(
+	result *lavalink.LoadResult,
+) (domain.TrackList, error) {
 	switch data := result.Data.(type) {
 	case lavalink.Track:
-		return &ports.LoadResult{
-			Type:   ports.LoadTypeTrack,
-			Tracks: []*ports.TrackInfo{c.convertTrack(data)},
-		}
+		return domain.TrackList{
+			Type:   domain.TrackListTypeTrack,
+			Tracks: []domain.Track{c.convertTrack(data)},
+		}, nil
 
 	case lavalink.Playlist:
-		tracks := make([]*ports.TrackInfo, len(data.Tracks))
+		tracks := make([]domain.Track, len(data.Tracks))
 		for i, track := range data.Tracks {
 			tracks[i] = c.convertTrack(track)
 		}
-		return &ports.LoadResult{
-			Type:       ports.LoadTypePlaylist,
-			Tracks:     tracks,
-			PlaylistID: data.Info.Name,
-		}
+		return domain.TrackList{
+			Type:   domain.TrackListTypePlaylist,
+			Name:   &data.Info.Name,
+			Tracks: tracks,
+		}, nil
 
 	case lavalink.Search:
-		tracks := make([]*ports.TrackInfo, len(data))
+		tracks := make([]domain.Track, len(data))
 		for i, track := range data {
 			tracks[i] = c.convertTrack(track)
 		}
-		return &ports.LoadResult{
-			Type:   ports.LoadTypeSearch,
+		return domain.TrackList{
+			Type:   domain.TrackListTypeSearch,
 			Tracks: tracks,
-		}
+		}, nil
 
 	case lavalink.Empty:
-		return &ports.LoadResult{
-			Type: ports.LoadTypeEmpty,
-		}
+		return domain.TrackList{}, fmt.Errorf("no results found")
 
 	case lavalink.Exception:
-		return &ports.LoadResult{
-			Type: ports.LoadTypeError,
-		}
+		return domain.TrackList{}, fmt.Errorf("lavalink load error: %w", data)
 
 	default:
-		return &ports.LoadResult{
-			Type: ports.LoadTypeEmpty,
-		}
+		return domain.TrackList{}, fmt.Errorf("no results found")
 	}
 }
 
-// convertTrack converts a Lavalink track to TrackInfo and caches its encoded data.
-func (c *LavalinkAdapter) convertTrack(track lavalink.Track) *ports.TrackInfo {
+// convertTrack converts a Lavalink track to a domain Track and caches encoded data.
+func (c *LavalinkAdapter) convertTrack(track lavalink.Track) domain.Track {
 	info := track.Info
 	artworkURL := ""
 	if info.ArtworkURL != nil {
 		artworkURL = *info.ArtworkURL
 	}
 
+	trackID := domain.TrackID(info.Identifier)
+
 	// Cache encoded track data for later playback
 	c.encodedMu.Lock()
-	c.encodedCache[domain.TrackID(info.Identifier)] = track.Encoded
+	c.encodedCache[trackID] = track.Encoded
 	c.encodedMu.Unlock()
 
-	return &ports.TrackInfo{
-		Identifier: info.Identifier,
-		Encoded:    track.Encoded,
-		Title:      info.Title,
-		Artist:     info.Author,
-		Duration:   time.Duration(info.Length) * time.Millisecond,
-		URI:        getStringPtr(info.URI),
-		ArtworkURL: artworkURL,
-		SourceName: info.SourceName,
-		IsStream:   info.IsStream,
-	}
+	// Cache domain Track for later lookup via LoadTrack/LoadTracks
+	domainTrack := domain.NewTrack(
+		trackID,
+		info.Title,
+		info.Author,
+		time.Duration(info.Length)*time.Millisecond,
+		getStringPtr(info.URI),
+		artworkURL,
+		domain.ParseTrackSource(info.SourceName),
+		info.IsStream,
+	)
+	c.trackMu.Lock()
+	c.trackCache[trackID] = domainTrack
+	c.trackMu.Unlock()
+
+	return *domainTrack
 }
 
 func getStringPtr(s *string) string {
@@ -512,11 +575,6 @@ func (c *LavalinkAdapter) forwardBufferedVoiceEvents(
 	c.link.OnVoiceServerUpdate(context.Background(), guildID, token, endpoint)
 }
 
-// SetEventPublisher sets the event publisher for publishing Lavalink events.
-func (c *LavalinkAdapter) SetEventPublisher(publisher ports.EventPublisher) {
-	c.publisher = publisher
-}
-
 func (c *LavalinkAdapter) onTrackStart(player disgolink.Player, event lavalink.TrackStartEvent) {
 	slog.Debug("track started", "guild", player.GuildID(), "track", event.Track.Info.Title)
 }
@@ -524,13 +582,22 @@ func (c *LavalinkAdapter) onTrackStart(player disgolink.Player, event lavalink.T
 func (c *LavalinkAdapter) onTrackEnd(player disgolink.Player, event lavalink.TrackEndEvent) {
 	slog.Debug("track ended", "guild", player.GuildID(), "reason", event.Reason)
 
-	if c.publisher != nil {
-		reason := convertEndReason(event.Reason)
-		c.publisher.PublishTrackEnded(domain.TrackEndedEvent{
-			GuildID: player.GuildID(),
-			Reason:  reason,
-		})
+	shouldAdvanceQueue, trackFailed := false, false
+	if event.Reason == lavalink.TrackEndReasonFinished {
+		shouldAdvanceQueue = true
 	}
+	if event.Reason == lavalink.TrackEndReasonLoadFailed {
+		shouldAdvanceQueue = true
+		trackFailed = true
+	}
+
+	_ = c.publisher.Publish(
+		domain.NewTrackEndedEvent(
+			player.GuildID(),
+			shouldAdvanceQueue,
+			trackFailed,
+		),
+	)
 }
 
 func (c *LavalinkAdapter) onTrackException(
@@ -543,27 +610,3 @@ func (c *LavalinkAdapter) onTrackException(
 func (c *LavalinkAdapter) onTrackStuck(player disgolink.Player, event lavalink.TrackStuckEvent) {
 	slog.Warn("track stuck", "guild", player.GuildID(), "threshold", event.Threshold)
 }
-
-func convertEndReason(reason lavalink.TrackEndReason) domain.TrackEndReason {
-	switch reason {
-	case lavalink.TrackEndReasonFinished:
-		return domain.TrackEndFinished
-	case lavalink.TrackEndReasonLoadFailed:
-		return domain.TrackEndLoadFailed
-	case lavalink.TrackEndReasonStopped:
-		return domain.TrackEndStopped
-	case lavalink.TrackEndReasonReplaced:
-		return domain.TrackEndReplaced
-	case lavalink.TrackEndReasonCleanup:
-		return domain.TrackEndCleanup
-	default:
-		return domain.TrackEndStopped
-	}
-}
-
-// Ensure LavalinkAdapter implements port interfaces.
-var (
-	_ ports.AudioPlayer     = (*LavalinkAdapter)(nil)
-	_ ports.VoiceConnection = (*LavalinkAdapter)(nil)
-	_ ports.TrackResolver   = (*LavalinkAdapter)(nil)
-)

@@ -95,8 +95,8 @@ func TestVoiceChannelService_Join(t *testing.T) {
 			setupRepo: func(m *mockRepository) {
 				state := m.createConnectedState(guildID, voiceChannelID, notificationChannelID)
 				// Add tracks to queue
-				state.Queue.Append(domain.QueueEntry{TrackID: mockTrack("track-1").ID})
-				state.Queue.Append(domain.QueueEntry{TrackID: mockTrack("track-2").ID})
+				state.Append(domain.QueueEntry{TrackID: mockTrack("track-1").ID})
+				state.Append(domain.QueueEntry{TrackID: mockTrack("track-2").ID})
 			},
 			wantVoiceChannelID: snowflake.ID(999),
 		},
@@ -118,7 +118,7 @@ func TestVoiceChannelService_Join(t *testing.T) {
 				tt.setupVoice(voiceState)
 			}
 
-			service := NewVoiceChannelService(repo, connection, voiceState, nil)
+			service := NewVoiceChannelService(repo, connection, voiceState, nil, nil)
 			output, err := service.Join(context.Background(), tt.input)
 
 			if tt.wantErr != nil {
@@ -173,10 +173,10 @@ func TestVoiceChannelService_Join_PreservesQueueOnMove(t *testing.T) {
 
 	// Create existing state with tracks in queue
 	state := repo.createConnectedState(guildID, oldVoiceChannel, notificationChannelID)
-	state.Queue.Append(domain.QueueEntry{TrackID: mockTrack("track-1").ID})
-	state.Queue.Append(domain.QueueEntry{TrackID: mockTrack("track-2").ID})
+	state.Append(domain.QueueEntry{TrackID: mockTrack("track-1").ID})
+	state.Append(domain.QueueEntry{TrackID: mockTrack("track-2").ID})
 
-	service := NewVoiceChannelService(repo, connection, nil, nil)
+	service := NewVoiceChannelService(repo, connection, nil, nil, nil)
 
 	// Move to different channel
 	output, err := service.Join(context.Background(), JoinInput{
@@ -209,11 +209,11 @@ func TestVoiceChannelService_Join_PreservesQueueOnMove(t *testing.T) {
 	}
 
 	// Verify queue was preserved
-	if updatedState.Queue.Len() != 2 {
-		t.Errorf("expected queue length 2, got %d", updatedState.Queue.Len())
+	if updatedState.Len() != 2 {
+		t.Errorf("expected queue length 2, got %d", updatedState.Len())
 	}
 
-	tracks := updatedState.Queue.List()
+	tracks := updatedState.List()
 	if tracks[0].TrackID != "track-1" {
 		t.Errorf("expected first track ID 'track-1', got %q", tracks[0].TrackID)
 	}
@@ -270,8 +270,8 @@ func TestVoiceChannelService_Leave(t *testing.T) {
 			},
 			setupRepo: func(m *mockRepository) {
 				state := m.createConnectedState(guildID, voiceChannelID, notificationChannelID)
-				state.Queue.Append(domain.QueueEntry{TrackID: mockTrack("track-1").ID})
-				state.Queue.Append(domain.QueueEntry{TrackID: mockTrack("track-2").ID})
+				state.Append(domain.QueueEntry{TrackID: mockTrack("track-1").ID})
+				state.Append(domain.QueueEntry{TrackID: mockTrack("track-2").ID})
 			},
 		},
 	}
@@ -288,7 +288,7 @@ func TestVoiceChannelService_Leave(t *testing.T) {
 				tt.setupConnection(connection)
 			}
 
-			service := NewVoiceChannelService(repo, connection, nil, nil)
+			service := NewVoiceChannelService(repo, connection, nil, nil, nil)
 			err := service.Leave(context.Background(), tt.input)
 
 			if tt.wantErr != nil {
@@ -318,7 +318,7 @@ func TestVoiceChannelService_Leave(t *testing.T) {
 	}
 }
 
-func TestVoiceChannelService_Leave_PublishesPlaybackFinishedEvent(t *testing.T) {
+func TestVoiceChannelService_Leave_DeletesNowPlayingMessage(t *testing.T) {
 	guildID := snowflake.ID(1)
 	notificationChannelID := snowflake.ID(3)
 	voiceChannelID := snowflake.ID(4)
@@ -326,36 +326,38 @@ func TestVoiceChannelService_Leave_PublishesPlaybackFinishedEvent(t *testing.T) 
 
 	repo := newMockRepository()
 	connection := &mockVoiceConnection{}
-	publisher := &mockEventPublisher{}
+	notifier := &mockNotificationSender{}
 
 	// Create connected state with a now playing message
 	state := repo.createConnectedState(guildID, voiceChannelID, notificationChannelID)
-	state.SetNowPlayingMessage(notificationChannelID, nowPlayingMsgID)
+	msg := domain.NewNowPlayingMessage(notificationChannelID, nowPlayingMsgID)
+	state.SetNowPlayingMessage(&msg)
 
-	service := NewVoiceChannelService(repo, connection, nil, publisher)
+	service := NewVoiceChannelService(repo, connection, nil, nil, notifier)
 
 	err := service.Leave(context.Background(), LeaveInput{GuildID: guildID})
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
 
-	// Verify the event was published
-	if len(publisher.playbackFinished) != 1 {
-		t.Fatalf("expected 1 PlaybackFinishedEvent, got %d", len(publisher.playbackFinished))
+	// Verify the now playing message was deleted via notifier
+	if len(notifier.deletedMessages) != 1 {
+		t.Fatalf("expected 1 deleted message, got %d", len(notifier.deletedMessages))
 	}
-	event := publisher.playbackFinished[0]
-	if event.GuildID != guildID {
-		t.Errorf("expected GuildID %d, got %d", guildID, event.GuildID)
-	}
-	if event.NotificationChannelID != notificationChannelID {
+	deleted := notifier.deletedMessages[0]
+	if deleted.ChannelID != notificationChannelID {
 		t.Errorf(
-			"expected NotificationChannelID %d, got %d",
+			"expected deleted message ChannelID %d, got %d",
 			notificationChannelID,
-			event.NotificationChannelID,
+			deleted.ChannelID,
 		)
 	}
-	if event.LastMessageID == nil || *event.LastMessageID != nowPlayingMsgID {
-		t.Errorf("expected LastMessageID %d, got %v", nowPlayingMsgID, event.LastMessageID)
+	if deleted.MessageID != nowPlayingMsgID {
+		t.Errorf(
+			"expected deleted message MessageID %d, got %d",
+			nowPlayingMsgID,
+			deleted.MessageID,
+		)
 	}
 }
 
@@ -366,13 +368,14 @@ func TestVoiceChannelService_HandleBotVoiceStateChange_Disconnected(t *testing.T
 	nowPlayingMsgID := snowflake.ID(999)
 
 	repo := newMockRepository()
-	publisher := &mockEventPublisher{}
+	notifier := &mockNotificationSender{}
 
 	// Create connected state with a now playing message
 	state := repo.createConnectedState(guildID, voiceChannelID, notificationChannelID)
-	state.SetNowPlayingMessage(notificationChannelID, nowPlayingMsgID)
+	msg := domain.NewNowPlayingMessage(notificationChannelID, nowPlayingMsgID)
+	state.SetNowPlayingMessage(&msg)
 
-	service := NewVoiceChannelService(repo, nil, nil, publisher)
+	service := NewVoiceChannelService(repo, nil, nil, nil, notifier)
 
 	// Handle bot disconnected (nil channel means disconnected)
 	service.HandleBotVoiceStateChange(BotVoiceStateChangeInput{
@@ -380,16 +383,24 @@ func TestVoiceChannelService_HandleBotVoiceStateChange_Disconnected(t *testing.T
 		NewChannelID: nil,
 	})
 
-	// Verify the event was published
-	if len(publisher.playbackFinished) != 1 {
-		t.Fatalf("expected 1 PlaybackFinishedEvent, got %d", len(publisher.playbackFinished))
+	// Verify the now playing message was deleted via notifier
+	if len(notifier.deletedMessages) != 1 {
+		t.Fatalf("expected 1 deleted message, got %d", len(notifier.deletedMessages))
 	}
-	event := publisher.playbackFinished[0]
-	if event.GuildID != guildID {
-		t.Errorf("expected GuildID %d, got %d", guildID, event.GuildID)
+	deleted := notifier.deletedMessages[0]
+	if deleted.ChannelID != notificationChannelID {
+		t.Errorf(
+			"expected deleted message ChannelID %d, got %d",
+			notificationChannelID,
+			deleted.ChannelID,
+		)
 	}
-	if event.LastMessageID == nil || *event.LastMessageID != nowPlayingMsgID {
-		t.Errorf("expected LastMessageID %d, got %v", nowPlayingMsgID, event.LastMessageID)
+	if deleted.MessageID != nowPlayingMsgID {
+		t.Errorf(
+			"expected deleted message MessageID %d, got %d",
+			nowPlayingMsgID,
+			deleted.MessageID,
+		)
 	}
 
 	// Verify state was deleted
@@ -410,7 +421,7 @@ func TestVoiceChannelService_HandleBotVoiceStateChange_Moved(t *testing.T) {
 	// Create connected state
 	repo.createConnectedState(guildID, oldVoiceChannel, notificationChannelID)
 
-	service := NewVoiceChannelService(repo, nil, nil, nil)
+	service := NewVoiceChannelService(repo, nil, nil, nil, nil)
 
 	// Handle bot moved to different channel
 	service.HandleBotVoiceStateChange(BotVoiceStateChangeInput{
@@ -433,7 +444,7 @@ func TestVoiceChannelService_HandleBotVoiceStateChange_NoState(t *testing.T) {
 
 	repo := newMockRepository()
 
-	service := NewVoiceChannelService(repo, nil, nil, nil)
+	service := NewVoiceChannelService(repo, nil, nil, nil, nil)
 
 	// Handle bot disconnected when no state exists - should not panic
 	service.HandleBotVoiceStateChange(BotVoiceStateChangeInput{
@@ -453,12 +464,12 @@ func TestVoiceChannelService_HandleBotVoiceStateChange_DisconnectedNoMessage(t *
 	voiceChannelID := snowflake.ID(4)
 
 	repo := newMockRepository()
-	publisher := &mockEventPublisher{}
+	notifier := &mockNotificationSender{}
 
 	// Create connected state WITHOUT a now playing message
 	repo.createConnectedState(guildID, voiceChannelID, notificationChannelID)
 
-	service := NewVoiceChannelService(repo, nil, nil, publisher)
+	service := NewVoiceChannelService(repo, nil, nil, nil, notifier)
 
 	// Handle bot disconnected
 	service.HandleBotVoiceStateChange(BotVoiceStateChangeInput{
@@ -466,9 +477,9 @@ func TestVoiceChannelService_HandleBotVoiceStateChange_DisconnectedNoMessage(t *
 		NewChannelID: nil,
 	})
 
-	// No event should be published since NowPlayingMessageID is nil
-	if len(publisher.playbackFinished) != 0 {
-		t.Errorf("expected no PlaybackFinishedEvent, got %d", len(publisher.playbackFinished))
+	// No message should be deleted since NowPlayingMessage is nil
+	if len(notifier.deletedMessages) != 0 {
+		t.Errorf("expected no deleted messages, got %d", len(notifier.deletedMessages))
 	}
 
 	// Verify state was deleted

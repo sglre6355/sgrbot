@@ -15,10 +15,10 @@ type QueueEntry struct {
 }
 
 // NewQueueEntry creates a new QueueEntry with the current time as EnqueuedAt.
-func NewQueueEntry(trackID TrackID, requesterID snowflake.ID) QueueEntry {
+func NewQueueEntry(trackID TrackID, requesterID snowflake.ID, enqueuedAt time.Time) QueueEntry {
 	return QueueEntry{
 		TrackID:     trackID,
 		RequesterID: requesterID,
-		EnqueuedAt:  time.Now().UTC(),
+		EnqueuedAt:  enqueuedAt,
 	}
 }

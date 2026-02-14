@@ -10,7 +10,7 @@ import (
 // AudioPlayer defines the interface for audio playback operations.
 type AudioPlayer interface {
 	// Play starts playback of the given track.
-	Play(ctx context.Context, guildID snowflake.ID, track *domain.Track) error
+	Play(ctx context.Context, guildID snowflake.ID, trackID domain.TrackID) error
 
 	// Stop stops the current playback.
 	Stop(ctx context.Context, guildID snowflake.ID) error

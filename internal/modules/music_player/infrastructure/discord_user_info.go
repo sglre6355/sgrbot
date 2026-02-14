@@ -8,6 +8,11 @@ import (
 	"github.com/sglre6355/sgrbot/internal/modules/music_player/application/ports"
 )
 
+// Ensure DiscordUserInfoProvider implements ports.UserInfoProvider.
+var (
+	_ ports.UserInfoProvider = (*DiscordUserInfoProvider)(nil)
+)
+
 // DiscordUserInfoProvider implements ports.UserInfoProvider using a Discord session.
 type DiscordUserInfoProvider struct {
 	session *discordgo.Session
@@ -47,6 +52,3 @@ func getDisplayName(member *discordgo.Member) string {
 	}
 	return member.User.Username
 }
-
-// Ensure DiscordUserInfoProvider implements ports.UserInfoProvider.
-var _ ports.UserInfoProvider = (*DiscordUserInfoProvider)(nil)

@@ -38,6 +38,7 @@ type VoiceChannelService struct {
 	voiceConnection ports.VoiceConnection
 	voiceState      ports.VoiceStateProvider
 	publisher       ports.EventPublisher
+	notifier        ports.NotificationSender
 }
 
 // NewVoiceChannelService creates a new VoiceChannelService.
@@ -46,12 +47,14 @@ func NewVoiceChannelService(
 	voiceConnection ports.VoiceConnection,
 	voiceState ports.VoiceStateProvider,
 	publisher ports.EventPublisher,
+	notifier ports.NotificationSender,
 ) *VoiceChannelService {
 	return &VoiceChannelService{
 		repo:            repo,
 		voiceConnection: voiceConnection,
 		voiceState:      voiceState,
 		publisher:       publisher,
+		notifier:        notifier,
 	}
 }
 
@@ -68,10 +71,10 @@ func (v *VoiceChannelService) Join(ctx context.Context, input JoinInput) (*JoinO
 		if err != nil {
 			return nil, err
 		}
-		if userChannel == 0 {
+		if userChannel == nil {
 			return nil, ErrUserNotInVoice
 		}
-		voiceChannelID = userChannel
+		voiceChannelID = *userChannel
 	}
 
 	// Check if already connected to the same channel - just update notification channel
@@ -97,7 +100,9 @@ func (v *VoiceChannelService) Join(ctx context.Context, input JoinInput) (*JoinO
 		}
 	} else {
 		// Fresh connection - create new state
-		state := domain.NewPlayerState(input.GuildID, voiceChannelID, input.NotificationChannelID)
+		state := domain.NewPlayerState(input.GuildID, domain.NewQueue())
+		state.SetVoiceChannelID(voiceChannelID)
+		state.SetNotificationChannelID(input.NotificationChannelID)
 		if err := v.repo.Save(ctx, *state); err != nil {
 			return nil, err
 		}
@@ -120,14 +125,10 @@ func (v *VoiceChannelService) HandleBotVoiceStateChange(input BotVoiceStateChang
 
 	if input.NewChannelID == nil {
 		// Bot was disconnected from voice
-		// Publish event to delete the "Now Playing" message before we lose the state
+		// Delete the "Now Playing" message before we lose the state
 		nowPlayingMsg := state.GetNowPlayingMessage()
-		if nowPlayingMsg != nil && v.publisher != nil {
-			v.publisher.PublishPlaybackFinished(domain.PlaybackFinishedEvent{
-				GuildID:               input.GuildID,
-				NotificationChannelID: nowPlayingMsg.ChannelID,
-				LastMessageID:         &nowPlayingMsg.MessageID,
-			})
+		if nowPlayingMsg != nil && v.notifier != nil {
+			_ = v.notifier.DeleteMessage(nowPlayingMsg.ChannelID, nowPlayingMsg.MessageID)
 		}
 
 		// Delete player state
@@ -149,14 +150,10 @@ func (v *VoiceChannelService) Leave(ctx context.Context, input LeaveInput) error
 		return ErrNotConnected
 	}
 
-	// Publish event to delete the "Now Playing" message before we lose the state
+	// Delete the "Now Playing" message before we lose the state
 	nowPlayingMsg := state.GetNowPlayingMessage()
-	if nowPlayingMsg != nil && v.publisher != nil {
-		v.publisher.PublishPlaybackFinished(domain.PlaybackFinishedEvent{
-			GuildID:               input.GuildID,
-			NotificationChannelID: nowPlayingMsg.ChannelID,
-			LastMessageID:         &nowPlayingMsg.MessageID,
-		})
+	if nowPlayingMsg != nil && v.notifier != nil {
+		_ = v.notifier.DeleteMessage(nowPlayingMsg.ChannelID, nowPlayingMsg.MessageID)
 	}
 
 	// Leave the channel

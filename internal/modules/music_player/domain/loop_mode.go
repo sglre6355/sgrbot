@@ -20,3 +20,15 @@ func (m LoopMode) String() string {
 		return "none"
 	}
 }
+
+// ParseLoopMode converts a string to domain.LoopMode.
+func ParseLoopMode(s string) LoopMode {
+	switch s {
+	case "track":
+		return LoopModeTrack
+	case "queue":
+		return LoopModeQueue
+	default:
+		return LoopModeNone
+	}
+}

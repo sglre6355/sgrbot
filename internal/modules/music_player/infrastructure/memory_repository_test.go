@@ -10,6 +10,15 @@ import (
 	"github.com/sglre6355/sgrbot/internal/modules/music_player/domain"
 )
 
+func newTestPlayerState(
+	guildID, voiceChannelID, notificationChannelID snowflake.ID,
+) *domain.PlayerState {
+	state := domain.NewPlayerState(guildID, domain.NewQueue())
+	state.SetVoiceChannelID(voiceChannelID)
+	state.SetNotificationChannelID(notificationChannelID)
+	return state
+}
+
 func TestMemoryRepository_Get(t *testing.T) {
 	ctx := context.Background()
 	repo := NewMemoryRepository()
@@ -20,12 +29,12 @@ func TestMemoryRepository_Get(t *testing.T) {
 	if err == nil {
 		t.Fatal("expected error for non-existent state")
 	}
-	if !errors.Is(err, ErrPlayerStateNotFound) {
-		t.Errorf("expected ErrPlayerStateNotFound, got %v", err)
+	if !errors.Is(err, domain.ErrPlayerStateNotFound) {
+		t.Errorf("expected domain.ErrPlayerStateNotFound, got %v", err)
 	}
 
 	// Save a state
-	newState := domain.NewPlayerState(guildID, snowflake.ID(100), snowflake.ID(200))
+	newState := newTestPlayerState(guildID, snowflake.ID(100), snowflake.ID(200))
 	if err := repo.Save(ctx, *newState); err != nil {
 		t.Fatalf("unexpected error saving state: %v", err)
 	}
@@ -53,7 +62,7 @@ func TestMemoryRepository_Save(t *testing.T) {
 	guildID := snowflake.ID(123)
 
 	// Save a state
-	state := domain.NewPlayerState(guildID, snowflake.ID(100), snowflake.ID(200))
+	state := newTestPlayerState(guildID, snowflake.ID(100), snowflake.ID(200))
 	if err := repo.Save(ctx, *state); err != nil {
 		t.Fatalf("unexpected error saving state: %v", err)
 	}
@@ -68,7 +77,7 @@ func TestMemoryRepository_Save(t *testing.T) {
 	}
 
 	// Save again should overwrite
-	newState := domain.NewPlayerState(guildID, snowflake.ID(300), snowflake.ID(400))
+	newState := newTestPlayerState(guildID, snowflake.ID(300), snowflake.ID(400))
 	if err := repo.Save(ctx, *newState); err != nil {
 		t.Fatalf("unexpected error saving state: %v", err)
 	}
@@ -88,7 +97,7 @@ func TestMemoryRepository_Delete(t *testing.T) {
 	guildID := snowflake.ID(123)
 
 	// Save a state
-	state := domain.NewPlayerState(guildID, snowflake.ID(100), snowflake.ID(200))
+	state := newTestPlayerState(guildID, snowflake.ID(100), snowflake.ID(200))
 	if err := repo.Save(ctx, *state); err != nil {
 		t.Fatalf("unexpected error saving state: %v", err)
 	}
@@ -115,7 +124,7 @@ func TestMemoryRepository_Count(t *testing.T) {
 
 	_ = repo.Save(
 		ctx,
-		*domain.NewPlayerState(snowflake.ID(1), snowflake.ID(100), snowflake.ID(200)),
+		*newTestPlayerState(snowflake.ID(1), snowflake.ID(100), snowflake.ID(200)),
 	)
 	if repo.Count() != 1 {
 		t.Errorf("expected count 1, got %d", repo.Count())
@@ -123,7 +132,7 @@ func TestMemoryRepository_Count(t *testing.T) {
 
 	_ = repo.Save(
 		ctx,
-		*domain.NewPlayerState(snowflake.ID(2), snowflake.ID(100), snowflake.ID(200)),
+		*newTestPlayerState(snowflake.ID(2), snowflake.ID(100), snowflake.ID(200)),
 	)
 	if repo.Count() != 2 {
 		t.Errorf("expected count 2, got %d", repo.Count())
@@ -146,7 +155,7 @@ func TestMemoryRepository_ConcurrentAccess(t *testing.T) {
 		go func(id int) {
 			defer wg.Done()
 			guildID := snowflake.ID(id)
-			state := domain.NewPlayerState(guildID, snowflake.ID(100), snowflake.ID(200))
+			state := newTestPlayerState(guildID, snowflake.ID(100), snowflake.ID(200))
 			_ = repo.Save(ctx, *state)
 		}(i)
 	}

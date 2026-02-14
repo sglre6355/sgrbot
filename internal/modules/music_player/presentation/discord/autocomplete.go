@@ -1,4 +1,4 @@
-package presentation
+package discord
 
 import (
 	"context"
@@ -70,12 +70,24 @@ func (h *AutocompleteHandler) handleQueuePositionAutocomplete(
 		return
 	}
 
-	choices := make([]*discordgo.ApplicationCommandOptionChoice, 0, len(output.Tracks))
-	for idx, track := range output.Tracks {
+	// Combine all track IDs into a flat list for autocomplete choices
+	var allIDs []string
+	allIDs = append(allIDs, output.PlayedTrackIDs...)
+	if output.CurrentTrackID != "" {
+		allIDs = append(allIDs, output.CurrentTrackID)
+	}
+	allIDs = append(allIDs, output.UpcomingTrackIDs...)
+
+	choices := make([]*discordgo.ApplicationCommandOptionChoice, 0, len(allIDs))
+	for idx, id := range allIDs {
 		// Use 1-indexed positions to match queue list display
-		displayPos := idx + 1
+		displayPos := output.PageStart + idx + 1
+		title := id // fallback to ID if track info unavailable
+		if info, err := h.trackLoader.LoadTrack(context.Background(), id); err == nil {
+			title = info.Title
+		}
 		choices = append(choices, &discordgo.ApplicationCommandOptionChoice{
-			Name:  fmt.Sprintf("%d. %s", displayPos, truncate(track.Title, 90)),
+			Name:  fmt.Sprintf("%d. %s", displayPos, truncate(title, 90)),
 			Value: displayPos,
 		})
 	}
