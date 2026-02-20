@@ -233,6 +233,7 @@ func (h *NotificationEventHandler) handleCurrentTrackChanged(
 				"error", err,
 			)
 		}
+		state.SetNowPlayingMessage(nil)
 	}
 
 	current := state.Current()
