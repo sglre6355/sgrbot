@@ -8,9 +8,9 @@ import (
 	"github.com/sglre6355/sgrbot/internal/modules/music_player/domain"
 )
 
-// TrackInfo is an application-layer DTO for track information.
+// TrackData is an application-layer DTO for track information.
 // It exposes track data without leaking domain types to the presentation layer.
-type TrackInfo struct {
+type TrackData struct {
 	ID         string
 	Title      string
 	Artist     string
@@ -21,9 +21,9 @@ type TrackInfo struct {
 	IsStream   bool
 }
 
-// toTrackInfo converts a domain.Track to a TrackInfo DTO.
-func toTrackInfo(t domain.Track) TrackInfo {
-	return TrackInfo{
+// toTrackData converts a domain.Track to a TrackData DTO.
+func toTrackData(t domain.Track) TrackData {
+	return TrackData{
 		ID:         t.ID.String(),
 		Title:      t.Title,
 		Artist:     t.Artist,
@@ -52,7 +52,7 @@ type LoadTrackInput struct {
 }
 
 type LoadTrackOutput struct {
-	Track TrackInfo
+	Track TrackData
 }
 
 // LoadTrack loads a single track by ID and returns its info.
@@ -64,7 +64,7 @@ func (s *TrackLoaderService) LoadTrack(
 	if err != nil {
 		return LoadTrackOutput{}, err
 	}
-	return LoadTrackOutput{Track: toTrackInfo(track)}, nil
+	return LoadTrackOutput{Track: toTrackData(track)}, nil
 }
 
 type LoadTracksInput struct {
@@ -72,7 +72,7 @@ type LoadTracksInput struct {
 }
 
 type LoadTracksOutput struct {
-	Tracks []TrackInfo
+	Tracks []TrackData
 }
 
 // LoadTracks loads multiple tracks by ID and returns their info.
@@ -90,9 +90,9 @@ func (s *TrackLoaderService) LoadTracks(
 		return LoadTracksOutput{}, err
 	}
 
-	trackInfos := make([]TrackInfo, len(input.TrackIDs))
+	trackInfos := make([]TrackData, len(input.TrackIDs))
 	for i, track := range tracks {
-		trackInfos[i] = toTrackInfo(track)
+		trackInfos[i] = toTrackData(track)
 	}
 	return LoadTracksOutput{Tracks: trackInfos}, nil
 }
@@ -104,9 +104,11 @@ type ResolveQueryInput struct {
 
 // ResolveQueryOutput contains the result of the ResolveQuery use case.
 type ResolveQueryOutput struct {
-	Tracks       []TrackInfo
-	IsPlaylist   bool
-	PlaylistName string
+	Type       string
+	Identifier *string
+	Name       *string
+	Url        *string
+	Tracks     []TrackData
 }
 
 // ResolveQuery loads tracks from the given query.
@@ -115,28 +117,25 @@ func (s *TrackLoaderService) ResolveQuery(
 	ctx context.Context,
 	input ResolveQueryInput,
 ) (*ResolveQueryOutput, error) {
-	result, err := s.trackResolver.ResolveQuery(ctx, input.Query)
+	output, err := s.trackResolver.ResolveQuery(ctx, input.Query)
 	if err != nil {
 		return nil, err
 	}
 
-	if len(result.Tracks) == 0 {
+	if len(output.Tracks) == 0 {
 		return nil, ErrNoResults
 	}
 
-	infos := make([]TrackInfo, len(result.Tracks))
-	for i := range result.Tracks {
-		infos[i] = toTrackInfo(result.Tracks[i])
-	}
-
-	var playlistName string
-	if result.Name != nil {
-		playlistName = *result.Name
+	tracks := make([]TrackData, len(output.Tracks))
+	for i, track := range output.Tracks {
+		tracks[i] = toTrackData(track)
 	}
 
 	return &ResolveQueryOutput{
-		Tracks:       infos,
-		IsPlaylist:   result.Type == domain.TrackListTypePlaylist,
-		PlaylistName: playlistName,
+		Type:       output.Type.String(),
+		Identifier: output.Identifier,
+		Name:       output.Name,
+		Url:        output.Url,
+		Tracks:     tracks,
 	}, nil
 }

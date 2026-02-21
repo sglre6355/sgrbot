@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"log/slog"
+	"net/url"
 	"strings"
 	"sync"
 	"time"
@@ -362,7 +363,7 @@ func (c *LavalinkAdapter) ResolveQuery(
 		return domain.TrackList{}, fmt.Errorf("failed to load tracks: %w", err)
 	}
 
-	return c.convertToTrackList(result)
+	return c.convertToTrackList(result, query)
 }
 
 // isURL checks if the input looks like a URL.
@@ -372,10 +373,36 @@ func isURL(input string) bool {
 		strings.HasPrefix(input, "www.")
 }
 
+// extractPlaylistInfo extracts a playlist identifier and clean URL from the query.
+// It applies provider-specific parsing for YouTube and Spotify, falling back to
+// the raw query for unrecognized providers.
+func extractPlaylistInfo(query, sourceName string) (identifier, cleanURL string) {
+	u, err := url.Parse(query)
+	if err != nil {
+		return query, query
+	}
+	base := u.Scheme + "://" + u.Host
+
+	switch sourceName {
+	case "youtube":
+		if listID := u.Query().Get("list"); listID != "" {
+			return listID, base + "/playlist?list=" + listID
+		}
+	case "spotify":
+		parts := strings.Split(strings.Trim(u.Path, "/"), "/")
+		if len(parts) >= 2 {
+			typ, id := parts[0], parts[1]
+			return id, base + "/" + typ + "/" + id
+		}
+	}
+	return query, query
+}
+
 // convertToTrackList converts a Lavalink load result to a domain TrackList.
 // Returns an error for empty results or Lavalink exceptions.
 func (c *LavalinkAdapter) convertToTrackList(
 	result *lavalink.LoadResult,
+	query string,
 ) (domain.TrackList, error) {
 	switch data := result.Data.(type) {
 	case lavalink.Track:
@@ -389,10 +416,14 @@ func (c *LavalinkAdapter) convertToTrackList(
 		for i, track := range data.Tracks {
 			tracks[i] = c.convertTrack(track)
 		}
+		sourceName := data.Tracks[0].Info.SourceName
+		identifier, cleanURL := extractPlaylistInfo(query, sourceName)
 		return domain.TrackList{
-			Type:   domain.TrackListTypePlaylist,
-			Name:   &data.Info.Name,
-			Tracks: tracks,
+			Type:       domain.TrackListTypePlaylist,
+			Identifier: &identifier,
+			Name:       &data.Info.Name,
+			Url:        &cleanURL,
+			Tracks:     tracks,
 		}, nil
 
 	case lavalink.Search:

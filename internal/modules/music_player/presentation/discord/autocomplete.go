@@ -67,24 +67,18 @@ func (h *AutocompleteHandler) HandlePlay(s *discordgo.Session, i *discordgo.Inte
 
 	choices := make([]*discordgo.ApplicationCommandOptionChoice, 0)
 
-	if output.IsPlaylist {
+	if output.Type == "playlist" && output.Name != nil && output.Url != nil {
 		choices = append(choices, &discordgo.ApplicationCommandOptionChoice{
 			Name: truncate(
-				fmt.Sprintf("📋 %s (%d tracks)", output.PlaylistName, len(output.Tracks)),
+				fmt.Sprintf("📋 %s (%d tracks)", *output.Name, len(output.Tracks)),
 				100,
 			),
-			Value: query,
+			Value: *output.Url,
 		})
 	}
 	for i, track := range output.Tracks {
-		var optionName string
-		if output.IsPlaylist {
-			optionName = fmt.Sprintf("🎵 %d. %s - %s", i+1, track.Title, track.Artist)
-		} else {
-			optionName = fmt.Sprintf("🎵 %s - %s", track.Title, track.Artist)
-		}
 		choices = append(choices, &discordgo.ApplicationCommandOptionChoice{
-			Name:  truncate(optionName, 100),
+			Name:  truncate(fmt.Sprintf("🎵 %d. %s - %s", i+1, track.Title, track.Artist), 100),
 			Value: track.URI,
 		})
 	}

@@ -199,11 +199,11 @@ func (h *CommandHandlers) HandlePlay(
 	}
 
 	var description string
-	if resolveQueryOutput.IsPlaylist {
+	if resolveQueryOutput.Type == "playlist" && resolveQueryOutput.Name != nil {
 		description = fmt.Sprintf(
 			"Added **%d tracks** from playlist **%s** to the queue.",
 			queueAddOutput.Count,
-			resolveQueryOutput.PlaylistName,
+			*resolveQueryOutput.Name,
 		)
 	} else {
 		track := resolveQueryOutput.Tracks[0]
@@ -891,7 +891,7 @@ func respondError(r bot.Responder, message string) error {
 	})
 }
 
-func respondQueueRemoved(r bot.Responder, track usecases.TrackInfo) error {
+func respondQueueRemoved(r bot.Responder, track usecases.TrackData) error {
 	var description string
 	if track.URI != "" {
 		description = fmt.Sprintf("Removed [%s](%s).", track.Title, track.URI)
@@ -914,7 +914,7 @@ func respondQueueRemoved(r bot.Responder, track usecases.TrackInfo) error {
 
 // writeTrackLine writes a single track line to the string builder.
 // Escapes period to prevent Discord markdown list formatting.
-func writeTrackLine(sb *strings.Builder, displayIndex int, track usecases.TrackInfo) {
+func writeTrackLine(sb *strings.Builder, displayIndex int, track usecases.TrackData) {
 	if track.URI != "" {
 		fmt.Fprintf(
 			sb,

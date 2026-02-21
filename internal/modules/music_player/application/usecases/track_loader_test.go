@@ -47,14 +47,14 @@ func TestTrackLoaderService_ResolveQuery(t *testing.T) {
 	}
 
 	tests := []struct {
-		name             string
-		input            ResolveQueryInput
-		setupResolver    func(*mockTrackResolver)
-		wantErr          error
-		wantTrackCount   int
-		wantIsPlaylist   bool
-		wantPlaylistName string
-		wantFirstTitle   string
+		name           string
+		input          ResolveQueryInput
+		setupResolver  func(*mockTrackResolver)
+		wantErr        error
+		wantTrackCount int
+		wantType       string
+		wantName       string
+		wantFirstTitle string
 	}{
 		{
 			name: "single track result returns one track",
@@ -65,7 +65,7 @@ func TestTrackLoaderService_ResolveQuery(t *testing.T) {
 				m.loadResult = singleTrackResult
 			},
 			wantTrackCount: 1,
-			wantIsPlaylist: false,
+			wantType:       "track",
 			wantFirstTitle: "Single Track",
 		},
 		{
@@ -77,7 +77,7 @@ func TestTrackLoaderService_ResolveQuery(t *testing.T) {
 				m.loadResult = searchResult
 			},
 			wantTrackCount: 3,
-			wantIsPlaylist: false,
+			wantType:       "search",
 			wantFirstTitle: "Search Result 1",
 		},
 		{
@@ -88,10 +88,10 @@ func TestTrackLoaderService_ResolveQuery(t *testing.T) {
 			setupResolver: func(m *mockTrackResolver) {
 				m.loadResult = playlistResult
 			},
-			wantTrackCount:   3,
-			wantIsPlaylist:   true,
-			wantPlaylistName: "My Awesome Playlist",
-			wantFirstTitle:   "Playlist Track 1",
+			wantTrackCount: 3,
+			wantType:       "playlist",
+			wantName:       "My Awesome Playlist",
+			wantFirstTitle: "Playlist Track 1",
 		},
 		{
 			name: "no results from resolver",
@@ -145,12 +145,16 @@ func TestTrackLoaderService_ResolveQuery(t *testing.T) {
 				t.Errorf("got %d tracks, want %d", len(output.Tracks), tt.wantTrackCount)
 			}
 
-			if output.IsPlaylist != tt.wantIsPlaylist {
-				t.Errorf("IsPlaylist = %v, want %v", output.IsPlaylist, tt.wantIsPlaylist)
+			if output.Type != tt.wantType {
+				t.Errorf("Type = %q, want %q", output.Type, tt.wantType)
 			}
 
-			if output.PlaylistName != tt.wantPlaylistName {
-				t.Errorf("PlaylistName = %q, want %q", output.PlaylistName, tt.wantPlaylistName)
+			gotName := ""
+			if output.Name != nil {
+				gotName = *output.Name
+			}
+			if gotName != tt.wantName {
+				t.Errorf("Name = %q, want %q", gotName, tt.wantName)
 			}
 
 			if len(output.Tracks) > 0 && output.Tracks[0].Title != tt.wantFirstTitle {
