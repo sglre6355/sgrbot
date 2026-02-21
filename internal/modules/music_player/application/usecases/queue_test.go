@@ -23,7 +23,7 @@ func TestQueueService_List(t *testing.T) {
 		wantUpcoming    int // upcoming tracks on current page
 		wantPage        int
 		wantTotalPages  int
-		wantPageStart   int // 0-indexed start position
+		wantPageStart   int // Start index
 	}{
 		{
 			name: "empty queue",
@@ -306,8 +306,8 @@ func TestQueueService_Remove(t *testing.T) {
 		{
 			name: "remove upcoming track",
 			input: QueueRemoveInput{
-				GuildID:  guildID,
-				Position: 2,
+				GuildID: guildID,
+				Index:   2,
 			},
 			setupRepo: func(m *mockRepository) {
 				state := m.createConnectedState(guildID, voiceChannelID, notificationChannelID)
@@ -323,8 +323,8 @@ func TestQueueService_Remove(t *testing.T) {
 		{
 			name: "remove played track (before current index)",
 			input: QueueRemoveInput{
-				GuildID:  guildID,
-				Position: 0,
+				GuildID: guildID,
+				Index:   0,
 			},
 			setupRepo: func(m *mockRepository) {
 				state := m.createConnectedState(guildID, voiceChannelID, notificationChannelID)
@@ -343,8 +343,8 @@ func TestQueueService_Remove(t *testing.T) {
 		{
 			name: "empty queue",
 			input: QueueRemoveInput{
-				GuildID:  guildID,
-				Position: 0,
+				GuildID: guildID,
+				Index:   0,
 			},
 			setupRepo: func(m *mockRepository) {
 				m.createConnectedState(guildID, voiceChannelID, notificationChannelID)
@@ -352,10 +352,10 @@ func TestQueueService_Remove(t *testing.T) {
 			wantErr: ErrQueueEmpty,
 		},
 		{
-			name: "invalid position - too high",
+			name: "invalid index - too high",
 			input: QueueRemoveInput{
-				GuildID:  guildID,
-				Position: 10,
+				GuildID: guildID,
+				Index:   10,
 			},
 			setupRepo: func(m *mockRepository) {
 				state := m.createConnectedState(guildID, voiceChannelID, notificationChannelID)
@@ -363,13 +363,13 @@ func TestQueueService_Remove(t *testing.T) {
 				state.SetPlaybackActive(true)
 				state.Append(domain.QueueEntry{TrackID: domain.TrackID("track-1")})
 			},
-			wantErr: ErrInvalidPosition,
+			wantErr: ErrInvalidIndex,
 		},
 		{
 			name: "remove current track - returns ErrIsCurrentTrack",
 			input: QueueRemoveInput{
-				GuildID:  guildID,
-				Position: 0,
+				GuildID: guildID,
+				Index:   0,
 			},
 			setupRepo: func(m *mockRepository) {
 				state := m.createConnectedState(guildID, voiceChannelID, notificationChannelID)
@@ -383,8 +383,8 @@ func TestQueueService_Remove(t *testing.T) {
 		{
 			name: "remove current track after advancing - returns ErrIsCurrentTrack",
 			input: QueueRemoveInput{
-				GuildID:  guildID,
-				Position: 2,
+				GuildID: guildID,
+				Index:   2,
 			},
 			setupRepo: func(m *mockRepository) {
 				state := m.createConnectedState(guildID, voiceChannelID, notificationChannelID)
@@ -401,10 +401,10 @@ func TestQueueService_Remove(t *testing.T) {
 			wantErr: ErrIsCurrentTrack,
 		},
 		{
-			name: "invalid position - negative",
+			name: "invalid index - negative",
 			input: QueueRemoveInput{
-				GuildID:  guildID,
-				Position: -1,
+				GuildID: guildID,
+				Index:   -1,
 			},
 			setupRepo: func(m *mockRepository) {
 				state := m.createConnectedState(guildID, voiceChannelID, notificationChannelID)
@@ -412,7 +412,7 @@ func TestQueueService_Remove(t *testing.T) {
 				state.SetPlaybackActive(true)
 				state.Append(domain.QueueEntry{TrackID: domain.TrackID("track-1")})
 			},
-			wantErr: ErrInvalidPosition,
+			wantErr: ErrInvalidIndex,
 		},
 	}
 
@@ -456,13 +456,13 @@ func TestQueueService_Add(t *testing.T) {
 	notificationChannelID := snowflake.ID(3)
 
 	tests := []struct {
-		name              string
-		input             QueueAddInput
-		setupRepo         func(*mockRepository)
-		wantErr           error
-		wantStartPosition int
-		wantCount         int
-		wantEvent         bool // expect CurrentTrackChangedEvent
+		name           string
+		input          QueueAddInput
+		setupRepo      func(*mockRepository)
+		wantErr        error
+		wantStartIndex int
+		wantCount      int
+		wantEvent      bool // expect CurrentTrackChangedEvent
 	}{
 		{
 			name: "add multiple tracks to empty queue",
@@ -474,9 +474,9 @@ func TestQueueService_Add(t *testing.T) {
 			setupRepo: func(m *mockRepository) {
 				m.createConnectedState(guildID, voiceChannelID, notificationChannelID)
 			},
-			wantStartPosition: 0,
-			wantCount:         3,
-			wantEvent:         true, // was idle, now has current
+			wantStartIndex: 0,
+			wantCount:      3,
+			wantEvent:      true, // was idle, now has current
 		},
 		{
 			name: "add multiple tracks to playing queue",
@@ -491,9 +491,9 @@ func TestQueueService_Add(t *testing.T) {
 				state.SetPlaybackActive(true)
 				state.Append(domain.QueueEntry{TrackID: domain.TrackID("queued-1")})
 			},
-			wantStartPosition: 2, // after current + queued-1
-			wantCount:         2,
-			wantEvent:         false, // was not idle
+			wantStartIndex: 2, // after current + queued-1
+			wantCount:      2,
+			wantEvent:      false, // was not idle
 		},
 		{
 			name: "add empty tracks slice",
@@ -505,9 +505,9 @@ func TestQueueService_Add(t *testing.T) {
 			setupRepo: func(m *mockRepository) {
 				m.createConnectedState(guildID, voiceChannelID, notificationChannelID)
 			},
-			wantStartPosition: 0,
-			wantCount:         0,
-			wantEvent:         false,
+			wantStartIndex: 0,
+			wantCount:      0,
+			wantEvent:      false,
 		},
 		{
 			name: "not connected",
@@ -548,8 +548,8 @@ func TestQueueService_Add(t *testing.T) {
 				return
 			}
 
-			if output.StartPosition != tt.wantStartPosition {
-				t.Errorf("StartPosition = %d, want %d", output.StartPosition, tt.wantStartPosition)
+			if output.StartIndex != tt.wantStartIndex {
+				t.Errorf("StartIndex = %d, want %d", output.StartIndex, tt.wantStartIndex)
 			}
 
 			if output.Count != tt.wantCount {
@@ -883,7 +883,7 @@ func TestQueueService_Restart(t *testing.T) {
 			if event.GuildID != tt.input.GuildID {
 				t.Errorf("event GuildID = %d, want %d", event.GuildID, tt.input.GuildID)
 			}
-			// Verify queue is at position 0 (Restart uses Seek(0))
+			// Verify queue is at index 0 (Restart uses Seek(0))
 			state, _ := repo.Get(context.Background(), guildID)
 			if state.CurrentIndex() != 0 {
 				t.Errorf(
@@ -910,8 +910,8 @@ func TestQueueService_Seek(t *testing.T) {
 		{
 			name: "seek to middle of queue",
 			input: QueueSeekInput{
-				GuildID:  guildID,
-				Position: 2,
+				GuildID: guildID,
+				Index:   2,
 			},
 			setupRepo: func(m *mockRepository) {
 				state := m.createConnectedState(guildID, voiceChannelID, notificationChannelID)
@@ -927,8 +927,8 @@ func TestQueueService_Seek(t *testing.T) {
 		{
 			name: "seek to played track (before current)",
 			input: QueueSeekInput{
-				GuildID:  guildID,
-				Position: 0,
+				GuildID: guildID,
+				Index:   0,
 			},
 			setupRepo: func(m *mockRepository) {
 				state := m.createConnectedState(guildID, voiceChannelID, notificationChannelID)
@@ -946,8 +946,8 @@ func TestQueueService_Seek(t *testing.T) {
 		{
 			name: "seek to upcoming track (after current)",
 			input: QueueSeekInput{
-				GuildID:  guildID,
-				Position: 4,
+				GuildID: guildID,
+				Index:   4,
 			},
 			setupRepo: func(m *mockRepository) {
 				state := m.createConnectedState(guildID, voiceChannelID, notificationChannelID)
@@ -961,10 +961,10 @@ func TestQueueService_Seek(t *testing.T) {
 			wantTrackID: "track-4",
 		},
 		{
-			name: "seek to current position (restarts current)",
+			name: "seek to current index (restarts current)",
 			input: QueueSeekInput{
-				GuildID:  guildID,
-				Position: 1,
+				GuildID: guildID,
+				Index:   1,
 			},
 			setupRepo: func(m *mockRepository) {
 				state := m.createConnectedState(guildID, voiceChannelID, notificationChannelID)
@@ -981,8 +981,8 @@ func TestQueueService_Seek(t *testing.T) {
 		{
 			name: "seek from idle state (queue ended)",
 			input: QueueSeekInput{
-				GuildID:  guildID,
-				Position: 1,
+				GuildID: guildID,
+				Index:   1,
 			},
 			setupRepo: func(m *mockRepository) {
 				state := m.createConnectedState(guildID, voiceChannelID, notificationChannelID)
@@ -997,8 +997,8 @@ func TestQueueService_Seek(t *testing.T) {
 		{
 			name: "empty queue error",
 			input: QueueSeekInput{
-				GuildID:  guildID,
-				Position: 0,
+				GuildID: guildID,
+				Index:   0,
 			},
 			setupRepo: func(m *mockRepository) {
 				m.createConnectedState(guildID, voiceChannelID, notificationChannelID)
@@ -1007,35 +1007,35 @@ func TestQueueService_Seek(t *testing.T) {
 			wantErr: ErrQueueEmpty,
 		},
 		{
-			name: "invalid position error - too high",
+			name: "invalid index error - too high",
 			input: QueueSeekInput{
-				GuildID:  guildID,
-				Position: 10,
+				GuildID: guildID,
+				Index:   10,
 			},
 			setupRepo: func(m *mockRepository) {
 				state := m.createConnectedState(guildID, voiceChannelID, notificationChannelID)
 				state.Append(domain.QueueEntry{TrackID: domain.TrackID("track-0")})
 				state.Append(domain.QueueEntry{TrackID: domain.TrackID("track-1")})
 			},
-			wantErr: ErrInvalidPosition,
+			wantErr: ErrInvalidIndex,
 		},
 		{
-			name: "invalid position error - negative",
+			name: "invalid index error - negative",
 			input: QueueSeekInput{
-				GuildID:  guildID,
-				Position: -1,
+				GuildID: guildID,
+				Index:   -1,
 			},
 			setupRepo: func(m *mockRepository) {
 				state := m.createConnectedState(guildID, voiceChannelID, notificationChannelID)
 				state.Append(domain.QueueEntry{TrackID: domain.TrackID("track-0")})
 			},
-			wantErr: ErrInvalidPosition,
+			wantErr: ErrInvalidIndex,
 		},
 		{
 			name: "not connected error",
 			input: QueueSeekInput{
-				GuildID:  guildID,
-				Position: 0,
+				GuildID: guildID,
+				Index:   0,
 			},
 			wantErr: ErrNotConnected,
 		},
@@ -1084,12 +1084,12 @@ func TestQueueService_Seek(t *testing.T) {
 			if event.GuildID != tt.input.GuildID {
 				t.Errorf("event GuildID = %d, want %d", event.GuildID, tt.input.GuildID)
 			}
-			// Verify queue is at the seeked position and playback active
+			// Verify queue is at the seeked index and playback active
 			state, _ := repo.Get(context.Background(), guildID)
-			if state.CurrentIndex() != tt.input.Position {
+			if state.CurrentIndex() != tt.input.Index {
 				t.Errorf(
 					"expected currentIndex %d after Seek, got %d",
-					tt.input.Position,
+					tt.input.Index,
 					state.CurrentIndex(),
 				)
 			}

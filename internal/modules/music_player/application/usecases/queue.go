@@ -37,16 +37,16 @@ type QueueAddInput struct {
 
 // QueueAddOutput contains the result of the QueueAdd use case.
 type QueueAddOutput struct {
-	StartPosition int // 0-indexed position where first track was added
-	Count         int // Number of tracks added
+	StartIndex int // Index where first track was added
+	Count      int // Number of tracks added
 }
 
 // Add adds tracks to the queue. If the queue was idle, triggers playback via CurrentTrackChangedEvent.
 func (q *QueueService) Add(ctx context.Context, input QueueAddInput) (*QueueAddOutput, error) {
 	if len(input.TrackIDs) == 0 {
 		return &QueueAddOutput{
-			StartPosition: 0,
-			Count:         0,
+			StartIndex: 0,
+			Count:      0,
 		}, nil
 	}
 
@@ -58,7 +58,7 @@ func (q *QueueService) Add(ctx context.Context, input QueueAddInput) (*QueueAddO
 	// Capture whether queue was idle before appending
 	wasActive := state.IsPlaybackActive()
 
-	startPosition := state.Len()
+	startIndex := state.Len()
 
 	// Create entries and append
 	entries := make([]domain.QueueEntry, 0, len(input.TrackIDs))
@@ -71,7 +71,7 @@ func (q *QueueService) Add(ctx context.Context, input QueueAddInput) (*QueueAddO
 	state.Append(entries...)
 
 	if !wasActive {
-		state.Seek(startPosition)
+		state.Seek(startIndex)
 	}
 	state.SetPlaybackActive(true)
 
@@ -88,8 +88,8 @@ func (q *QueueService) Add(ctx context.Context, input QueueAddInput) (*QueueAddO
 	}
 
 	return &QueueAddOutput{
-		StartPosition: startPosition,
-		Count:         len(input.TrackIDs),
+		StartIndex: startIndex,
+		Count:      len(input.TrackIDs),
 	}, nil
 }
 
@@ -108,7 +108,7 @@ type QueueListOutput struct {
 	TotalTracks      int      // Total tracks in queue
 	CurrentPage      int
 	TotalPages       int
-	PageStart        int    // 0-indexed start position of this page
+	PageStart        int    // Start index of this page
 	LoopMode         string // "none", "track", "queue"
 }
 
@@ -193,8 +193,8 @@ func (q *QueueService) List(ctx context.Context, input QueueListInput) (*QueueLi
 
 // QueueRemoveInput contains the input for the QueueRemove use case.
 type QueueRemoveInput struct {
-	GuildID  snowflake.ID
-	Position int // 0-indexed position in queue (cannot remove current track directly)
+	GuildID snowflake.ID
+	Index   int // Index in queue (cannot remove current track directly)
 }
 
 // QueueRemoveOutput contains the result of the QueueRemove use case.
@@ -202,8 +202,8 @@ type QueueRemoveOutput struct {
 	RemovedTrackID string
 }
 
-// Remove removes a track from the queue at the given position (0-indexed).
-// Returns ErrIsCurrentTrack if position is the current track (should use Skip instead).
+// Remove removes a track from the queue at the given index.
+// Returns ErrIsCurrentTrack if index is the current track (should use Skip instead).
 func (q *QueueService) Remove(
 	ctx context.Context,
 	input QueueRemoveInput,
@@ -217,9 +217,9 @@ func (q *QueueService) Remove(
 		return nil, ErrQueueEmpty
 	}
 
-	index := input.Position
+	index := input.Index
 	if index < 0 || index >= state.Len() {
-		return nil, ErrInvalidPosition
+		return nil, ErrInvalidIndex
 	}
 
 	// Cannot remove current track directly - must use Skip
@@ -229,7 +229,7 @@ func (q *QueueService) Remove(
 
 	removedEntry, err := state.Remove(index)
 	if err != nil {
-		return nil, ErrInvalidPosition
+		return nil, ErrInvalidIndex
 	}
 
 	if err := q.playerStates.Save(ctx, state); err != nil {
@@ -328,8 +328,8 @@ func (q *QueueService) Restart(
 	input QueueRestartInput,
 ) (*QueueRestartOutput, error) {
 	output, err := q.Seek(ctx, QueueSeekInput{
-		GuildID:  input.GuildID,
-		Position: 0,
+		GuildID: input.GuildID,
+		Index:   0,
 	})
 	if err != nil {
 		return nil, err
@@ -339,8 +339,8 @@ func (q *QueueService) Restart(
 
 // QueueSeekInput contains the input for the QueueSeek use case.
 type QueueSeekInput struct {
-	GuildID  snowflake.ID
-	Position int // 0-indexed position in the queue
+	GuildID snowflake.ID
+	Index   int // Index in the queue
 }
 
 // QueueSeekOutput contains the result of the QueueSeek use case.
@@ -348,8 +348,8 @@ type QueueSeekOutput struct {
 	TrackID string
 }
 
-// Seek jumps to a specific position in the queue and triggers playback.
-// Used to immediately play a track at any position (played or upcoming).
+// Seek jumps to a specific index in the queue and triggers playback.
+// Used to immediately play a track at any index (played or upcoming).
 func (q *QueueService) Seek(
 	ctx context.Context,
 	input QueueSeekInput,
@@ -363,10 +363,10 @@ func (q *QueueService) Seek(
 		return nil, ErrQueueEmpty
 	}
 
-	// Seek to target position (atomic operation with bounds checking)
-	entry := state.Seek(input.Position)
+	// Seek to target index (atomic operation with bounds checking)
+	entry := state.Seek(input.Index)
 	if entry == nil {
-		return nil, ErrInvalidPosition
+		return nil, ErrInvalidIndex
 	}
 
 	// Mark playback as active before saving

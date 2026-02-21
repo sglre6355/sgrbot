@@ -18,8 +18,8 @@ const (
 	colorError   = 0xE74C3C
 )
 
-// Handlers holds all the command handlers.
-type Handlers struct {
+// CommandHandlers holds all the command handlers.
+type CommandHandlers struct {
 	voiceChannel        *usecases.VoiceChannelService
 	playback            *usecases.PlaybackService
 	queue               *usecases.QueueService
@@ -27,15 +27,15 @@ type Handlers struct {
 	notificationChannel *usecases.NotificationChannelService
 }
 
-// NewHandlers creates new Handlers.
-func NewHandlers(
+// NewCommandHandlers creates new CommandHandlers.
+func NewCommandHandlers(
 	voiceChannel *usecases.VoiceChannelService,
 	playback *usecases.PlaybackService,
 	queue *usecases.QueueService,
 	trackLoader *usecases.TrackLoaderService,
 	notificationChannel *usecases.NotificationChannelService,
-) *Handlers {
-	return &Handlers{
+) *CommandHandlers {
+	return &CommandHandlers{
 		voiceChannel:        voiceChannel,
 		playback:            playback,
 		queue:               queue,
@@ -45,73 +45,7 @@ func NewHandlers(
 }
 
 // HandleJoin handles the /join command.
-func (h *Handlers) HandleJoin(
-	s *discordgo.Session,
-	i *discordgo.InteractionCreate,
-	r bot.Responder,
-) error {
-	guildID, err := snowflake.Parse(i.GuildID)
-	if err != nil {
-		return respondError(r, "Invalid guild")
-	}
-
-	userID, err := snowflake.Parse(i.Member.User.ID)
-	if err != nil {
-		return respondError(r, "Invalid user")
-	}
-
-	notificationChannelID, err := snowflake.Parse(i.ChannelID)
-	if err != nil {
-		return respondError(r, "Invalid channel")
-	}
-
-	var voiceChannelID snowflake.ID
-	options := i.ApplicationCommandData().Options
-	for _, opt := range options {
-		if opt.Name == "channel" {
-			voiceChannelID, _ = snowflake.Parse(opt.ChannelValue(s).ID)
-		}
-	}
-
-	input := usecases.JoinInput{
-		GuildID:               guildID,
-		UserID:                userID,
-		NotificationChannelID: notificationChannelID,
-		VoiceChannelID:        voiceChannelID,
-	}
-
-	output, err := h.voiceChannel.Join(context.Background(), input)
-	if err != nil {
-		return respondError(r, err.Error())
-	}
-
-	return respondJoined(r, output.VoiceChannelID)
-}
-
-// HandleLeave handles the /leave command.
-func (h *Handlers) HandleLeave(
-	s *discordgo.Session,
-	i *discordgo.InteractionCreate,
-	r bot.Responder,
-) error {
-	guildID, err := snowflake.Parse(i.GuildID)
-	if err != nil {
-		return respondError(r, "Invalid guild")
-	}
-
-	input := usecases.LeaveInput{
-		GuildID: guildID,
-	}
-
-	if err := h.voiceChannel.Leave(context.Background(), input); err != nil {
-		return respondError(r, err.Error())
-	}
-
-	return respondDisconnected(r)
-}
-
-// HandlePlay handles the /play command.
-func (h *Handlers) HandlePlay(
+func (h *CommandHandlers) HandleJoin(
 	s *discordgo.Session,
 	i *discordgo.InteractionCreate,
 	r bot.Responder,
@@ -130,7 +64,98 @@ func (h *Handlers) HandlePlay(
 
 	notificationChannelID, err := snowflake.Parse(i.ChannelID)
 	if err != nil {
-		return respondError(r, "Invalid channel")
+		return respondError(r, "Invalid notification channel")
+	}
+
+	var voiceChannelID snowflake.ID
+	options := i.ApplicationCommandData().Options
+	for _, opt := range options {
+		if opt.Name == "channel" {
+			voiceChannelID, err = snowflake.Parse(opt.ChannelValue(s).ID)
+			if err != nil {
+				return respondError(r, "Invalid voice channel")
+			}
+		}
+	}
+
+	output, err := h.voiceChannel.Join(ctx, usecases.JoinInput{
+		GuildID:               guildID,
+		UserID:                userID,
+		NotificationChannelID: notificationChannelID,
+		VoiceChannelID:        voiceChannelID,
+	})
+	if err != nil {
+		return respondError(r, err.Error())
+	}
+
+	return r.Respond(&discordgo.InteractionResponse{
+		Type: discordgo.InteractionResponseChannelMessageWithSource,
+		Data: &discordgo.InteractionResponseData{
+			Embeds: []*discordgo.MessageEmbed{
+				{
+					Description: fmt.Sprintf("Connected to <#%d>.", output.VoiceChannelID),
+					Color:       colorSuccess,
+				},
+			},
+		},
+	})
+}
+
+// HandleLeave handles the /leave command.
+func (h *CommandHandlers) HandleLeave(
+	s *discordgo.Session,
+	i *discordgo.InteractionCreate,
+	r bot.Responder,
+) error {
+	ctx := context.Background()
+
+	guildID, err := snowflake.Parse(i.GuildID)
+	if err != nil {
+		return respondError(r, "Invalid guild")
+	}
+
+	input := usecases.LeaveInput{
+		GuildID: guildID,
+	}
+
+	if err := h.voiceChannel.Leave(ctx, input); err != nil {
+		return respondError(r, err.Error())
+	}
+
+	return r.Respond(&discordgo.InteractionResponse{
+		Type: discordgo.InteractionResponseChannelMessageWithSource,
+		Data: &discordgo.InteractionResponseData{
+			Embeds: []*discordgo.MessageEmbed{
+				{
+					Description: "Disconnected.",
+					Color:       colorSuccess,
+				},
+			},
+		},
+	})
+}
+
+// HandlePlay handles the /play command.
+func (h *CommandHandlers) HandlePlay(
+	s *discordgo.Session,
+	i *discordgo.InteractionCreate,
+	r bot.Responder,
+) error {
+	ctx := context.Background()
+
+	guildID, err := snowflake.Parse(i.GuildID)
+	if err != nil {
+		return respondError(r, "Invalid guild")
+	}
+
+	userID, err := snowflake.Parse(i.Member.User.ID)
+	if err != nil {
+		return respondError(r, "Invalid user")
+	}
+
+	notificationChannelID, err := snowflake.Parse(i.ChannelID)
+	if err != nil {
+		return respondError(r, "Invalid notification channel")
 	}
 
 	var query string
@@ -152,7 +177,7 @@ func (h *Handlers) HandlePlay(
 	}
 
 	// 2. Load tracks via TrackLoaderService (may be single track or playlist)
-	tracksOutput, err := h.trackLoader.ResolveQuery(ctx, usecases.ResolveQueryInput{
+	resolveQueryOutput, err := h.trackLoader.ResolveQuery(ctx, usecases.ResolveQueryInput{
 		Query: query,
 	})
 	if err != nil {
@@ -160,11 +185,11 @@ func (h *Handlers) HandlePlay(
 	}
 
 	// 3. Add to queue
-	trackIDs := make([]string, len(tracksOutput.Tracks))
-	for i, t := range tracksOutput.Tracks {
+	trackIDs := make([]string, len(resolveQueryOutput.Tracks))
+	for i, t := range resolveQueryOutput.Tracks {
 		trackIDs[i] = t.ID
 	}
-	output, err := h.queue.Add(ctx, usecases.QueueAddInput{
+	queueAddOutput, err := h.queue.Add(ctx, usecases.QueueAddInput{
 		GuildID:     guildID,
 		TrackIDs:    trackIDs,
 		RequesterID: userID,
@@ -173,19 +198,44 @@ func (h *Handlers) HandlePlay(
 		return respondError(r, err.Error())
 	}
 
-	if tracksOutput.IsPlaylist {
-		return respondPlaylistAdded(r, tracksOutput.PlaylistName, output.Count)
+	var description string
+	if resolveQueryOutput.IsPlaylist {
+		description = fmt.Sprintf(
+			"Added **%d tracks** from playlist **%s** to the queue.",
+			queueAddOutput.Count,
+			resolveQueryOutput.PlaylistName,
+		)
+	} else {
+		track := resolveQueryOutput.Tracks[0]
+		if track.URI != "" {
+			description = fmt.Sprintf("Added [%s](%s) to the queue.", track.Title, track.URI)
+		} else {
+			description = fmt.Sprintf("Added **%s** to the queue.", track.Title)
+		}
 	}
-	return respondQueueAdded(r, tracksOutput.Tracks[0])
+
+	return r.Respond(&discordgo.InteractionResponse{
+		Type: discordgo.InteractionResponseChannelMessageWithSource,
+		Data: &discordgo.InteractionResponseData{
+			Embeds: []*discordgo.MessageEmbed{
+				{
+					Description: description,
+					Color:       colorSuccess,
+				},
+			},
+		},
+	})
 }
 
 // HandleStop handles the /stop command.
 // Stop is a presentation concept: clear queue + skip current track.
-func (h *Handlers) HandleStop(
+func (h *CommandHandlers) HandleStop(
 	s *discordgo.Session,
 	i *discordgo.InteractionCreate,
 	r bot.Responder,
 ) error {
+	ctx := context.Background()
+
 	guildID, err := snowflake.Parse(i.GuildID)
 	if err != nil {
 		return respondError(r, "Invalid guild")
@@ -193,10 +243,8 @@ func (h *Handlers) HandleStop(
 
 	notificationChannelID, err := snowflake.Parse(i.ChannelID)
 	if err != nil {
-		return respondError(r, "Invalid channel")
+		return respondError(r, "Invalid notification channel")
 	}
-
-	ctx := context.Background()
 
 	// Update notification channel (best-effort)
 	_ = h.notificationChannel.Set(ctx, usecases.SetNotificationChannelInput{
@@ -213,15 +261,27 @@ func (h *Handlers) HandleStop(
 		return respondError(r, err.Error())
 	}
 
-	return respondStopped(r)
+	return r.Respond(&discordgo.InteractionResponse{
+		Type: discordgo.InteractionResponseChannelMessageWithSource,
+		Data: &discordgo.InteractionResponseData{
+			Embeds: []*discordgo.MessageEmbed{
+				{
+					Description: "Stopped playback.",
+					Color:       colorSuccess,
+				},
+			},
+		},
+	})
 }
 
 // HandlePause handles the /pause command.
-func (h *Handlers) HandlePause(
+func (h *CommandHandlers) HandlePause(
 	s *discordgo.Session,
 	i *discordgo.InteractionCreate,
 	r bot.Responder,
 ) error {
+	ctx := context.Background()
+
 	guildID, err := snowflake.Parse(i.GuildID)
 	if err != nil {
 		return respondError(r, "Invalid guild")
@@ -229,10 +289,8 @@ func (h *Handlers) HandlePause(
 
 	notificationChannelID, err := snowflake.Parse(i.ChannelID)
 	if err != nil {
-		return respondError(r, "Invalid channel")
+		return respondError(r, "Invalid notification channel")
 	}
-
-	ctx := context.Background()
 
 	// Update notification channel (best-effort)
 	_ = h.notificationChannel.Set(ctx, usecases.SetNotificationChannelInput{
@@ -244,15 +302,27 @@ func (h *Handlers) HandlePause(
 		return respondError(r, err.Error())
 	}
 
-	return respondPaused(r)
+	return r.Respond(&discordgo.InteractionResponse{
+		Type: discordgo.InteractionResponseChannelMessageWithSource,
+		Data: &discordgo.InteractionResponseData{
+			Embeds: []*discordgo.MessageEmbed{
+				{
+					Description: "Paused playback.",
+					Color:       colorSuccess,
+				},
+			},
+		},
+	})
 }
 
 // HandleResume handles the /resume command.
-func (h *Handlers) HandleResume(
+func (h *CommandHandlers) HandleResume(
 	s *discordgo.Session,
 	i *discordgo.InteractionCreate,
 	r bot.Responder,
 ) error {
+	ctx := context.Background()
+
 	guildID, err := snowflake.Parse(i.GuildID)
 	if err != nil {
 		return respondError(r, "Invalid guild")
@@ -260,10 +330,8 @@ func (h *Handlers) HandleResume(
 
 	notificationChannelID, err := snowflake.Parse(i.ChannelID)
 	if err != nil {
-		return respondError(r, "Invalid channel")
+		return respondError(r, "Invalid notification channel")
 	}
-
-	ctx := context.Background()
 
 	// Update notification channel (best-effort)
 	_ = h.notificationChannel.Set(ctx, usecases.SetNotificationChannelInput{
@@ -275,15 +343,27 @@ func (h *Handlers) HandleResume(
 		return respondError(r, err.Error())
 	}
 
-	return respondResumed(r)
+	return r.Respond(&discordgo.InteractionResponse{
+		Type: discordgo.InteractionResponseChannelMessageWithSource,
+		Data: &discordgo.InteractionResponseData{
+			Embeds: []*discordgo.MessageEmbed{
+				{
+					Description: "Resumed playback.",
+					Color:       colorSuccess,
+				},
+			},
+		},
+	})
 }
 
 // HandleSkip handles the /skip command.
-func (h *Handlers) HandleSkip(
+func (h *CommandHandlers) HandleSkip(
 	s *discordgo.Session,
 	i *discordgo.InteractionCreate,
 	r bot.Responder,
 ) error {
+	ctx := context.Background()
+
 	guildID, err := snowflake.Parse(i.GuildID)
 	if err != nil {
 		return respondError(r, "Invalid guild")
@@ -291,10 +371,8 @@ func (h *Handlers) HandleSkip(
 
 	notificationChannelID, err := snowflake.Parse(i.ChannelID)
 	if err != nil {
-		return respondError(r, "Invalid channel")
+		return respondError(r, "Invalid notification channel")
 	}
-
-	ctx := context.Background()
 
 	// Update notification channel (best-effort)
 	_ = h.notificationChannel.Set(ctx, usecases.SetNotificationChannelInput{
@@ -307,11 +385,21 @@ func (h *Handlers) HandleSkip(
 	}
 
 	// Respond with skipped confirmation - "Now Playing" is sent via CurrentTrackChangedEvent
-	return respondSkipped(r)
+	return r.Respond(&discordgo.InteractionResponse{
+		Type: discordgo.InteractionResponseChannelMessageWithSource,
+		Data: &discordgo.InteractionResponseData{
+			Embeds: []*discordgo.MessageEmbed{
+				{
+					Description: "Skipped.",
+					Color:       colorSuccess,
+				},
+			},
+		},
+	})
 }
 
 // HandleQueue handles the /queue command.
-func (h *Handlers) HandleQueue(
+func (h *CommandHandlers) HandleQueue(
 	s *discordgo.Session,
 	i *discordgo.InteractionCreate,
 	r bot.Responder,
@@ -338,12 +426,14 @@ func (h *Handlers) HandleQueue(
 	}
 }
 
-func (h *Handlers) handleQueueList(
+func (h *CommandHandlers) handleQueueList(
 	_ *discordgo.Session,
 	i *discordgo.InteractionCreate,
 	r bot.Responder,
 	options []*discordgo.ApplicationCommandInteractionDataOption,
 ) error {
+	ctx := context.Background()
+
 	guildID, err := snowflake.Parse(i.GuildID)
 	if err != nil {
 		return respondError(r, "Invalid guild")
@@ -351,10 +441,8 @@ func (h *Handlers) handleQueueList(
 
 	notificationChannelID, err := snowflake.Parse(i.ChannelID)
 	if err != nil {
-		return respondError(r, "Invalid channel")
+		return respondError(r, "Invalid notification channel")
 	}
-
-	ctx := context.Background()
 
 	// Update notification channel (best-effort)
 	_ = h.notificationChannel.Set(ctx, usecases.SetNotificationChannelInput{
@@ -377,32 +465,104 @@ func (h *Handlers) handleQueueList(
 		return respondError(r, err.Error())
 	}
 
-	// Collect all track IDs and load track info for display
-	var allIDs []string
-	allIDs = append(allIDs, output.PlayedTrackIDs...)
-	if output.CurrentTrackID != "" {
-		allIDs = append(allIDs, output.CurrentTrackID)
+	// Build title with loop mode indicator
+	title := "Queue"
+	switch output.LoopMode {
+	case "track":
+		title = "Queue \U0001F502" // 🔂
+	case "queue":
+		title = "Queue \U0001F501" // 🔁
 	}
-	allIDs = append(allIDs, output.UpcomingTrackIDs...)
 
-	tracks := make(map[string]*usecases.TrackInfo, len(allIDs))
-	for _, id := range allIDs {
-		info, err := h.trackLoader.LoadTrack(ctx, id)
+	embed := &discordgo.MessageEmbed{
+		Title: title,
+	}
+
+	// Handle empty queue
+	if output.TotalTracks == 0 {
+		embed.Description = "Queue is empty."
+		embed.Footer = &discordgo.MessageEmbedFooter{
+			Text: fmt.Sprintf("Page %d/%d", output.CurrentPage, output.TotalPages),
+		}
+		return r.Respond(&discordgo.InteractionResponse{
+			Type: discordgo.InteractionResponseChannelMessageWithSource,
+			Data: &discordgo.InteractionResponseData{
+				Embeds: []*discordgo.MessageEmbed{embed},
+			},
+		})
+	}
+
+	// Build description with sections
+	var sb strings.Builder
+	displayIndex := output.PageStart + 1 // 1-indexed for display
+
+	if len(output.PlayedTrackIDs) > 0 {
+		output, err := h.trackLoader.LoadTracks(
+			ctx,
+			usecases.LoadTracksInput{TrackIDs: output.PlayedTrackIDs},
+		)
 		if err != nil {
 			return respondError(r, err.Error())
 		}
-		tracks[id] = info
+
+		sb.WriteString("### Played\n")
+		for _, track := range output.Tracks {
+			writeTrackLine(&sb, displayIndex, track)
+			displayIndex++
+		}
 	}
 
-	return respondQueueList(r, output, tracks)
+	if output.CurrentTrackID != "" {
+		output, err := h.trackLoader.LoadTrack(
+			ctx,
+			usecases.LoadTrackInput{TrackID: output.CurrentTrackID},
+		)
+		if err != nil {
+			return respondError(r, err.Error())
+		}
+
+		sb.WriteString("### Now Playing\n")
+		writeTrackLine(&sb, displayIndex, output.Track)
+		displayIndex++
+	}
+
+	if len(output.UpcomingTrackIDs) > 0 {
+		output, err := h.trackLoader.LoadTracks(
+			ctx,
+			usecases.LoadTracksInput{TrackIDs: output.UpcomingTrackIDs},
+		)
+		if err != nil {
+			return respondError(r, err.Error())
+		}
+
+		sb.WriteString("### Up Next\n")
+		for _, track := range output.Tracks {
+			writeTrackLine(&sb, displayIndex, track)
+			displayIndex++
+		}
+	}
+
+	embed.Description = sb.String()
+	embed.Footer = &discordgo.MessageEmbedFooter{
+		Text: fmt.Sprintf("Page %d/%d", output.CurrentPage, output.TotalPages),
+	}
+
+	return r.Respond(&discordgo.InteractionResponse{
+		Type: discordgo.InteractionResponseChannelMessageWithSource,
+		Data: &discordgo.InteractionResponseData{
+			Embeds: []*discordgo.MessageEmbed{embed},
+		},
+	})
 }
 
-func (h *Handlers) handleQueueRemove(
+func (h *CommandHandlers) handleQueueRemove(
 	_ *discordgo.Session,
 	i *discordgo.InteractionCreate,
 	r bot.Responder,
 	options []*discordgo.ApplicationCommandInteractionDataOption,
 ) error {
+	ctx := context.Background()
+
 	guildID, err := snowflake.Parse(i.GuildID)
 	if err != nil {
 		return respondError(r, "Invalid guild")
@@ -410,10 +570,8 @@ func (h *Handlers) handleQueueRemove(
 
 	notificationChannelID, err := snowflake.Parse(i.ChannelID)
 	if err != nil {
-		return respondError(r, "Invalid channel")
+		return respondError(r, "Invalid notification channel")
 	}
-
-	ctx := context.Background()
 
 	// Update notification channel (best-effort)
 	_ = h.notificationChannel.Set(ctx, usecases.SetNotificationChannelInput{
@@ -421,17 +579,17 @@ func (h *Handlers) handleQueueRemove(
 		ChannelID: notificationChannelID,
 	})
 
-	var position int
+	var index int
 	for _, opt := range options {
 		if opt.Name == "position" {
 			// Convert from 1-indexed (user input) to 0-indexed (internal)
-			position = int(opt.IntValue()) - 1
+			index = int(opt.IntValue()) - 1
 		}
 	}
 
-	output, err := h.queue.Remove(ctx, usecases.QueueRemoveInput{
-		GuildID:  guildID,
-		Position: position,
+	removeOutput, err := h.queue.Remove(ctx, usecases.QueueRemoveInput{
+		GuildID: guildID,
+		Index:   index,
 	})
 	if err != nil {
 		// If trying to remove current track, skip first then remove
@@ -444,34 +602,42 @@ func (h *Handlers) handleQueueRemove(
 			// After skip, currentIndex has advanced, so we can now remove the track
 			// at the original position (which is now in the "played" section)
 			removeOutput, removeErr := h.queue.Remove(ctx, usecases.QueueRemoveInput{
-				GuildID:  guildID,
-				Position: position,
+				GuildID: guildID,
+				Index:   index,
 			})
 			if removeErr != nil {
 				return respondError(r, removeErr.Error())
 			}
-			track, loadErr := h.trackLoader.LoadTrack(ctx, removeOutput.RemovedTrackID)
+			loadTrackOutput, loadErr := h.trackLoader.LoadTrack(
+				ctx,
+				usecases.LoadTrackInput{TrackID: removeOutput.RemovedTrackID},
+			)
 			if loadErr != nil {
 				return respondError(r, loadErr.Error())
 			}
-			return respondQueueRemoved(r, track)
+			return respondQueueRemoved(r, loadTrackOutput.Track)
 		}
 		return respondError(r, err.Error())
 	}
 
-	track, err := h.trackLoader.LoadTrack(ctx, output.RemovedTrackID)
+	loadTrackOutput, err := h.trackLoader.LoadTrack(
+		ctx,
+		usecases.LoadTrackInput{TrackID: removeOutput.RemovedTrackID},
+	)
 	if err != nil {
 		return respondError(r, err.Error())
 	}
 
-	return respondQueueRemoved(r, track)
+	return respondQueueRemoved(r, loadTrackOutput.Track)
 }
 
-func (h *Handlers) handleQueueClear(
+func (h *CommandHandlers) handleQueueClear(
 	_ *discordgo.Session,
 	i *discordgo.InteractionCreate,
 	r bot.Responder,
 ) error {
+	ctx := context.Background()
+
 	guildID, err := snowflake.Parse(i.GuildID)
 	if err != nil {
 		return respondError(r, "Invalid guild")
@@ -479,10 +645,8 @@ func (h *Handlers) handleQueueClear(
 
 	notificationChannelID, err := snowflake.Parse(i.ChannelID)
 	if err != nil {
-		return respondError(r, "Invalid channel")
+		return respondError(r, "Invalid notification channel")
 	}
-
-	ctx := context.Background()
 
 	// Update notification channel (best-effort)
 	_ = h.notificationChannel.Set(ctx, usecases.SetNotificationChannelInput{
@@ -498,14 +662,26 @@ func (h *Handlers) handleQueueClear(
 		return respondError(r, err.Error())
 	}
 
-	return respondQueueCleared(r)
+	return r.Respond(&discordgo.InteractionResponse{
+		Type: discordgo.InteractionResponseChannelMessageWithSource,
+		Data: &discordgo.InteractionResponseData{
+			Embeds: []*discordgo.MessageEmbed{
+				{
+					Description: "Cleared the queue.",
+					Color:       colorSuccess,
+				},
+			},
+		},
+	})
 }
 
-func (h *Handlers) handleQueueRestart(
+func (h *CommandHandlers) handleQueueRestart(
 	_ *discordgo.Session,
 	i *discordgo.InteractionCreate,
 	r bot.Responder,
 ) error {
+	ctx := context.Background()
+
 	guildID, err := snowflake.Parse(i.GuildID)
 	if err != nil {
 		return respondError(r, "Invalid guild")
@@ -513,10 +689,8 @@ func (h *Handlers) handleQueueRestart(
 
 	notificationChannelID, err := snowflake.Parse(i.ChannelID)
 	if err != nil {
-		return respondError(r, "Invalid channel")
+		return respondError(r, "Invalid notification channel")
 	}
-
-	ctx := context.Background()
 
 	// Update notification channel (best-effort)
 	_ = h.notificationChannel.Set(ctx, usecases.SetNotificationChannelInput{
@@ -531,15 +705,27 @@ func (h *Handlers) handleQueueRestart(
 		return respondError(r, err.Error())
 	}
 
-	return respondQueueRestarted(r)
+	return r.Respond(&discordgo.InteractionResponse{
+		Type: discordgo.InteractionResponseChannelMessageWithSource,
+		Data: &discordgo.InteractionResponseData{
+			Embeds: []*discordgo.MessageEmbed{
+				{
+					Description: "Restarted the queue from the beginning.",
+					Color:       colorSuccess,
+				},
+			},
+		},
+	})
 }
 
-func (h *Handlers) handleQueueSeek(
+func (h *CommandHandlers) handleQueueSeek(
 	_ *discordgo.Session,
 	i *discordgo.InteractionCreate,
 	r bot.Responder,
 	options []*discordgo.ApplicationCommandInteractionDataOption,
 ) error {
+	ctx := context.Background()
+
 	guildID, err := snowflake.Parse(i.GuildID)
 	if err != nil {
 		return respondError(r, "Invalid guild")
@@ -547,10 +733,8 @@ func (h *Handlers) handleQueueSeek(
 
 	notificationChannelID, err := snowflake.Parse(i.ChannelID)
 	if err != nil {
-		return respondError(r, "Invalid channel")
+		return respondError(r, "Invalid notification channel")
 	}
-
-	ctx := context.Background()
 
 	// Update notification channel (best-effort)
 	_ = h.notificationChannel.Set(ctx, usecases.SetNotificationChannelInput{
@@ -558,37 +742,68 @@ func (h *Handlers) handleQueueSeek(
 		ChannelID: notificationChannelID,
 	})
 
-	var position int
+	var index int
 	for _, opt := range options {
 		if opt.Name == "position" {
 			// Convert from 1-indexed (user input) to 0-indexed (internal)
-			position = int(opt.IntValue()) - 1
+			index = int(opt.IntValue()) - 1
 		}
 	}
 
-	output, err := h.queue.Seek(ctx, usecases.QueueSeekInput{
-		GuildID:  guildID,
-		Position: position,
+	queueSeekOutput, err := h.queue.Seek(ctx, usecases.QueueSeekInput{
+		GuildID: guildID,
+		Index:   index,
 	})
 	if err != nil {
 		return respondError(r, err.Error())
 	}
 
-	track, err := h.trackLoader.LoadTrack(ctx, output.TrackID)
+	loadTrackOutput, err := h.trackLoader.LoadTrack(
+		ctx,
+		usecases.LoadTrackInput{TrackID: queueSeekOutput.TrackID},
+	)
 	if err != nil {
 		return respondError(r, err.Error())
 	}
 
 	// Convert back to 1-indexed for display
-	return respondQueueSeeked(r, position+1, track)
+	var description string
+	if loadTrackOutput.Track.URI != "" {
+		description = fmt.Sprintf(
+			"Jumped to position %d: [%s](%s).",
+			index+1,
+			loadTrackOutput.Track.Title,
+			loadTrackOutput.Track.URI,
+		)
+	} else {
+		description = fmt.Sprintf(
+			"Jumped to position %d: **%s**.",
+			index+1,
+			loadTrackOutput.Track.Title,
+		)
+	}
+
+	return r.Respond(&discordgo.InteractionResponse{
+		Type: discordgo.InteractionResponseChannelMessageWithSource,
+		Data: &discordgo.InteractionResponseData{
+			Embeds: []*discordgo.MessageEmbed{
+				{
+					Description: description,
+					Color:       colorSuccess,
+				},
+			},
+		},
+	})
 }
 
 // HandleLoop handles the /loop command.
-func (h *Handlers) HandleLoop(
+func (h *CommandHandlers) HandleLoop(
 	s *discordgo.Session,
 	i *discordgo.InteractionCreate,
 	r bot.Responder,
 ) error {
+	ctx := context.Background()
+
 	guildID, err := snowflake.Parse(i.GuildID)
 	if err != nil {
 		return respondError(r, "Invalid guild")
@@ -596,10 +811,8 @@ func (h *Handlers) HandleLoop(
 
 	notificationChannelID, err := snowflake.Parse(i.ChannelID)
 	if err != nil {
-		return respondError(r, "Invalid channel")
+		return respondError(r, "Invalid notification channel")
 	}
-
-	ctx := context.Background()
 
 	// Update notification channel (best-effort)
 	_ = h.notificationChannel.Set(ctx, usecases.SetNotificationChannelInput{
@@ -638,188 +851,8 @@ func (h *Handlers) HandleLoop(
 		newMode = output.NewMode
 	}
 
-	return respondLoopModeChanged(r, newMode)
-}
-
-// Response helpers.
-
-func respondError(r bot.Responder, message string) error {
-	return r.Respond(&discordgo.InteractionResponse{
-		Type: discordgo.InteractionResponseChannelMessageWithSource,
-		Data: &discordgo.InteractionResponseData{
-			Embeds: []*discordgo.MessageEmbed{
-				{
-					Title:       "Error",
-					Description: message,
-					Color:       colorError,
-				},
-			},
-		},
-	})
-}
-
-func respondJoined(r bot.Responder, voiceChannelID snowflake.ID) error {
-	return r.Respond(&discordgo.InteractionResponse{
-		Type: discordgo.InteractionResponseChannelMessageWithSource,
-		Data: &discordgo.InteractionResponseData{
-			Embeds: []*discordgo.MessageEmbed{
-				{
-					Description: fmt.Sprintf("Connected to <#%d>.", voiceChannelID),
-					Color:       colorSuccess,
-				},
-			},
-		},
-	})
-}
-
-func respondDisconnected(r bot.Responder) error {
-	return r.Respond(&discordgo.InteractionResponse{
-		Type: discordgo.InteractionResponseChannelMessageWithSource,
-		Data: &discordgo.InteractionResponseData{
-			Embeds: []*discordgo.MessageEmbed{
-				{
-					Description: "Disconnected.",
-					Color:       colorSuccess,
-				},
-			},
-		},
-	})
-}
-
-func respondStopped(r bot.Responder) error {
-	return r.Respond(&discordgo.InteractionResponse{
-		Type: discordgo.InteractionResponseChannelMessageWithSource,
-		Data: &discordgo.InteractionResponseData{
-			Embeds: []*discordgo.MessageEmbed{
-				{
-					Description: "Stopped playback.",
-					Color:       colorSuccess,
-				},
-			},
-		},
-	})
-}
-
-func respondPaused(r bot.Responder) error {
-	return r.Respond(&discordgo.InteractionResponse{
-		Type: discordgo.InteractionResponseChannelMessageWithSource,
-		Data: &discordgo.InteractionResponseData{
-			Embeds: []*discordgo.MessageEmbed{
-				{
-					Description: "Paused playback.",
-					Color:       colorSuccess,
-				},
-			},
-		},
-	})
-}
-
-func respondResumed(r bot.Responder) error {
-	return r.Respond(&discordgo.InteractionResponse{
-		Type: discordgo.InteractionResponseChannelMessageWithSource,
-		Data: &discordgo.InteractionResponseData{
-			Embeds: []*discordgo.MessageEmbed{
-				{
-					Description: "Resumed playback.",
-					Color:       colorSuccess,
-				},
-			},
-		},
-	})
-}
-
-func respondSkipped(r bot.Responder) error {
-	return r.Respond(&discordgo.InteractionResponse{
-		Type: discordgo.InteractionResponseChannelMessageWithSource,
-		Data: &discordgo.InteractionResponseData{
-			Embeds: []*discordgo.MessageEmbed{
-				{
-					Description: "Skipped.",
-					Color:       colorSuccess,
-				},
-			},
-		},
-	})
-}
-
-func respondQueueRemoved(r bot.Responder, track *usecases.TrackInfo) error {
 	var description string
-	if track.URI != "" {
-		description = fmt.Sprintf("Removed [%s](%s).", track.Title, track.URI)
-	} else {
-		description = fmt.Sprintf("Removed **%s**.", track.Title)
-	}
-
-	return r.Respond(&discordgo.InteractionResponse{
-		Type: discordgo.InteractionResponseChannelMessageWithSource,
-		Data: &discordgo.InteractionResponseData{
-			Embeds: []*discordgo.MessageEmbed{
-				{
-					Description: description,
-					Color:       colorSuccess,
-				},
-			},
-		},
-	})
-}
-
-func respondQueueCleared(r bot.Responder) error {
-	return r.Respond(&discordgo.InteractionResponse{
-		Type: discordgo.InteractionResponseChannelMessageWithSource,
-		Data: &discordgo.InteractionResponseData{
-			Embeds: []*discordgo.MessageEmbed{
-				{
-					Description: "Cleared the queue.",
-					Color:       colorSuccess,
-				},
-			},
-		},
-	})
-}
-
-func respondQueueRestarted(r bot.Responder) error {
-	return r.Respond(&discordgo.InteractionResponse{
-		Type: discordgo.InteractionResponseChannelMessageWithSource,
-		Data: &discordgo.InteractionResponseData{
-			Embeds: []*discordgo.MessageEmbed{
-				{
-					Description: "Restarted the queue from the beginning.",
-					Color:       colorSuccess,
-				},
-			},
-		},
-	})
-}
-
-func respondQueueSeeked(r bot.Responder, position int, track *usecases.TrackInfo) error {
-	var description string
-	if track.URI != "" {
-		description = fmt.Sprintf(
-			"Jumped to position %d: [%s](%s).",
-			position,
-			track.Title,
-			track.URI,
-		)
-	} else {
-		description = fmt.Sprintf("Jumped to position %d: **%s**.", position, track.Title)
-	}
-
-	return r.Respond(&discordgo.InteractionResponse{
-		Type: discordgo.InteractionResponseChannelMessageWithSource,
-		Data: &discordgo.InteractionResponseData{
-			Embeds: []*discordgo.MessageEmbed{
-				{
-					Description: description,
-					Color:       colorSuccess,
-				},
-			},
-		},
-	})
-}
-
-func respondLoopModeChanged(r bot.Responder, mode string) error {
-	var description string
-	switch mode {
+	switch newMode {
 	case "track":
 		description = "Now looping the current track."
 	case "queue":
@@ -841,12 +874,29 @@ func respondLoopModeChanged(r bot.Responder, mode string) error {
 	})
 }
 
-func respondQueueAdded(r bot.Responder, track *usecases.TrackInfo) error {
+// Response helpers.
+
+func respondError(r bot.Responder, message string) error {
+	return r.Respond(&discordgo.InteractionResponse{
+		Type: discordgo.InteractionResponseChannelMessageWithSource,
+		Data: &discordgo.InteractionResponseData{
+			Embeds: []*discordgo.MessageEmbed{
+				{
+					Title:       "Error",
+					Description: message,
+					Color:       colorError,
+				},
+			},
+		},
+	})
+}
+
+func respondQueueRemoved(r bot.Responder, track usecases.TrackInfo) error {
 	var description string
 	if track.URI != "" {
-		description = fmt.Sprintf("Added [%s](%s) to the queue.", track.Title, track.URI)
+		description = fmt.Sprintf("Removed [%s](%s).", track.Title, track.URI)
 	} else {
-		description = fmt.Sprintf("Added **%s** to the queue.", track.Title)
+		description = fmt.Sprintf("Removed **%s**.", track.Title)
 	}
 
 	return r.Respond(&discordgo.InteractionResponse{
@@ -858,104 +908,13 @@ func respondQueueAdded(r bot.Responder, track *usecases.TrackInfo) error {
 					Color:       colorSuccess,
 				},
 			},
-		},
-	})
-}
-
-func respondPlaylistAdded(r bot.Responder, playlistName string, trackCount int) error {
-	description := fmt.Sprintf(
-		"Added **%d tracks** from playlist **%s** to the queue.",
-		trackCount,
-		playlistName,
-	)
-
-	return r.Respond(&discordgo.InteractionResponse{
-		Type: discordgo.InteractionResponseChannelMessageWithSource,
-		Data: &discordgo.InteractionResponseData{
-			Embeds: []*discordgo.MessageEmbed{
-				{
-					Description: description,
-					Color:       colorSuccess,
-				},
-			},
-		},
-	})
-}
-
-func respondQueueList(
-	r bot.Responder,
-	output *usecases.QueueListOutput,
-	tracks map[string]*usecases.TrackInfo,
-) error {
-	// Build title with loop mode indicator
-	title := "Queue"
-	switch output.LoopMode {
-	case "track":
-		title = "Queue \U0001F502" // 🔂
-	case "queue":
-		title = "Queue \U0001F501" // 🔁
-	}
-
-	embed := &discordgo.MessageEmbed{
-		Title: title,
-	}
-
-	// Handle empty queue
-	if output.TotalTracks == 0 {
-		embed.Description = "Queue is empty."
-		embed.Footer = &discordgo.MessageEmbedFooter{
-			Text: fmt.Sprintf("Page %d/%d", output.CurrentPage, output.TotalPages),
-		}
-		return r.Respond(&discordgo.InteractionResponse{
-			Type: discordgo.InteractionResponseChannelMessageWithSource,
-			Data: &discordgo.InteractionResponseData{
-				Embeds: []*discordgo.MessageEmbed{embed},
-			},
-		})
-	}
-
-	// Build description with sections
-	var sb strings.Builder
-	displayIndex := output.PageStart + 1 // 1-indexed for display
-
-	if len(output.PlayedTrackIDs) > 0 {
-		sb.WriteString("### Played\n")
-		for _, id := range output.PlayedTrackIDs {
-			writeTrackLine(&sb, displayIndex, tracks[id])
-			displayIndex++
-		}
-	}
-
-	if output.CurrentTrackID != "" {
-		sb.WriteString("### Now Playing\n")
-		writeTrackLine(&sb, displayIndex, tracks[output.CurrentTrackID])
-		displayIndex++
-	}
-
-	if len(output.UpcomingTrackIDs) > 0 {
-		sb.WriteString("### Up Next\n")
-		for _, id := range output.UpcomingTrackIDs {
-			writeTrackLine(&sb, displayIndex, tracks[id])
-			displayIndex++
-		}
-	}
-
-	embed.Description = sb.String()
-	embed.Footer = &discordgo.MessageEmbedFooter{
-		Text: fmt.Sprintf("Page %d/%d", output.CurrentPage, output.TotalPages),
-	}
-
-	return r.Respond(&discordgo.InteractionResponse{
-		Type: discordgo.InteractionResponseChannelMessageWithSource,
-		Data: &discordgo.InteractionResponseData{
-			Embeds: []*discordgo.MessageEmbed{embed},
 		},
 	})
 }
 
 // writeTrackLine writes a single track line to the string builder.
 // Escapes period to prevent Discord markdown list formatting.
-func writeTrackLine(sb *strings.Builder, displayIndex int, track *usecases.TrackInfo) {
+func writeTrackLine(sb *strings.Builder, displayIndex int, track usecases.TrackInfo) {
 	if track.URI != "" {
 		fmt.Fprintf(
 			sb,
