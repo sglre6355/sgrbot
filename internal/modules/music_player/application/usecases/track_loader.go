@@ -22,8 +22,8 @@ type TrackInfo struct {
 }
 
 // toTrackInfo converts a domain.Track to a TrackInfo DTO.
-func toTrackInfo(t *domain.Track) *TrackInfo {
-	return &TrackInfo{
+func toTrackInfo(t domain.Track) TrackInfo {
+	return TrackInfo{
 		ID:         t.ID.String(),
 		Title:      t.Title,
 		Artist:     t.Artist,
@@ -47,13 +47,54 @@ func NewTrackLoaderService(trackResolver ports.TrackProvider) *TrackLoaderServic
 	}
 }
 
+type LoadTrackInput struct {
+	TrackID string
+}
+
+type LoadTrackOutput struct {
+	Track TrackInfo
+}
+
 // LoadTrack loads a single track by ID and returns its info.
-func (s *TrackLoaderService) LoadTrack(ctx context.Context, trackID string) (*TrackInfo, error) {
-	track, err := s.trackResolver.LoadTrack(ctx, domain.TrackID(trackID))
+func (s *TrackLoaderService) LoadTrack(
+	ctx context.Context,
+	input LoadTrackInput,
+) (LoadTrackOutput, error) {
+	track, err := s.trackResolver.LoadTrack(ctx, domain.TrackID(input.TrackID))
 	if err != nil {
-		return nil, err
+		return LoadTrackOutput{}, err
 	}
-	return toTrackInfo(&track), nil
+	return LoadTrackOutput{Track: toTrackInfo(track)}, nil
+}
+
+type LoadTracksInput struct {
+	TrackIDs []string
+}
+
+type LoadTracksOutput struct {
+	Tracks []TrackInfo
+}
+
+// LoadTracks loads multiple tracks by ID and returns their info.
+func (s *TrackLoaderService) LoadTracks(
+	ctx context.Context,
+	input LoadTracksInput,
+) (LoadTracksOutput, error) {
+	trackIDs := make([]domain.TrackID, len(input.TrackIDs))
+	for i, id := range input.TrackIDs {
+		trackIDs[i] = domain.TrackID(id)
+	}
+
+	tracks, err := s.trackResolver.LoadTracks(ctx, trackIDs...)
+	if err != nil {
+		return LoadTracksOutput{}, err
+	}
+
+	trackInfos := make([]TrackInfo, len(input.TrackIDs))
+	for i, track := range tracks {
+		trackInfos[i] = toTrackInfo(track)
+	}
+	return LoadTracksOutput{Tracks: trackInfos}, nil
 }
 
 // ResolveQueryInput contains the input for the ResolveQuery use case.
@@ -63,7 +104,7 @@ type ResolveQueryInput struct {
 
 // ResolveQueryOutput contains the result of the ResolveQuery use case.
 type ResolveQueryOutput struct {
-	Tracks       []*TrackInfo
+	Tracks       []TrackInfo
 	IsPlaylist   bool
 	PlaylistName string
 }
@@ -83,15 +124,9 @@ func (s *TrackLoaderService) ResolveQuery(
 		return nil, ErrNoResults
 	}
 
-	// For playlists, return all tracks; otherwise just the first one
-	tracks := result.Tracks
-	if result.Type != domain.TrackListTypePlaylist {
-		tracks = tracks[:1]
-	}
-
-	infos := make([]*TrackInfo, len(tracks))
-	for i := range tracks {
-		infos[i] = toTrackInfo(&tracks[i])
+	infos := make([]TrackInfo, len(result.Tracks))
+	for i := range result.Tracks {
+		infos[i] = toTrackInfo(result.Tracks[i])
 	}
 
 	var playlistName string
@@ -103,69 +138,5 @@ func (s *TrackLoaderService) ResolveQuery(
 		Tracks:       infos,
 		IsPlaylist:   result.Type == domain.TrackListTypePlaylist,
 		PlaylistName: playlistName,
-	}, nil
-}
-
-// PreviewQueryInput contains the input for previewing a query into track info.
-type PreviewQueryInput struct {
-	Query string
-	Limit int // Max individual tracks to return (default 24)
-}
-
-// PreviewQueryOutput contains the result of previewing a query.
-type PreviewQueryOutput struct {
-	Tracks       []TrackInfo
-	IsPlaylist   bool
-	PlaylistName string
-	TotalTracks  int
-}
-
-// PreviewQuery resolves a query into track information without creating domain tracks.
-// For playlists, returns playlist metadata and a limited list of individual tracks.
-// For non-playlists, returns the tracks normally.
-func (s *TrackLoaderService) PreviewQuery(
-	ctx context.Context,
-	input PreviewQueryInput,
-) (*PreviewQueryOutput, error) {
-	if s.trackResolver == nil {
-		return &PreviewQueryOutput{}, nil
-	}
-
-	result, err := s.trackResolver.ResolveQuery(ctx, input.Query)
-	if err != nil {
-		return &PreviewQueryOutput{}, nil
-	}
-
-	if len(result.Tracks) == 0 {
-		return &PreviewQueryOutput{}, nil
-	}
-
-	// Determine limit (default 24 to leave room for playlist option)
-	limit := input.Limit
-	if limit <= 0 {
-		limit = 24
-	}
-
-	// Limit tracks
-	tracks := result.Tracks
-	if len(tracks) > limit {
-		tracks = tracks[:limit]
-	}
-
-	infos := make([]TrackInfo, len(tracks))
-	for i := range tracks {
-		infos[i] = *toTrackInfo(&tracks[i])
-	}
-
-	var playlistName string
-	if result.Name != nil {
-		playlistName = *result.Name
-	}
-
-	return &PreviewQueryOutput{
-		IsPlaylist:   result.Type == domain.TrackListTypePlaylist,
-		PlaylistName: playlistName,
-		TotalTracks:  len(result.Tracks),
-		Tracks:       infos,
 	}, nil
 }

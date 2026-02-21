@@ -24,7 +24,7 @@ var _ bot.ConfigurableModule = (*MusicPlayerModule)(nil)
 // MusicPlayerModule provides music playback commands.
 type MusicPlayerModule struct {
 	config          *Config
-	handlers        *discord.Handlers
+	commandHandlers *discord.CommandHandlers
 	autocomplete    *discord.AutocompleteHandler
 	eventHandlers   *discord.EventHandlers
 	lavalinkAdapter *infrastructure.LavalinkAdapter
@@ -52,15 +52,15 @@ func (m *MusicPlayerModule) Commands() []*discordgo.ApplicationCommand {
 // CommandHandlers returns the command handlers for this module.
 func (m *MusicPlayerModule) CommandHandlers() map[string]bot.InteractionHandler {
 	return map[string]bot.InteractionHandler{
-		"join":   m.handlers.HandleJoin,
-		"leave":  m.handlers.HandleLeave,
-		"play":   m.handlers.HandlePlay,
-		"stop":   m.handlers.HandleStop,
-		"pause":  m.handlers.HandlePause,
-		"resume": m.handlers.HandleResume,
-		"skip":   m.handlers.HandleSkip,
-		"queue":  m.handlers.HandleQueue,
-		"loop":   m.handlers.HandleLoop,
+		"join":   m.commandHandlers.HandleJoin,
+		"leave":  m.commandHandlers.HandleLeave,
+		"play":   m.commandHandlers.HandlePlay,
+		"stop":   m.commandHandlers.HandleStop,
+		"pause":  m.commandHandlers.HandlePause,
+		"resume": m.commandHandlers.HandleResume,
+		"skip":   m.commandHandlers.HandleSkip,
+		"queue":  m.commandHandlers.HandleQueue,
+		"loop":   m.commandHandlers.HandleLoop,
 	}
 }
 
@@ -109,7 +109,7 @@ func (m *MusicPlayerModule) initWithoutLavalink() error {
 	queue := usecases.NewQueueService(repo, nil)
 	trackLoader := usecases.NewTrackLoaderService(nil)
 
-	m.handlers = discord.NewHandlers(nil, nil, queue, nil, nil)
+	m.commandHandlers = discord.NewCommandHandlers(nil, nil, queue, nil, nil)
 	m.autocomplete = discord.NewAutocompleteHandler(queue, trackLoader)
 
 	return nil
@@ -192,7 +192,7 @@ func (m *MusicPlayerModule) initWithLavalink(deps bot.ModuleDependencies) error 
 	if err != nil {
 		return err
 	}
-	m.handlers = discord.NewHandlers(
+	m.commandHandlers = discord.NewCommandHandlers(
 		voiceChannel,
 		playback,
 		queue,

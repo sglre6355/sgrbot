@@ -28,8 +28,8 @@ var (
 	// ErrNothingToClear is returned when there are no tracks to clear (only current track exists).
 	ErrNothingToClear = errors.New("nothing to clear")
 
-	// ErrInvalidPosition is returned when an invalid queue position is specified.
-	ErrInvalidPosition = errors.New("invalid queue position")
+	// ErrInvalidIndex is returned when an invalid queue position is specified.
+	ErrInvalidIndex = errors.New("invalid queue index")
 
 	// ErrIsCurrentTrack is returned when trying to remove the currently playing track.
 	// The handler should delegate to Skip instead.
