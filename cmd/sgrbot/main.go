@@ -15,10 +15,11 @@ import (
 var version = "dev"
 
 func main() {
-	// Configure JSON logging
-	slog.SetDefault(slog.New(slog.NewJSONHandler(os.Stdout, nil)))
-
-	slog.Info("starting sgrbot", "version", version)
+	// Configure JSON logging with default level
+	logLevel := &slog.LevelVar{}
+	slog.SetDefault(slog.New(slog.NewJSONHandler(os.Stdout, &slog.HandlerOptions{
+		Level: logLevel,
+	})))
 
 	// Load configuration
 	cfg, err := bot.LoadConfig()
@@ -26,6 +27,11 @@ func main() {
 		slog.Error("failed to load config", "error", err)
 		os.Exit(1)
 	}
+
+	// Apply configured log level
+	logLevel.Set(cfg.LogLevel)
+
+	slog.Info("starting sgrbot", "version", version)
 
 	// Create and configure bot
 	b := bot.NewBot(cfg)

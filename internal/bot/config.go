@@ -1,12 +1,15 @@
 package bot
 
 import (
+	"log/slog"
+
 	"github.com/caarlos0/env/v11"
 )
 
 // Config holds the bot configuration loaded from environment variables.
 type Config struct {
-	DiscordToken string `env:"DISCORD_TOKEN,notEmpty"`
+	DiscordToken string     `env:"DISCORD_TOKEN,notEmpty"`
+	LogLevel     slog.Level `env:"LOG_LEVEL"              envDefault:"info"`
 }
 
 // LoadConfig loads configuration from environment variables.

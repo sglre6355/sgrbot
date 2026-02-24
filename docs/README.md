@@ -118,6 +118,7 @@ type ConfigurableModule interface {
 Environment variables:
 
 - `DISCORD_TOKEN`: (required)
+- `LOG_LEVEL`: Log level (`debug`, `info`, `warn`, `error`). Defaults to `info`.
 
 ## Running the Bot
 
