@@ -1,0 +1,5 @@
+builds:
+  - id: sgrbot
+    main: ./cmd/sgrbot
+    ldflags:
+      - -X main.version={{ .Env.VERSION }}
