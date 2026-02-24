@@ -156,6 +156,53 @@ func TestQueue_Prepend(t *testing.T) {
 	}
 }
 
+func TestQueue_Shuffle(t *testing.T) {
+	t.Run("preserves all entries", func(t *testing.T) {
+		q := NewQueue()
+		q.Append(entry("a"), entry("b"), entry("c"), entry("d"), entry("e"))
+
+		q.Shuffle()
+
+		if q.Len() != 5 {
+			t.Fatalf("expected length 5, got %d", q.Len())
+		}
+
+		// Verify all original entries are still present
+		seen := make(map[TrackID]bool)
+		for _, e := range q.List() {
+			seen[e.TrackID] = true
+		}
+		for _, id := range []TrackID{"a", "b", "c", "d", "e"} {
+			if !seen[id] {
+				t.Errorf("missing entry %q after shuffle", id)
+			}
+		}
+	})
+
+	t.Run("empty queue is no-op", func(t *testing.T) {
+		q := NewQueue()
+		q.Shuffle() // should not panic
+		if q.Len() != 0 {
+			t.Errorf("expected empty queue, got length %d", q.Len())
+		}
+	})
+
+	t.Run("single entry queue is no-op", func(t *testing.T) {
+		q := NewQueue()
+		q.Append(entry("only"))
+
+		q.Shuffle()
+
+		if q.Len() != 1 {
+			t.Fatalf("expected length 1, got %d", q.Len())
+		}
+		got, _ := q.Get(0)
+		if got.TrackID != "only" {
+			t.Errorf("expected track 'only', got %q", got.TrackID)
+		}
+	})
+}
+
 func TestQueue_Append(t *testing.T) {
 	q := NewQueue()
 	trackID1 := TrackID("track-1")

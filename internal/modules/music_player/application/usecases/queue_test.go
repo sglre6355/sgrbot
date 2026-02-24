@@ -776,6 +776,142 @@ func TestQueueService_Clear(t *testing.T) {
 	}
 }
 
+func TestQueueService_Shuffle(t *testing.T) {
+	guildID := snowflake.ID(1)
+	voiceChannelID := snowflake.ID(4)
+	notificationChannelID := snowflake.ID(3)
+
+	t.Run("not connected", func(t *testing.T) {
+		repo := newMockRepository()
+		publisher := &mockEventPublisher{}
+		service := NewQueueService(repo, publisher)
+
+		_, err := service.Shuffle(context.Background(), QueueShuffleInput{GuildID: guildID})
+		if err != ErrNotConnected {
+			t.Errorf("expected ErrNotConnected, got %v", err)
+		}
+	})
+
+	t.Run("empty queue", func(t *testing.T) {
+		repo := newMockRepository()
+		publisher := &mockEventPublisher{}
+		repo.createConnectedState(guildID, voiceChannelID, notificationChannelID)
+
+		service := NewQueueService(repo, publisher)
+		_, err := service.Shuffle(context.Background(), QueueShuffleInput{GuildID: guildID})
+		if err != ErrQueueEmpty {
+			t.Errorf("expected ErrQueueEmpty, got %v", err)
+		}
+	})
+
+	t.Run("playing with multiple tracks - current at index 0", func(t *testing.T) {
+		repo := newMockRepository()
+		publisher := &mockEventPublisher{}
+		state := repo.createConnectedState(guildID, voiceChannelID, notificationChannelID)
+		for _, id := range []string{"a", "b", "c", "d", "e"} {
+			state.Append(domain.QueueEntry{TrackID: domain.TrackID(id)})
+		}
+		state.SetPlaybackActive(true)
+		state.Seek(2) // playing "c"
+
+		service := NewQueueService(repo, publisher)
+		output, err := service.Shuffle(context.Background(), QueueShuffleInput{GuildID: guildID})
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+
+		if output.ShuffledCount != 5 {
+			t.Errorf("ShuffledCount = %d, want 5", output.ShuffledCount)
+		}
+
+		// Verify current track is at index 0
+		updatedState, _ := repo.Get(context.Background(), guildID)
+		if updatedState.CurrentIndex() != 0 {
+			t.Errorf("expected currentIndex 0, got %d", updatedState.CurrentIndex())
+		}
+		current := updatedState.Current()
+		if current == nil || current.TrackID != "c" {
+			t.Errorf("expected current track 'c', got %v", current)
+		}
+
+		// All entries preserved
+		seen := make(map[domain.TrackID]bool)
+		for _, e := range updatedState.List() {
+			seen[e.TrackID] = true
+		}
+		for _, id := range []domain.TrackID{"a", "b", "c", "d", "e"} {
+			if !seen[id] {
+				t.Errorf("missing entry %q after shuffle", id)
+			}
+		}
+
+		// No events published
+		if len(publisher.events) != 0 {
+			t.Errorf("expected 0 events, got %d", len(publisher.events))
+		}
+	})
+
+	t.Run("idle with tracks - shuffles all entries", func(t *testing.T) {
+		repo := newMockRepository()
+		publisher := &mockEventPublisher{}
+		state := repo.createConnectedState(guildID, voiceChannelID, notificationChannelID)
+		for _, id := range []string{"a", "b", "c", "d", "e"} {
+			state.Append(domain.QueueEntry{TrackID: domain.TrackID(id)})
+		}
+		// playback not active
+
+		service := NewQueueService(repo, publisher)
+		output, err := service.Shuffle(context.Background(), QueueShuffleInput{GuildID: guildID})
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+
+		if output.ShuffledCount != 5 {
+			t.Errorf("ShuffledCount = %d, want 5", output.ShuffledCount)
+		}
+
+		// All entries preserved
+		updatedState, _ := repo.Get(context.Background(), guildID)
+		seen := make(map[domain.TrackID]bool)
+		for _, e := range updatedState.List() {
+			seen[e.TrackID] = true
+		}
+		for _, id := range []domain.TrackID{"a", "b", "c", "d", "e"} {
+			if !seen[id] {
+				t.Errorf("missing entry %q after shuffle", id)
+			}
+		}
+
+		// No events published
+		if len(publisher.events) != 0 {
+			t.Errorf("expected 0 events, got %d", len(publisher.events))
+		}
+	})
+
+	t.Run("single track - success (no-op)", func(t *testing.T) {
+		repo := newMockRepository()
+		publisher := &mockEventPublisher{}
+		state := repo.createConnectedState(guildID, voiceChannelID, notificationChannelID)
+		state.Append(domain.QueueEntry{TrackID: domain.TrackID("only")})
+		state.SetPlaybackActive(true)
+
+		service := NewQueueService(repo, publisher)
+		output, err := service.Shuffle(context.Background(), QueueShuffleInput{GuildID: guildID})
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+
+		if output.ShuffledCount != 1 {
+			t.Errorf("ShuffledCount = %d, want 1", output.ShuffledCount)
+		}
+
+		// No events published
+		if len(publisher.events) != 0 {
+			t.Errorf("expected 0 events, got %d", len(publisher.events))
+		}
+	})
+}
+
 func TestQueueService_Restart(t *testing.T) {
 	guildID := snowflake.ID(1)
 	voiceChannelID := snowflake.ID(4)

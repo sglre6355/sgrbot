@@ -419,6 +419,8 @@ func (h *CommandHandlers) HandleQueue(
 		return h.handleQueueClear(s, i, r)
 	case "restart":
 		return h.handleQueueRestart(s, i, r)
+	case "shuffle":
+		return h.handleQueueShuffle(s, i, r)
 	case "seek":
 		return h.handleQueueSeek(s, i, r, subCmd.Options)
 	default:
@@ -711,6 +713,49 @@ func (h *CommandHandlers) handleQueueRestart(
 			Embeds: []*discordgo.MessageEmbed{
 				{
 					Description: "Restarted the queue from the beginning.",
+					Color:       colorSuccess,
+				},
+			},
+		},
+	})
+}
+
+func (h *CommandHandlers) handleQueueShuffle(
+	_ *discordgo.Session,
+	i *discordgo.InteractionCreate,
+	r bot.Responder,
+) error {
+	ctx := context.Background()
+
+	guildID, err := snowflake.Parse(i.GuildID)
+	if err != nil {
+		return respondError(r, "Invalid guild")
+	}
+
+	notificationChannelID, err := snowflake.Parse(i.ChannelID)
+	if err != nil {
+		return respondError(r, "Invalid notification channel")
+	}
+
+	// Update notification channel (best-effort)
+	_ = h.notificationChannel.Set(ctx, usecases.SetNotificationChannelInput{
+		GuildID:   guildID,
+		ChannelID: notificationChannelID,
+	})
+
+	_, err = h.queue.Shuffle(ctx, usecases.QueueShuffleInput{
+		GuildID: guildID,
+	})
+	if err != nil {
+		return respondError(r, err.Error())
+	}
+
+	return r.Respond(&discordgo.InteractionResponse{
+		Type: discordgo.InteractionResponseChannelMessageWithSource,
+		Data: &discordgo.InteractionResponseData{
+			Embeds: []*discordgo.MessageEmbed{
+				{
+					Description: "Shuffled the queue.",
 					Color:       colorSuccess,
 				},
 			},

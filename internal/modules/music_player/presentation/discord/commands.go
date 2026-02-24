@@ -99,6 +99,11 @@ func Commands() []*discordgo.ApplicationCommand {
 				},
 				{
 					Type:        discordgo.ApplicationCommandOptionSubCommand,
+					Name:        "shuffle",
+					Description: "Shuffle the queue",
+				},
+				{
+					Type:        discordgo.ApplicationCommandOptionSubCommand,
 					Name:        "seek",
 					Description: "Jump to a specific position in the queue",
 					Options: []*discordgo.ApplicationCommandOption{
