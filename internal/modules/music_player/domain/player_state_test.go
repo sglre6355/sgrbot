@@ -764,6 +764,91 @@ func TestPlayerState_QueuePrepend(t *testing.T) {
 	})
 }
 
+func TestPlayerState_Shuffle(t *testing.T) {
+	t.Run("active playback - current track moves to index 0", func(t *testing.T) {
+		state := newTestPlayerState()
+		state.Append(testEntry("a"), testEntry("b"), testEntry("c"), testEntry("d"), testEntry("e"))
+		state.SetPlaybackActive(true)
+		state.Seek(2) // playing "c"
+
+		state.Shuffle()
+
+		// Current track should now be at index 0
+		if state.CurrentIndex() != 0 {
+			t.Errorf("expected currentIndex 0, got %d", state.CurrentIndex())
+		}
+		current := state.Current()
+		if current == nil || current.TrackID != "c" {
+			t.Errorf("expected current track 'c', got %v", current)
+		}
+
+		// All entries should be preserved
+		if state.Len() != 5 {
+			t.Fatalf("expected 5 entries, got %d", state.Len())
+		}
+		seen := make(map[TrackID]bool)
+		for _, e := range state.List() {
+			seen[e.TrackID] = true
+		}
+		for _, id := range []TrackID{"a", "b", "c", "d", "e"} {
+			if !seen[id] {
+				t.Errorf("missing entry %q after shuffle", id)
+			}
+		}
+	})
+
+	t.Run("idle - all entries shuffled, currentIndex unchanged", func(t *testing.T) {
+		state := newTestPlayerState()
+		state.Append(testEntry("a"), testEntry("b"), testEntry("c"), testEntry("d"), testEntry("e"))
+		// playback not active
+
+		state.Shuffle()
+
+		if state.CurrentIndex() != 0 {
+			t.Errorf("expected currentIndex 0, got %d", state.CurrentIndex())
+		}
+		if state.Len() != 5 {
+			t.Fatalf("expected 5 entries, got %d", state.Len())
+		}
+		seen := make(map[TrackID]bool)
+		for _, e := range state.List() {
+			seen[e.TrackID] = true
+		}
+		for _, id := range []TrackID{"a", "b", "c", "d", "e"} {
+			if !seen[id] {
+				t.Errorf("missing entry %q after shuffle", id)
+			}
+		}
+	})
+
+	t.Run("empty queue is no-op", func(t *testing.T) {
+		state := newTestPlayerState()
+		state.Shuffle() // should not panic
+		if state.Len() != 0 {
+			t.Errorf("expected empty queue, got %d", state.Len())
+		}
+	})
+
+	t.Run("single entry is no-op", func(t *testing.T) {
+		state := newTestPlayerState()
+		state.Append(testEntry("only"))
+		state.SetPlaybackActive(true)
+
+		state.Shuffle()
+
+		if state.Len() != 1 {
+			t.Fatalf("expected 1 entry, got %d", state.Len())
+		}
+		if state.CurrentIndex() != 0 {
+			t.Errorf("expected currentIndex 0, got %d", state.CurrentIndex())
+		}
+		current := state.Current()
+		if current == nil || current.TrackID != "only" {
+			t.Errorf("expected current track 'only', got %v", current)
+		}
+	})
+}
+
 func TestPlayerState_IsAtLast(t *testing.T) {
 	state := newTestPlayerState()
 

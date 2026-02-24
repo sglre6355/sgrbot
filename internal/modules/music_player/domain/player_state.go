@@ -265,6 +265,27 @@ func (p *PlayerState) Remove(index int) (*QueueEntry, error) {
 	return entry, nil
 }
 
+// Shuffle randomizes the order of entries in the queue.
+// When playback is active, the currently playing track is moved to index 0
+// so playback continues uninterrupted.
+func (p *PlayerState) Shuffle() {
+	current := p.Current() // nil if idle
+	var savedEntry QueueEntry
+	if current != nil {
+		savedEntry = *current // copy value before shuffle mutates the slice
+	}
+	p.queue.Shuffle()
+	if current != nil {
+		for i, e := range p.queue.entries {
+			if e == savedEntry {
+				p.queue.entries[0], p.queue.entries[i] = p.queue.entries[i], p.queue.entries[0]
+				break
+			}
+		}
+		p.currentIndex = 0
+	}
+}
+
 // Clear removes all entries from the queue and resets playback state.
 func (p *PlayerState) Clear() {
 	p.queue.Clear()

@@ -311,6 +311,42 @@ func (q *QueueService) Clear(
 	}, nil
 }
 
+// QueueShuffleInput contains the input for the QueueShuffle use case.
+type QueueShuffleInput struct {
+	GuildID snowflake.ID
+}
+
+// QueueShuffleOutput contains the result of the QueueShuffle use case.
+type QueueShuffleOutput struct {
+	ShuffledCount int
+}
+
+// Shuffle randomizes the order of tracks in the queue.
+// When playback is active, the current track remains at the front.
+func (q *QueueService) Shuffle(
+	ctx context.Context,
+	input QueueShuffleInput,
+) (*QueueShuffleOutput, error) {
+	state, err := q.playerStates.Get(ctx, input.GuildID)
+	if err != nil {
+		return nil, ErrNotConnected
+	}
+
+	if state.IsEmpty() {
+		return nil, ErrQueueEmpty
+	}
+
+	state.Shuffle()
+
+	if err := q.playerStates.Save(ctx, state); err != nil {
+		return nil, err
+	}
+
+	return &QueueShuffleOutput{
+		ShuffledCount: state.Len(),
+	}, nil
+}
+
 // QueueRestartInput contains the input for the QueueRestart use case.
 type QueueRestartInput struct {
 	GuildID snowflake.ID

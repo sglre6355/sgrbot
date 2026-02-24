@@ -3,6 +3,7 @@ package domain
 import (
 	"context"
 	"errors"
+	"math/rand/v2"
 )
 
 // QueueID uniquely identifies a queue.
@@ -76,6 +77,13 @@ func (q *Queue) Remove(index int) (*QueueEntry, error) {
 	q.entries = append(q.entries[:index], q.entries[index+1:]...)
 
 	return &entry, nil
+}
+
+// Shuffle randomizes the order of entries in the queue.
+func (q *Queue) Shuffle() {
+	rand.Shuffle(len(q.entries), func(i, j int) {
+		q.entries[i], q.entries[j] = q.entries[j], q.entries[i]
+	})
 }
 
 // Clear removes all entries from the queue.
