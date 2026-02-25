@@ -4,7 +4,6 @@ import (
 	"context"
 	"fmt"
 	"log/slog"
-	"math/rand/v2"
 	"sort"
 
 	"github.com/sglre6355/sgrbot/internal/modules/music_player/application/ports"
@@ -13,9 +12,6 @@ import (
 
 // Ensure TrackRecommenderAdapter implements required ports.
 var _ ports.TrackRecommender = (*TrackRecommenderAdapter)(nil)
-
-// maxMixSeeds is the maximum number of YouTube seeds to sample for mix playlists.
-const maxMixSeeds = 3
 
 // TrackRecommenderAdapter recommends tracks using YouTube Mix playlists.
 type TrackRecommenderAdapter struct {
@@ -30,7 +26,8 @@ func NewTrackRecommenderAdapter(trackProvider ports.TrackProvider) *TrackRecomme
 }
 
 // Recommend returns up to limit recommended tracks based on the given seed track IDs.
-// Tracks with IDs in the exclude list are also filtered out.
+// Tracks with IDs in the exclude list are also filtered out. Seeds should be
+// YouTube track IDs so they can be used for YouTube Mix playlists.
 // It uses YouTube Mix playlists (RD{trackID}) to find related tracks, then ranks
 // them by how many mixes they appear in (overlap score).
 func (a *TrackRecommenderAdapter) Recommend(
@@ -43,12 +40,6 @@ func (a *TrackRecommenderAdapter) Recommend(
 		return []domain.Track{}, nil
 	}
 
-	// Load track metadata for all seeds to find YouTube-sourced tracks
-	tracks, err := a.trackProvider.LoadTracks(ctx, seeds...)
-	if err != nil {
-		return nil, fmt.Errorf("failed to load seed tracks: %w", err)
-	}
-
 	// Build exclude set from all seed IDs and explicit excludes
 	excludeSet := make(map[domain.TrackID]struct{}, len(seeds)+len(exclude))
 	for _, id := range seeds {
@@ -58,46 +49,25 @@ func (a *TrackRecommenderAdapter) Recommend(
 		excludeSet[id] = struct{}{}
 	}
 
-	// Filter to YouTube-sourced tracks
-	var ytTracks []domain.Track
-	for _, t := range tracks {
-		if t.Source == domain.TrackSourceYouTube {
-			ytTracks = append(ytTracks, t)
-		}
-	}
-
-	if len(ytTracks) == 0 {
-		return []domain.Track{}, nil
-	}
-
-	// Randomly sample up to maxMixSeeds YouTube seeds
-	sampled := ytTracks
-	if len(sampled) > maxMixSeeds {
-		rand.Shuffle(len(sampled), func(i, j int) {
-			sampled[i], sampled[j] = sampled[j], sampled[i]
-		})
-		sampled = sampled[:maxMixSeeds]
-	}
-
-	// For each sampled seed, load the YouTube Mix playlist
+	// For each seed, load the YouTube Mix playlist
 	type scoredTrack struct {
 		track domain.Track
 		score int
 	}
 	trackScores := make(map[domain.TrackID]*scoredTrack)
 
-	for _, seed := range sampled {
+	for _, seed := range seeds {
 		mixURL := fmt.Sprintf(
 			"https://www.youtube.com/watch?v=%s&list=RD%s",
-			seed.ID.String(),
-			seed.ID.String(),
+			seed.String(),
+			seed.String(),
 		)
 
 		trackList, err := a.trackProvider.ResolveQuery(ctx, mixURL)
 		if err != nil {
 			slog.Debug(
 				"failed to load YouTube Mix",
-				"seed", seed.ID,
+				"seed", seed,
 				"error", err,
 			)
 			continue
