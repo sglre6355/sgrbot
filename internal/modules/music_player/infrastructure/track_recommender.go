@@ -30,11 +30,13 @@ func NewTrackRecommenderAdapter(trackProvider ports.TrackProvider) *TrackRecomme
 }
 
 // Recommend returns up to limit recommended tracks based on the given seed track IDs.
+// Tracks with IDs in the exclude list are also filtered out.
 // It uses YouTube Mix playlists (RD{trackID}) to find related tracks, then ranks
 // them by how many mixes they appear in (overlap score).
 func (a *TrackRecommenderAdapter) Recommend(
 	ctx context.Context,
 	seeds []domain.TrackID,
+	exclude []domain.TrackID,
 	limit int,
 ) ([]domain.Track, error) {
 	if len(seeds) == 0 || limit <= 0 {
@@ -47,9 +49,12 @@ func (a *TrackRecommenderAdapter) Recommend(
 		return nil, fmt.Errorf("failed to load seed tracks: %w", err)
 	}
 
-	// Build exclude set from all seed IDs
-	excludeSet := make(map[domain.TrackID]struct{}, len(seeds))
+	// Build exclude set from all seed IDs and explicit excludes
+	excludeSet := make(map[domain.TrackID]struct{}, len(seeds)+len(exclude))
 	for _, id := range seeds {
+		excludeSet[id] = struct{}{}
+	}
+	for _, id := range exclude {
 		excludeSet[id] = struct{}{}
 	}
 

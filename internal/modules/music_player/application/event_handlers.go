@@ -193,18 +193,19 @@ func (h *PlaybackEventHandler) tryAutoPlay(
 	ctx context.Context,
 	state *domain.PlayerState,
 ) bool {
-	// Collect all track IDs from queue as seeds
+	// Collect seed and exclude track IDs from queue
 	allEntries := state.List()
 	seeds := make([]domain.TrackID, 0)
+	exclude := make([]domain.TrackID, 0)
 	for _, entry := range allEntries {
 		if entry.IsAutoPlay {
-			continue
+			exclude = append(exclude, entry.TrackID)
+		} else {
+			seeds = append(seeds, entry.TrackID)
 		}
-
-		seeds = append(seeds, entry.TrackID)
 	}
 
-	tracks, err := h.recommender.Recommend(ctx, seeds, 1)
+	tracks, err := h.recommender.Recommend(ctx, seeds, exclude, 1)
 	if err != nil {
 		slog.Warn(
 			"auto-play recommendation failed",
