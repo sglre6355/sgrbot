@@ -422,33 +422,23 @@ func (q *QueueService) Seek(
 	return &QueueSeekOutput{TrackID: entry.TrackID.String()}, nil
 }
 
-// ToggleAutoPlayInput contains the input for the ToggleAutoPlay use case.
-type ToggleAutoPlayInput struct {
+// SetAutoPlayInput contains the input for the SetAutoPlay use case.
+type SetAutoPlayInput struct {
 	GuildID snowflake.ID
-}
-
-// ToggleAutoPlayOutput contains the result of the ToggleAutoPlay use case.
-type ToggleAutoPlayOutput struct {
 	Enabled bool
 }
 
-// ToggleAutoPlay toggles auto-play on/off for the guild's player.
-func (q *QueueService) ToggleAutoPlay(
+// SetAutoPlay sets the auto-play mode for the guild's player.
+func (q *QueueService) SetAutoPlay(
 	ctx context.Context,
-	input ToggleAutoPlayInput,
-) (*ToggleAutoPlayOutput, error) {
+	input SetAutoPlayInput,
+) error {
 	state, err := q.playerStates.Get(ctx, input.GuildID)
 	if err != nil {
-		return nil, ErrNotConnected
+		return ErrNotConnected
 	}
 
-	state.SetAutoPlayEnabled(!state.IsAutoPlayEnabled())
+	state.SetAutoPlayEnabled(input.Enabled)
 
-	if err := q.playerStates.Save(ctx, state); err != nil {
-		return nil, err
-	}
-
-	return &ToggleAutoPlayOutput{
-		Enabled: state.IsAutoPlayEnabled(),
-	}, nil
+	return q.playerStates.Save(ctx, state)
 }

@@ -121,7 +121,15 @@ func Commands() []*discordgo.ApplicationCommand {
 		},
 		{
 			Name:        "autoplay",
-			Description: "Toggle auto-play (automatically play related tracks when the queue ends)",
+			Description: "Set auto-play (automatically play related tracks when the queue ends)",
+			Options: []*discordgo.ApplicationCommandOption{
+				{
+					Type:        discordgo.ApplicationCommandOptionBoolean,
+					Name:        "enabled",
+					Description: "Enable or disable auto-play",
+					Required:    true,
+				},
+			},
 		},
 		{
 			Name:        "loop",

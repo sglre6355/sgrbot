@@ -884,15 +884,24 @@ func (h *CommandHandlers) HandleAutoPlay(
 		ChannelID: notificationChannelID,
 	})
 
-	output, err := h.queue.ToggleAutoPlay(ctx, usecases.ToggleAutoPlayInput{
+	var enabled bool
+	options := i.ApplicationCommandData().Options
+	for _, opt := range options {
+		if opt.Name == "enabled" {
+			enabled = opt.BoolValue()
+		}
+	}
+
+	err = h.queue.SetAutoPlay(ctx, usecases.SetAutoPlayInput{
 		GuildID: guildID,
+		Enabled: enabled,
 	})
 	if err != nil {
 		return respondError(r, err.Error())
 	}
 
 	var description string
-	if output.Enabled {
+	if enabled {
 		description = "Auto-play enabled."
 	} else {
 		description = "Auto-play disabled."
