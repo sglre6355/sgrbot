@@ -120,6 +120,10 @@ func Commands() []*discordgo.ApplicationCommand {
 			},
 		},
 		{
+			Name:        "autoplay",
+			Description: "Toggle auto-play (automatically play related tracks when the queue ends)",
+		},
+		{
 			Name:        "loop",
 			Description: "Set the loop mode (or cycle through modes if no option provided)",
 			Options: []*discordgo.ApplicationCommandOption{

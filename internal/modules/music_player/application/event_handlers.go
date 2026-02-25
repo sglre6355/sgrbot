@@ -5,6 +5,7 @@ import (
 	"log/slog"
 	"reflect"
 
+	"github.com/disgoorg/snowflake/v2"
 	"github.com/sglre6355/sgrbot/internal/modules/music_player/application/ports"
 	"github.com/sglre6355/sgrbot/internal/modules/music_player/domain"
 )
@@ -16,6 +17,8 @@ type PlaybackEventHandler struct {
 	player       ports.AudioPlayer
 	publisher    ports.EventPublisher
 	subscriber   ports.EventSubscriber
+	recommender  ports.TrackRecommender
+	botUserID    snowflake.ID
 }
 
 // NewPlaybackEventHandler creates a new PlaybackEventHandler.
@@ -24,12 +27,16 @@ func NewPlaybackEventHandler(
 	player ports.AudioPlayer,
 	publisher ports.EventPublisher,
 	subscriber ports.EventSubscriber,
+	recommender ports.TrackRecommender,
+	botUserID snowflake.ID,
 ) *PlaybackEventHandler {
 	return &PlaybackEventHandler{
 		playerStates: playerStates,
 		player:       player,
 		subscriber:   subscriber,
 		publisher:    publisher,
+		recommender:  recommender,
+		botUserID:    botUserID,
 	}
 }
 
@@ -75,6 +82,23 @@ func (h *PlaybackEventHandler) handleCurrentTrackChanged(
 	}
 
 	current := state.Current()
+
+	// Queue ended — try auto-play if enabled
+	if current == nil && state.IsAutoPlayEnabled() && h.recommender != nil {
+		ok := h.tryAutoPlay(ctx, &state)
+		if ok {
+			if err := h.playerStates.Save(ctx, state); err != nil {
+				slog.Error(
+					"failed to save player state after auto-play",
+					"event", event,
+					"error", err,
+				)
+				return
+			}
+			current = state.Current()
+		}
+	}
+
 	if current == nil {
 		slog.Debug("no current track in the queue, stopping playback")
 		if err := h.player.Stop(ctx, event.GuildID); err != nil {
@@ -160,6 +184,61 @@ func (h *PlaybackEventHandler) handleTrackEnded(ctx context.Context, event domai
 			"error", err,
 		)
 	}
+}
+
+// tryAutoPlay attempts to recommend and enqueue a track for auto-play.
+// Returns true if a track was successfully appended and the state was advanced.
+func (h *PlaybackEventHandler) tryAutoPlay(
+	ctx context.Context,
+	state *domain.PlayerState,
+) bool {
+	// Collect all track IDs from queue as seeds
+	allEntries := state.List()
+	seeds := make([]domain.TrackID, len(allEntries))
+	for i, entry := range allEntries {
+		seeds[i] = entry.TrackID
+	}
+
+	tracks, err := h.recommender.Recommend(ctx, seeds, 1)
+	if err != nil {
+		slog.Warn(
+			"auto-play recommendation failed",
+			"guild", state.GetGuildID(),
+			"error", err,
+		)
+		return false
+	}
+
+	if len(tracks) == 0 {
+		slog.Debug(
+			"auto-play found no recommendations",
+			"guild", state.GetGuildID(),
+		)
+		return false
+	}
+
+	// Append the recommended track as an auto-play entry
+	entry := domain.QueueEntry{
+		TrackID:     tracks[0].ID,
+		RequesterID: h.botUserID,
+		IsAutoPlay:  true,
+	}
+	state.Append(entry)
+
+	// Activate playback and advance to the newly appended track
+	state.SetPlaybackActive(true)
+	next := state.Advance(domain.LoopModeNone)
+	if next == nil {
+		return false
+	}
+
+	slog.Info(
+		"auto-play queued track",
+		"guild", state.GetGuildID(),
+		"track", tracks[0].ID,
+	)
+
+	return true
 }
 
 // NotificationEventHandler handles events related to Discord notifications.

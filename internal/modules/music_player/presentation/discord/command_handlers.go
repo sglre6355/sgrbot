@@ -467,18 +467,37 @@ func (h *CommandHandlers) handleQueueList(
 		return respondError(r, err.Error())
 	}
 
-	// Build title with loop mode indicator
-	title := "Queue"
-	switch output.LoopMode {
-	case "track":
-		title = "Queue \U0001F502" // 🔂
-	case "queue":
-		title = "Queue \U0001F501" // 🔁
+	// Build embed with mode fields
+	embed := &discordgo.MessageEmbed{
+		Title: "Queue",
 	}
 
-	embed := &discordgo.MessageEmbed{
-		Title: title,
+	var loopModeValue string
+	switch output.LoopMode {
+	case "track":
+		loopModeValue = "\U0001F502 Track" // 🔂
+	case "queue":
+		loopModeValue = "\U0001F501 Queue" // 🔁
+	default:
+		loopModeValue = "Off"
 	}
+	embed.Fields = append(embed.Fields, &discordgo.MessageEmbedField{
+		Name:   "Loop",
+		Value:  loopModeValue,
+		Inline: true,
+	})
+
+	var autoPlayValue string
+	if output.AutoPlayEnabled {
+		autoPlayValue = "\u2705 Enabled" // ✅
+	} else {
+		autoPlayValue = "Off"
+	}
+	embed.Fields = append(embed.Fields, &discordgo.MessageEmbedField{
+		Name:   "Auto-Play",
+		Value:  autoPlayValue,
+		Inline: true,
+	})
 
 	// Handle empty queue
 	if output.TotalTracks == 0 {
@@ -826,6 +845,57 @@ func (h *CommandHandlers) handleQueueSeek(
 			index+1,
 			loadTrackOutput.Track.Title,
 		)
+	}
+
+	return r.Respond(&discordgo.InteractionResponse{
+		Type: discordgo.InteractionResponseChannelMessageWithSource,
+		Data: &discordgo.InteractionResponseData{
+			Embeds: []*discordgo.MessageEmbed{
+				{
+					Description: description,
+					Color:       colorSuccess,
+				},
+			},
+		},
+	})
+}
+
+// HandleAutoPlay handles the /autoplay command.
+func (h *CommandHandlers) HandleAutoPlay(
+	s *discordgo.Session,
+	i *discordgo.InteractionCreate,
+	r bot.Responder,
+) error {
+	ctx := context.Background()
+
+	guildID, err := snowflake.Parse(i.GuildID)
+	if err != nil {
+		return respondError(r, "Invalid guild")
+	}
+
+	notificationChannelID, err := snowflake.Parse(i.ChannelID)
+	if err != nil {
+		return respondError(r, "Invalid notification channel")
+	}
+
+	// Update notification channel (best-effort)
+	_ = h.notificationChannel.Set(ctx, usecases.SetNotificationChannelInput{
+		GuildID:   guildID,
+		ChannelID: notificationChannelID,
+	})
+
+	output, err := h.queue.ToggleAutoPlay(ctx, usecases.ToggleAutoPlayInput{
+		GuildID: guildID,
+	})
+	if err != nil {
+		return respondError(r, err.Error())
+	}
+
+	var description string
+	if output.Enabled {
+		description = "Auto-play enabled."
+	} else {
+		description = "Auto-play disabled."
 	}
 
 	return r.Respond(&discordgo.InteractionResponse{

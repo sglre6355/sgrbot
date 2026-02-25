@@ -12,6 +12,7 @@ type QueueEntry struct {
 	TrackID     TrackID
 	RequesterID snowflake.ID
 	EnqueuedAt  time.Time
+	IsAutoPlay  bool
 }
 
 // NewQueueEntry creates a new QueueEntry with the current time as EnqueuedAt.

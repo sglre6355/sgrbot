@@ -76,6 +76,10 @@ func (n *Notifier) SendNowPlaying(
 		requesterAvatarURL = userInfo.AvatarURL
 	}
 
+	if requesterID.String() == n.session.State.User.ID {
+		requesterName += " (auto-play)"
+	}
+
 	embed := &discordgo.MessageEmbed{
 		Author: &discordgo.MessageEmbedAuthor{
 			Name:    "Now Playing",
@@ -93,7 +97,7 @@ func (n *Notifier) SendNowPlaying(
 			},
 		},
 		Footer: &discordgo.MessageEmbedFooter{
-			Text:    fmt.Sprintf("Requested by %s", requesterName),
+			Text:    fmt.Sprintf("Added by %s", requesterName),
 			IconURL: requesterAvatarURL,
 		},
 	}

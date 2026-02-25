@@ -1,0 +1,14 @@
+package ports
+
+import (
+	"context"
+
+	"github.com/sglre6355/sgrbot/internal/modules/music_player/domain"
+)
+
+// TrackRecommender defines the interface for recommending tracks based on seed tracks.
+type TrackRecommender interface {
+	// Recommend returns up to limit recommended tracks based on the given
+	// seed track IDs. Returned tracks must not have IDs in the seed list.
+	Recommend(ctx context.Context, seeds []domain.TrackID, limit int) ([]domain.Track, error)
+}

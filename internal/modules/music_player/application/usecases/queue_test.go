@@ -1031,6 +1031,67 @@ func TestQueueService_Restart(t *testing.T) {
 	}
 }
 
+func TestQueueService_ToggleAutoPlay(t *testing.T) {
+	guildID := snowflake.ID(1)
+	voiceChannelID := snowflake.ID(4)
+	notificationChannelID := snowflake.ID(3)
+
+	t.Run("toggle on then off", func(t *testing.T) {
+		repo := newMockRepository()
+		repo.createConnectedState(guildID, voiceChannelID, notificationChannelID)
+
+		service := NewQueueService(repo, &mockEventPublisher{})
+
+		// Toggle on
+		output, err := service.ToggleAutoPlay(
+			context.Background(),
+			ToggleAutoPlayInput{GuildID: guildID},
+		)
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		if !output.Enabled {
+			t.Error("expected auto-play to be enabled")
+		}
+
+		// Verify state was saved
+		state, _ := repo.Get(context.Background(), guildID)
+		if !state.IsAutoPlayEnabled() {
+			t.Error("expected auto-play enabled in saved state")
+		}
+
+		// Toggle off
+		output, err = service.ToggleAutoPlay(
+			context.Background(),
+			ToggleAutoPlayInput{GuildID: guildID},
+		)
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		if output.Enabled {
+			t.Error("expected auto-play to be disabled")
+		}
+
+		state, _ = repo.Get(context.Background(), guildID)
+		if state.IsAutoPlayEnabled() {
+			t.Error("expected auto-play disabled in saved state")
+		}
+	})
+
+	t.Run("not connected", func(t *testing.T) {
+		repo := newMockRepository()
+		service := NewQueueService(repo, &mockEventPublisher{})
+
+		_, err := service.ToggleAutoPlay(
+			context.Background(),
+			ToggleAutoPlayInput{GuildID: guildID},
+		)
+		if err != ErrNotConnected {
+			t.Errorf("expected ErrNotConnected, got %v", err)
+		}
+	})
+}
+
 func TestQueueService_Seek(t *testing.T) {
 	guildID := snowflake.ID(1)
 	voiceChannelID := snowflake.ID(4)

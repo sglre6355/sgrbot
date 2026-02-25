@@ -110,6 +110,7 @@ type QueueListOutput struct {
 	TotalPages       int
 	PageStart        int    // Start index of this page
 	LoopMode         string // "none", "track", "queue"
+	AutoPlayEnabled  bool   // Whether auto-play is enabled
 }
 
 // List returns the current queue with pagination.
@@ -161,11 +162,12 @@ func (q *QueueService) List(ctx context.Context, input QueueListInput) (*QueueLi
 	end = min(end, totalTracks)
 
 	output := &QueueListOutput{
-		TotalTracks: totalTracks,
-		CurrentPage: page,
-		TotalPages:  totalPages,
-		PageStart:   start,
-		LoopMode:    loopMode.String(),
+		TotalTracks:     totalTracks,
+		CurrentPage:     page,
+		TotalPages:      totalPages,
+		PageStart:       start,
+		LoopMode:        loopMode.String(),
+		AutoPlayEnabled: state.IsAutoPlayEnabled(),
 	}
 
 	if start >= totalTracks {
@@ -418,4 +420,35 @@ func (q *QueueService) Seek(
 	}
 
 	return &QueueSeekOutput{TrackID: entry.TrackID.String()}, nil
+}
+
+// ToggleAutoPlayInput contains the input for the ToggleAutoPlay use case.
+type ToggleAutoPlayInput struct {
+	GuildID snowflake.ID
+}
+
+// ToggleAutoPlayOutput contains the result of the ToggleAutoPlay use case.
+type ToggleAutoPlayOutput struct {
+	Enabled bool
+}
+
+// ToggleAutoPlay toggles auto-play on/off for the guild's player.
+func (q *QueueService) ToggleAutoPlay(
+	ctx context.Context,
+	input ToggleAutoPlayInput,
+) (*ToggleAutoPlayOutput, error) {
+	state, err := q.playerStates.Get(ctx, input.GuildID)
+	if err != nil {
+		return nil, ErrNotConnected
+	}
+
+	state.SetAutoPlayEnabled(!state.IsAutoPlayEnabled())
+
+	if err := q.playerStates.Save(ctx, state); err != nil {
+		return nil, err
+	}
+
+	return &ToggleAutoPlayOutput{
+		Enabled: state.IsAutoPlayEnabled(),
+	}, nil
 }
