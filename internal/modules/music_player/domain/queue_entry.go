@@ -12,13 +12,20 @@ type QueueEntry struct {
 	TrackID     TrackID
 	RequesterID snowflake.ID
 	EnqueuedAt  time.Time
+	IsAutoPlay  bool
 }
 
-// NewQueueEntry creates a new QueueEntry with the current time as EnqueuedAt.
-func NewQueueEntry(trackID TrackID, requesterID snowflake.ID, enqueuedAt time.Time) QueueEntry {
+// NewQueueEntry creates a new QueueEntry with the provided metadata.
+func NewQueueEntry(
+	trackID TrackID,
+	requesterID snowflake.ID,
+	enqueuedAt time.Time,
+	isAutoPlay bool,
+) QueueEntry {
 	return QueueEntry{
 		TrackID:     trackID,
 		RequesterID: requesterID,
 		EnqueuedAt:  enqueuedAt,
+		IsAutoPlay:  isAutoPlay,
 	}
 }

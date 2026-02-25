@@ -18,6 +18,7 @@ type PlayerState struct {
 	isPlaybackActive      bool               // true when playback is active
 	isPaused              bool               // true when playback is paused
 	loopMode              LoopMode           // loop mode for playback
+	autoPlayEnabled       bool               // true when auto-play is enabled
 }
 
 // NewPlayerState creates a new PlayerState for the given guild and channels.
@@ -26,8 +27,9 @@ func NewPlayerState(
 	queue Queue,
 ) *PlayerState {
 	return &PlayerState{
-		guildID: guildID,
-		queue:   queue,
+		guildID:         guildID,
+		queue:           queue,
+		autoPlayEnabled: true,
 	}
 }
 
@@ -324,6 +326,16 @@ func (p *PlayerState) CycleLoopMode() LoopMode {
 		p.loopMode = LoopModeNone
 	}
 	return p.loopMode
+}
+
+// IsAutoPlayEnabled returns true if auto-play is enabled.
+func (p *PlayerState) IsAutoPlayEnabled() bool {
+	return p.autoPlayEnabled
+}
+
+// SetAutoPlayEnabled sets the auto-play enabled state.
+func (p *PlayerState) SetAutoPlayEnabled(enabled bool) {
+	p.autoPlayEnabled = enabled
 }
 
 // Errors for PlayerStateRepository

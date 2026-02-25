@@ -52,15 +52,16 @@ func (m *MusicPlayerModule) Commands() []*discordgo.ApplicationCommand {
 // CommandHandlers returns the command handlers for this module.
 func (m *MusicPlayerModule) CommandHandlers() map[string]bot.InteractionHandler {
 	return map[string]bot.InteractionHandler{
-		"join":   m.commandHandlers.HandleJoin,
-		"leave":  m.commandHandlers.HandleLeave,
-		"play":   m.commandHandlers.HandlePlay,
-		"stop":   m.commandHandlers.HandleStop,
-		"pause":  m.commandHandlers.HandlePause,
-		"resume": m.commandHandlers.HandleResume,
-		"skip":   m.commandHandlers.HandleSkip,
-		"queue":  m.commandHandlers.HandleQueue,
-		"loop":   m.commandHandlers.HandleLoop,
+		"join":     m.commandHandlers.HandleJoin,
+		"leave":    m.commandHandlers.HandleLeave,
+		"play":     m.commandHandlers.HandlePlay,
+		"stop":     m.commandHandlers.HandleStop,
+		"pause":    m.commandHandlers.HandlePause,
+		"resume":   m.commandHandlers.HandleResume,
+		"skip":     m.commandHandlers.HandleSkip,
+		"queue":    m.commandHandlers.HandleQueue,
+		"loop":     m.commandHandlers.HandleLoop,
+		"autoplay": m.commandHandlers.HandleAutoPlay,
 	}
 }
 
@@ -165,12 +166,23 @@ func (m *MusicPlayerModule) initWithLavalink(deps bot.ModuleDependencies) error 
 
 	notificationChannel := usecases.NewNotificationChannelService(repo)
 
+	// Parse bot user ID (needed by event handlers and presentation)
+	botID, err := snowflake.Parse(deps.Session.State.User.ID)
+	if err != nil {
+		return err
+	}
+
+	// Create track recommender adapter
+	trackRecommender := infrastructure.NewTrackRecommenderAdapter(lavalinkAdapter)
+
 	// Create application event handlers
 	m.playbackHandler = application.NewPlaybackEventHandler(
 		repo,
 		lavalinkAdapter,
 		m.eventBus,
 		m.eventBus,
+		trackRecommender,
+		botID,
 	)
 	m.notificationHandler = application.NewNotificationEventHandler(
 		repo,
@@ -188,10 +200,6 @@ func (m *MusicPlayerModule) initWithLavalink(deps bot.ModuleDependencies) error 
 	}
 
 	// Create presentation handlers
-	botID, err := snowflake.Parse(deps.Session.State.User.ID)
-	if err != nil {
-		return err
-	}
 	m.commandHandlers = discord.NewCommandHandlers(
 		voiceChannel,
 		playback,

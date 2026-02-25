@@ -65,7 +65,7 @@ func (q *QueueService) Add(ctx context.Context, input QueueAddInput) (*QueueAddO
 	for _, trackID := range input.TrackIDs {
 		entries = append(
 			entries,
-			domain.NewQueueEntry(domain.TrackID(trackID), input.RequesterID, time.Now()),
+			domain.NewQueueEntry(domain.TrackID(trackID), input.RequesterID, time.Now(), false),
 		)
 	}
 	state.Append(entries...)
@@ -110,6 +110,7 @@ type QueueListOutput struct {
 	TotalPages       int
 	PageStart        int    // Start index of this page
 	LoopMode         string // "none", "track", "queue"
+	AutoPlayEnabled  bool   // Whether auto-play is enabled
 }
 
 // List returns the current queue with pagination.
@@ -161,11 +162,12 @@ func (q *QueueService) List(ctx context.Context, input QueueListInput) (*QueueLi
 	end = min(end, totalTracks)
 
 	output := &QueueListOutput{
-		TotalTracks: totalTracks,
-		CurrentPage: page,
-		TotalPages:  totalPages,
-		PageStart:   start,
-		LoopMode:    loopMode.String(),
+		TotalTracks:     totalTracks,
+		CurrentPage:     page,
+		TotalPages:      totalPages,
+		PageStart:       start,
+		LoopMode:        loopMode.String(),
+		AutoPlayEnabled: state.IsAutoPlayEnabled(),
 	}
 
 	if start >= totalTracks {
@@ -418,4 +420,25 @@ func (q *QueueService) Seek(
 	}
 
 	return &QueueSeekOutput{TrackID: entry.TrackID.String()}, nil
+}
+
+// SetAutoPlayInput contains the input for the SetAutoPlay use case.
+type SetAutoPlayInput struct {
+	GuildID snowflake.ID
+	Enabled bool
+}
+
+// SetAutoPlay sets the auto-play mode for the guild's player.
+func (q *QueueService) SetAutoPlay(
+	ctx context.Context,
+	input SetAutoPlayInput,
+) error {
+	state, err := q.playerStates.Get(ctx, input.GuildID)
+	if err != nil {
+		return ErrNotConnected
+	}
+
+	state.SetAutoPlayEnabled(input.Enabled)
+
+	return q.playerStates.Save(ctx, state)
 }
