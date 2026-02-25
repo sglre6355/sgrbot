@@ -852,21 +852,21 @@ func TestPlayerState_Shuffle(t *testing.T) {
 func TestPlayerState_AutoPlayEnabled(t *testing.T) {
 	state := newTestPlayerState()
 
-	// Default is false
-	if state.IsAutoPlayEnabled() {
-		t.Error("expected auto-play to be disabled by default")
-	}
-
-	// Enable auto-play
-	state.SetAutoPlayEnabled(true)
+	// Default is true
 	if !state.IsAutoPlayEnabled() {
-		t.Error("expected auto-play to be enabled")
+		t.Error("expected auto-play to be enabled by default")
 	}
 
 	// Disable auto-play
 	state.SetAutoPlayEnabled(false)
 	if state.IsAutoPlayEnabled() {
 		t.Error("expected auto-play to be disabled")
+	}
+
+	// Re-enable auto-play
+	state.SetAutoPlayEnabled(true)
+	if !state.IsAutoPlayEnabled() {
+		t.Error("expected auto-play to be enabled")
 	}
 }
 

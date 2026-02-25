@@ -27,8 +27,9 @@ func NewPlayerState(
 	queue Queue,
 ) *PlayerState {
 	return &PlayerState{
-		guildID: guildID,
-		queue:   queue,
+		guildID:         guildID,
+		queue:           queue,
+		autoPlayEnabled: true,
 	}
 }
 
