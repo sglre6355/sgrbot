@@ -133,11 +133,6 @@ type LavalinkAdapter struct {
 	voiceBufferMu sync.Mutex
 	voiceBuffers  map[snowflake.ID]*voiceEventBuffer
 
-	// encodedCache stores Lavalink encoded track data keyed by TrackID.
-	// Populated during convertTrack, consumed during Play.
-	encodedMu    sync.RWMutex
-	encodedCache map[domain.TrackID]string
-
 	// trackCache stores domain Track objects keyed by TrackID.
 	// Populated during convertTrack, consumed during LoadTrack/LoadTracks.
 	trackMu    sync.RWMutex
@@ -167,7 +162,6 @@ func NewLavalinkAdapter(
 		botID:        botID,
 		pending:      make(map[snowflake.ID]*pendingVoiceConnection),
 		voiceBuffers: make(map[snowflake.ID]*voiceEventBuffer),
-		encodedCache: make(map[domain.TrackID]string),
 		trackCache:   make(map[domain.TrackID]*domain.Track),
 	}
 
@@ -255,24 +249,23 @@ func (c *LavalinkAdapter) LeaveChannel(ctx context.Context, guildID snowflake.ID
 	return nil
 }
 
-// Play plays a track by looking up its encoded data from the internal cache.
+// Play resolves a fresh encoded track from Lavalink and starts playback.
 func (c *LavalinkAdapter) Play(
 	ctx context.Context,
 	guildID snowflake.ID,
 	trackID domain.TrackID,
 ) error {
-	c.encodedMu.RLock()
-	encodedTrack, ok := c.encodedCache[trackID]
-	c.encodedMu.RUnlock()
-
-	if !ok {
-		return fmt.Errorf("encoded track data not found for %q", trackID)
+	track, err := c.resolveFromLavalink(ctx, trackID)
+	if err != nil {
+		return fmt.Errorf("failed to resolve track %q: %w", trackID, err)
 	}
+
+	// Update trackCache with fresh data
+	c.convertTrack(track)
 
 	player := c.link.Player(guildID)
 
-	// Use WithEncodedTrack to avoid userData:null issue
-	if err := player.Update(ctx, lavalink.WithEncodedTrack(encodedTrack)); err != nil {
+	if err := player.Update(ctx, lavalink.WithEncodedTrack(track.Encoded)); err != nil {
 		return fmt.Errorf("failed to play track: %w", err)
 	}
 
@@ -312,33 +305,39 @@ func (c *LavalinkAdapter) Resume(ctx context.Context, guildID snowflake.ID) erro
 	return nil
 }
 
-// LoadTrack returns the Track for the given ID from the cache, or error if not found.
-func (c *LavalinkAdapter) LoadTrack(_ context.Context, id domain.TrackID) (domain.Track, error) {
+// LoadTrack returns the Track for the given ID.
+// It checks the local cache first, falling back to a Lavalink query on cache miss.
+func (c *LavalinkAdapter) LoadTrack(ctx context.Context, id domain.TrackID) (domain.Track, error) {
 	c.trackMu.RLock()
 	track, ok := c.trackCache[id]
 	c.trackMu.RUnlock()
 
-	if !ok {
-		return domain.Track{}, fmt.Errorf("track %q not found in cache", id)
+	if ok {
+		return *track, nil
 	}
-	return *track, nil
+
+	// Cache miss: resolve from Lavalink
+	lavalinkTrack, err := c.resolveFromLavalink(ctx, id)
+	if err != nil {
+		return domain.Track{}, fmt.Errorf("track %q not found: %w", id, err)
+	}
+
+	return c.convertTrack(lavalinkTrack), nil
 }
 
-// LoadTracks returns Tracks for the given IDs from the cache, or error if any not found.
+// LoadTracks returns Tracks for the given IDs.
+// It checks the local cache first, falling back to a Lavalink query for cache misses.
 func (c *LavalinkAdapter) LoadTracks(
-	_ context.Context,
+	ctx context.Context,
 	ids ...domain.TrackID,
 ) ([]domain.Track, error) {
-	c.trackMu.RLock()
-	defer c.trackMu.RUnlock()
-
 	tracks := make([]domain.Track, 0, len(ids))
 	for _, id := range ids {
-		track, ok := c.trackCache[id]
-		if !ok {
-			return nil, fmt.Errorf("track %q not found in cache", id)
+		track, err := c.LoadTrack(ctx, id)
+		if err != nil {
+			return nil, err
 		}
-		tracks = append(tracks, *track)
+		tracks = append(tracks, track)
 	}
 	return tracks, nil
 }
@@ -363,47 +362,6 @@ func (c *LavalinkAdapter) ResolveQuery(
 		return domain.TrackList{}, fmt.Errorf("failed to load tracks: %w", err)
 	}
 
-	return c.convertToTrackList(result, query)
-}
-
-// isURL checks if the input looks like a URL.
-func isURL(input string) bool {
-	return strings.HasPrefix(input, "http://") ||
-		strings.HasPrefix(input, "https://") ||
-		strings.HasPrefix(input, "www.")
-}
-
-// extractPlaylistInfo extracts a playlist identifier and clean URL from the query.
-// It applies provider-specific parsing for YouTube and Spotify, falling back to
-// the raw query for unrecognized providers.
-func extractPlaylistInfo(query, sourceName string) (identifier, cleanURL string) {
-	u, err := url.Parse(query)
-	if err != nil {
-		return query, query
-	}
-	base := u.Scheme + "://" + u.Host
-
-	switch sourceName {
-	case "youtube":
-		if listID := u.Query().Get("list"); listID != "" {
-			return listID, base + "/playlist?list=" + listID
-		}
-	case "spotify":
-		parts := strings.Split(strings.Trim(u.Path, "/"), "/")
-		if len(parts) >= 2 {
-			typ, id := parts[0], parts[1]
-			return id, base + "/" + typ + "/" + id
-		}
-	}
-	return query, query
-}
-
-// convertToTrackList converts a Lavalink load result to a domain TrackList.
-// Returns an error for empty results or Lavalink exceptions.
-func (c *LavalinkAdapter) convertToTrackList(
-	result *lavalink.LoadResult,
-	query string,
-) (domain.TrackList, error) {
 	switch data := result.Data.(type) {
 	case lavalink.Track:
 		return domain.TrackList{
@@ -447,7 +405,70 @@ func (c *LavalinkAdapter) convertToTrackList(
 	}
 }
 
-// convertTrack converts a Lavalink track to a domain Track and caches encoded data.
+// isURL checks if the input looks like a URL.
+func isURL(input string) bool {
+	return strings.HasPrefix(input, "http://") ||
+		strings.HasPrefix(input, "https://") ||
+		strings.HasPrefix(input, "www.")
+}
+
+// extractPlaylistInfo extracts a playlist identifier and clean URL from the query.
+// It applies provider-specific parsing for YouTube and Spotify, falling back to
+// the raw query for unrecognized providers.
+func extractPlaylistInfo(query, sourceName string) (identifier, cleanURL string) {
+	u, err := url.Parse(query)
+	if err != nil {
+		return query, query
+	}
+	base := u.Scheme + "://" + u.Host
+
+	switch sourceName {
+	case "youtube":
+		if listID := u.Query().Get("list"); listID != "" {
+			return listID, base + "/playlist?list=" + listID
+		}
+	case "spotify":
+		parts := strings.Split(strings.Trim(u.Path, "/"), "/")
+		if len(parts) >= 2 {
+			typ, id := parts[0], parts[1]
+			return id, base + "/" + typ + "/" + id
+		}
+	}
+	return query, query
+}
+
+// resolveFromLavalink queries Lavalink to get a fresh track by identifier.
+func (c *LavalinkAdapter) resolveFromLavalink(
+	ctx context.Context,
+	trackID domain.TrackID,
+) (lavalink.Track, error) {
+	node := c.link.BestNode()
+	if node == nil {
+		return lavalink.Track{}, fmt.Errorf("no available Lavalink node")
+	}
+
+	result, err := node.LoadTracks(ctx, trackID.String())
+	if err != nil {
+		return lavalink.Track{}, fmt.Errorf("failed to load track from Lavalink: %w", err)
+	}
+
+	switch data := result.Data.(type) {
+	case lavalink.Track:
+		return data, nil
+	case lavalink.Empty:
+		return lavalink.Track{}, fmt.Errorf("track %q not found on Lavalink", trackID)
+	case lavalink.Exception:
+		return lavalink.Track{}, fmt.Errorf(
+			"track resolution raised an exception for track %q: %w",
+			trackID,
+			data,
+		)
+	default:
+		return lavalink.Track{}, fmt.Errorf("invalid track id: %q", trackID)
+	}
+}
+
+// convertTrack converts a Lavalink track to a domain Track and caches it.
 func (c *LavalinkAdapter) convertTrack(track lavalink.Track) domain.Track {
 	info := track.Info
 	artworkURL := ""
@@ -457,12 +478,6 @@ func (c *LavalinkAdapter) convertTrack(track lavalink.Track) domain.Track {
 
 	trackID := domain.TrackID(info.Identifier)
 
-	// Cache encoded track data for later playback
-	c.encodedMu.Lock()
-	c.encodedCache[trackID] = track.Encoded
-	c.encodedMu.Unlock()
-
-	// Cache domain Track for later lookup via LoadTrack/LoadTracks
 	domainTrack := domain.NewTrack(
 		trackID,
 		info.Title,
