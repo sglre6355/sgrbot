@@ -65,7 +65,7 @@ func (q *QueueService) Add(ctx context.Context, input QueueAddInput) (*QueueAddO
 	for _, trackID := range input.TrackIDs {
 		entries = append(
 			entries,
-			domain.NewQueueEntry(domain.TrackID(trackID), input.RequesterID, time.Now()),
+			domain.NewQueueEntry(domain.TrackID(trackID), input.RequesterID, time.Now(), false),
 		)
 	}
 	state.Append(entries...)
