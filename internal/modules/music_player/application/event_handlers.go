@@ -3,6 +3,7 @@ package application
 import (
 	"context"
 	"log/slog"
+	"math/rand/v2"
 	"reflect"
 	"time"
 
@@ -14,12 +15,13 @@ import (
 // PlaybackEventHandler handles events related to playback control.
 // It subscribes to CurrentTrackChanged and TrackEnded events to manage playback flow.
 type PlaybackEventHandler struct {
-	playerStates domain.PlayerStateRepository
-	player       ports.AudioPlayer
-	publisher    ports.EventPublisher
-	subscriber   ports.EventSubscriber
-	recommender  ports.TrackRecommender
-	botUserID    snowflake.ID
+	playerStates  domain.PlayerStateRepository
+	player        ports.AudioPlayer
+	publisher     ports.EventPublisher
+	subscriber    ports.EventSubscriber
+	recommender   ports.TrackRecommender
+	trackProvider ports.TrackProvider
+	botUserID     snowflake.ID
 }
 
 // NewPlaybackEventHandler creates a new PlaybackEventHandler.
@@ -29,15 +31,17 @@ func NewPlaybackEventHandler(
 	publisher ports.EventPublisher,
 	subscriber ports.EventSubscriber,
 	recommender ports.TrackRecommender,
+	trackProvider ports.TrackProvider,
 	botUserID snowflake.ID,
 ) *PlaybackEventHandler {
 	return &PlaybackEventHandler{
-		playerStates: playerStates,
-		player:       player,
-		subscriber:   subscriber,
-		publisher:    publisher,
-		recommender:  recommender,
-		botUserID:    botUserID,
+		playerStates:  playerStates,
+		player:        player,
+		subscriber:    subscriber,
+		publisher:     publisher,
+		recommender:   recommender,
+		trackProvider: trackProvider,
+		botUserID:     botUserID,
 	}
 }
 
@@ -193,15 +197,88 @@ func (h *PlaybackEventHandler) tryAutoPlay(
 	ctx context.Context,
 	state *domain.PlayerState,
 ) bool {
-	// Collect seed and exclude track IDs from queue
+	// Collect seed and exclude track IDs using a weighted mix:
+	// up to 2 randomly sampled manually added YouTube tracks + the most recent
+	// auto-play YouTube track.
+	// This keeps recommendations anchored to the user's selections while allowing
+	// natural progression via the latest auto-play track.
 	allEntries := state.List()
-	seeds := make([]domain.TrackID, 0)
-	exclude := make([]domain.TrackID, 0)
+	var manualIDs []domain.TrackID
+	var autoPlayIDs []domain.TrackID
 	for _, entry := range allEntries {
 		if entry.IsAutoPlay {
-			exclude = append(exclude, entry.TrackID)
+			autoPlayIDs = append(autoPlayIDs, entry.TrackID)
 		} else {
-			seeds = append(seeds, entry.TrackID)
+			manualIDs = append(manualIDs, entry.TrackID)
+		}
+	}
+
+	seeds := make([]domain.TrackID, 0, 3)
+	seedSet := make(map[domain.TrackID]struct{}, 3)
+
+	// Sample up to 2 manual YouTube seeds
+	rand.Shuffle(len(manualIDs), func(i, j int) {
+		manualIDs[i], manualIDs[j] = manualIDs[j], manualIDs[i]
+	})
+	for _, id := range manualIDs {
+		if len(seeds) >= 2 {
+			break
+		}
+		track, err := h.trackProvider.LoadTrack(ctx, id)
+		if err != nil {
+			slog.Debug(
+				"failed to load manual seed track",
+				"track", id,
+				"error", err,
+			)
+			continue
+		}
+		if track.Source != domain.TrackSourceYouTube {
+			continue
+		}
+		if _, exists := seedSet[id]; exists {
+			continue
+		}
+		seedSet[id] = struct{}{}
+		seeds = append(seeds, id)
+	}
+
+	// Add the most recent auto-play YouTube track as a seed
+	for i := len(autoPlayIDs) - 1; i >= 0; i-- {
+		id := autoPlayIDs[i]
+		if _, exists := seedSet[id]; exists {
+			continue
+		}
+		track, err := h.trackProvider.LoadTrack(ctx, id)
+		if err != nil {
+			slog.Debug(
+				"failed to load auto-play seed track",
+				"track", id,
+				"error", err,
+			)
+			continue
+		}
+		if track.Source != domain.TrackSourceYouTube {
+			continue
+		}
+		seedSet[id] = struct{}{}
+		seeds = append(seeds, id)
+		break
+	}
+
+	if len(seeds) == 0 {
+		slog.Debug(
+			"auto-play has no YouTube seeds",
+			"guild", state.GetGuildID(),
+		)
+		return false
+	}
+
+	// Exclude all tracks not selected as seeds
+	var exclude []domain.TrackID
+	for _, entry := range allEntries {
+		if _, isSeed := seedSet[entry.TrackID]; !isSeed {
+			exclude = append(exclude, entry.TrackID)
 		}
 	}
 

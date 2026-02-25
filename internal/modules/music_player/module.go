@@ -182,6 +182,7 @@ func (m *MusicPlayerModule) initWithLavalink(deps bot.ModuleDependencies) error 
 		m.eventBus,
 		m.eventBus,
 		trackRecommender,
+		lavalinkAdapter,
 		botID,
 	)
 	m.notificationHandler = application.NewNotificationEventHandler(
