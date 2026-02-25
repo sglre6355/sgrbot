@@ -211,11 +211,11 @@ type UserInfoProvider interface {
 The `LavalinkAdapter` (`infrastructure/lavalink_client.go`) implements three
 port interfaces:
 
-- `AudioPlayer` - playback control via Lavalink (plays by TrackID using an
-  internal encoded track cache)
+- `AudioPlayer` - playback control via Lavalink (resolves fresh encoded track
+  data from Lavalink on each play to avoid stale credentials)
 - `VoiceConnection` - voice channel join/leave via discordgo + Lavalink
-- `TrackProvider` - track loading/searching via Lavalink (caches both encoded
-  track data and domain Track objects)
+- `TrackProvider` - track loading/searching via Lavalink (caches domain Track
+  objects, falls back to Lavalink queries on cache miss)
 
 Voice connection uses a buffered two-phase handshake, handling out-of-order
 `VoiceStateUpdate` and `VoiceServerUpdate` events before forwarding to Lavalink.
