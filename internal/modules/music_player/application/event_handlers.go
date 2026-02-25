@@ -4,6 +4,7 @@ import (
 	"context"
 	"log/slog"
 	"reflect"
+	"time"
 
 	"github.com/disgoorg/snowflake/v2"
 	"github.com/sglre6355/sgrbot/internal/modules/music_player/application/ports"
@@ -222,11 +223,7 @@ func (h *PlaybackEventHandler) tryAutoPlay(
 	}
 
 	// Append the recommended track as an auto-play entry
-	entry := domain.QueueEntry{
-		TrackID:     tracks[0].ID,
-		RequesterID: h.botUserID,
-		IsAutoPlay:  true,
-	}
+	entry := domain.NewQueueEntry(tracks[0].ID, h.botUserID, time.Now(), true)
 	state.Append(entry)
 
 	// Activate playback and advance to the newly appended track
