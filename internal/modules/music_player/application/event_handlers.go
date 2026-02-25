@@ -194,9 +194,13 @@ func (h *PlaybackEventHandler) tryAutoPlay(
 ) bool {
 	// Collect all track IDs from queue as seeds
 	allEntries := state.List()
-	seeds := make([]domain.TrackID, len(allEntries))
-	for i, entry := range allEntries {
-		seeds[i] = entry.TrackID
+	seeds := make([]domain.TrackID, 0)
+	for _, entry := range allEntries {
+		if entry.IsAutoPlay {
+			continue
+		}
+
+		seeds = append(seeds, entry.TrackID)
 	}
 
 	tracks, err := h.recommender.Recommend(ctx, seeds, 1)
