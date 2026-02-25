@@ -38,7 +38,7 @@ func (a *TrackRecommenderAdapter) Recommend(
 	limit int,
 ) ([]domain.Track, error) {
 	if len(seeds) == 0 || limit <= 0 {
-		return nil, nil
+		return []domain.Track{}, nil
 	}
 
 	// Load track metadata for all seeds to find YouTube-sourced tracks
@@ -62,7 +62,7 @@ func (a *TrackRecommenderAdapter) Recommend(
 	}
 
 	if len(ytTracks) == 0 {
-		return nil, nil
+		return []domain.Track{}, nil
 	}
 
 	// Randomly sample up to maxMixSeeds YouTube seeds
@@ -113,7 +113,7 @@ func (a *TrackRecommenderAdapter) Recommend(
 	}
 
 	if len(trackScores) == 0 {
-		return nil, nil
+		return []domain.Track{}, nil
 	}
 
 	// Sort by overlap score descending
