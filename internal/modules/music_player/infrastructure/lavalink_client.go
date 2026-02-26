@@ -97,25 +97,16 @@ func (b *voiceEventBuffer) setVoiceServer(token, endpoint string) bool {
 	return b.hasVoiceState && b.hasVoiceServer
 }
 
-// getData returns the buffered data and resets the buffer.
+// getData returns the buffered data.
+// The buffer retains values so that a subsequent lone VoiceServerUpdate
+// (e.g. Discord voice server rotation) can be forwarded immediately
+// using the existing session info. Cleanup is handled by clearVoiceBuffer
+// on disconnect.
 func (b *voiceEventBuffer) getData() (channelID *snowflake.ID, sessionID, token, endpoint string) {
 	b.mu.Lock()
 	defer b.mu.Unlock()
 
-	channelID = b.channelID
-	sessionID = b.sessionID
-	token = b.token
-	endpoint = b.endpoint
-
-	// Reset buffer
-	b.hasVoiceState = false
-	b.hasVoiceServer = false
-	b.channelID = nil
-	b.sessionID = ""
-	b.token = ""
-	b.endpoint = ""
-
-	return
+	return b.channelID, b.sessionID, b.token, b.endpoint
 }
 
 // LavalinkAdapter wraps DisGoLink to implement the port interfaces.
