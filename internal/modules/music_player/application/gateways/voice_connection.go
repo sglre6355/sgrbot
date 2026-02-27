@@ -6,8 +6,8 @@ import (
 	"github.com/disgoorg/snowflake/v2"
 )
 
-// VoiceConnection defines the interface for voice channel connection operations.
-type VoiceConnection interface {
+// VoiceConnectionManager defines the interface for voice channel connection operations.
+type VoiceConnectionManager interface {
 	// JoinChannel connects the bot to the specified voice channel.
 	JoinChannel(ctx context.Context, guildID, channelID snowflake.ID) error
 

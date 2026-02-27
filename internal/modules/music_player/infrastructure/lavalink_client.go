@@ -22,14 +22,14 @@ const voiceConnectionTimeout = 10 * time.Second
 
 // Ensure LavalinkAdapter implements port interfaces.
 var (
-	_ gateways.TrackPlayer     = (*LavalinkAdapter)(nil)
-	_ gateways.VoiceConnection = (*LavalinkAdapter)(nil)
-	_ domain.TrackRepository   = (*LavalinkAdapter)(nil)
-	_ gateways.TrackResolver   = (*LavalinkAdapter)(nil)
+	_ gateways.TrackPlayer            = (*LavalinkAdapter)(nil)
+	_ gateways.VoiceConnectionManager = (*LavalinkAdapter)(nil)
+	_ domain.TrackRepository          = (*LavalinkAdapter)(nil)
+	_ gateways.TrackResolver          = (*LavalinkAdapter)(nil)
 )
 
-// pendingVoiceConnection tracks the state of a pending voice connection.
-type pendingVoiceConnection struct {
+// pendingVoiceConnectionManager tracks the state of a pending voice connection.
+type pendingVoiceConnectionManager struct {
 	mu             sync.Mutex
 	hasVoiceState  bool
 	hasVoiceServer bool
@@ -37,7 +37,7 @@ type pendingVoiceConnection struct {
 }
 
 // onEvent marks an event as received and signals ready if both events are present.
-func (p *pendingVoiceConnection) onEvent(isVoiceState bool) {
+func (p *pendingVoiceConnectionManager) onEvent(isVoiceState bool) {
 	p.mu.Lock()
 	defer p.mu.Unlock()
 
@@ -119,7 +119,7 @@ type LavalinkAdapter struct {
 	botID snowflake.ID
 
 	pendingMu sync.Mutex
-	pending   map[snowflake.ID]*pendingVoiceConnection
+	pending   map[snowflake.ID]*pendingVoiceConnectionManager
 
 	// voiceBuffers holds buffered voice events per guild to handle out-of-order events
 	voiceBufferMu sync.Mutex
@@ -152,7 +152,7 @@ func NewLavalinkAdapter(
 		session:      session,
 		publisher:    publisher,
 		botID:        botID,
-		pending:      make(map[snowflake.ID]*pendingVoiceConnection),
+		pending:      make(map[snowflake.ID]*pendingVoiceConnectionManager),
 		voiceBuffers: make(map[snowflake.ID]*voiceEventBuffer),
 		trackCache:   make(map[domain.TrackID]*domain.Track),
 	}
@@ -191,7 +191,7 @@ func (c *LavalinkAdapter) Link() disgolink.Client {
 // It waits for both VoiceStateUpdate and VoiceServerUpdate events before returning.
 func (c *LavalinkAdapter) JoinChannel(ctx context.Context, guildID, channelID snowflake.ID) error {
 	// Create pending connection tracker
-	pending := &pendingVoiceConnection{
+	pending := &pendingVoiceConnectionManager{
 		ready: make(chan struct{}),
 	}
 

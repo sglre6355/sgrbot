@@ -83,16 +83,16 @@ func (m *mockTrackPlayer) Resume(_ context.Context, _ snowflake.ID) error {
 	return m.resumeErr
 }
 
-type mockVoiceConnection struct {
+type mockVoiceConnectionManager struct {
 	joinErr  error
 	leaveErr error
 }
 
-func (m *mockVoiceConnection) JoinChannel(_ context.Context, _, _ snowflake.ID) error {
+func (m *mockVoiceConnectionManager) JoinChannel(_ context.Context, _, _ snowflake.ID) error {
 	return m.joinErr
 }
 
-func (m *mockVoiceConnection) LeaveChannel(_ context.Context, _ snowflake.ID) error {
+func (m *mockVoiceConnectionManager) LeaveChannel(_ context.Context, _ snowflake.ID) error {
 	return m.leaveErr
 }
 

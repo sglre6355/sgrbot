@@ -35,7 +35,7 @@ type BotVoiceStateChangeInput struct {
 // VoiceChannelService handles voice channel operations.
 type VoiceChannelService struct {
 	repo            domain.PlayerStateRepository
-	voiceConnection gateways.VoiceConnection
+	voiceConnection gateways.VoiceConnectionManager
 	voiceState      gateways.VoiceStateProvider
 	publisher       gateways.EventPublisher
 	notifier        gateways.NotificationSender
@@ -44,7 +44,7 @@ type VoiceChannelService struct {
 // NewVoiceChannelService creates a new VoiceChannelService.
 func NewVoiceChannelService(
 	repo domain.PlayerStateRepository,
-	voiceConnection gateways.VoiceConnection,
+	voiceConnection gateways.VoiceConnectionManager,
 	voiceState gateways.VoiceStateProvider,
 	publisher gateways.EventPublisher,
 	notifier gateways.NotificationSender,
