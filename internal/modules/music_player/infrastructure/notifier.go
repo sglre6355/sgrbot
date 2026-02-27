@@ -10,7 +10,7 @@ import (
 
 	"github.com/bwmarrin/discordgo"
 	"github.com/disgoorg/snowflake/v2"
-	"github.com/sglre6355/sgrbot/internal/modules/music_player/application/ports"
+	"github.com/sglre6355/sgrbot/internal/modules/music_player/application/gateways"
 	"github.com/sglre6355/sgrbot/internal/modules/music_player/domain"
 )
 
@@ -19,28 +19,28 @@ const (
 	colorRed = 0xE74C3C
 )
 
-// Ensure Notifier implements required ports.
+// Ensure Notifier implements required gateways.
 var (
-	_ ports.NotificationSender = (*Notifier)(nil)
+	_ gateways.NotificationSender = (*Notifier)(nil)
 )
 
 // Notifier sends notifications to Discord channels.
 type Notifier struct {
 	session          *discordgo.Session
-	trackProvider    ports.TrackProvider
-	userInfoProvider ports.UserInfoProvider
+	trackRepo        domain.TrackRepository
+	userInfoProvider gateways.UserInfoProvider
 	httpClient       *http.Client
 }
 
 // NewNotifier creates a new Notifier.
 func NewNotifier(
 	session *discordgo.Session,
-	trackProvider ports.TrackProvider,
-	userInfoProvider ports.UserInfoProvider,
+	trackRepo domain.TrackRepository,
+	userInfoProvider gateways.UserInfoProvider,
 ) *Notifier {
 	return &Notifier{
 		session:          session,
-		trackProvider:    trackProvider,
+		trackRepo:        trackRepo,
 		userInfoProvider: userInfoProvider,
 		httpClient: &http.Client{
 			Timeout: 5 * time.Second,
@@ -56,7 +56,7 @@ func (n *Notifier) SendNowPlaying(
 	requesterID snowflake.ID,
 	enqueuedAt time.Time,
 ) (snowflake.ID, error) {
-	track, err := n.trackProvider.LoadTrack(context.Background(), trackID)
+	track, err := n.trackRepo.FindByID(context.Background(), trackID)
 	if err != nil {
 		return 0, fmt.Errorf("failed to load track %q: %w", trackID, err)
 	}

@@ -6,22 +6,22 @@ import (
 	"log/slog"
 	"sort"
 
-	"github.com/sglre6355/sgrbot/internal/modules/music_player/application/ports"
+	"github.com/sglre6355/sgrbot/internal/modules/music_player/application/gateways"
 	"github.com/sglre6355/sgrbot/internal/modules/music_player/domain"
 )
 
-// Ensure TrackRecommenderAdapter implements required ports.
-var _ ports.TrackRecommender = (*TrackRecommenderAdapter)(nil)
+// Ensure TrackRecommenderAdapter implements required interfaces.
+var _ domain.TrackRecommender = (*TrackRecommenderAdapter)(nil)
 
 // TrackRecommenderAdapter recommends tracks using YouTube Mix playlists.
 type TrackRecommenderAdapter struct {
-	trackProvider ports.TrackProvider
+	trackResolver gateways.TrackResolver
 }
 
 // NewTrackRecommenderAdapter creates a new TrackRecommenderAdapter.
-func NewTrackRecommenderAdapter(trackProvider ports.TrackProvider) *TrackRecommenderAdapter {
+func NewTrackRecommenderAdapter(trackResolver gateways.TrackResolver) *TrackRecommenderAdapter {
 	return &TrackRecommenderAdapter{
-		trackProvider: trackProvider,
+		trackResolver: trackResolver,
 	}
 }
 
@@ -63,7 +63,7 @@ func (a *TrackRecommenderAdapter) Recommend(
 			seed.String(),
 		)
 
-		trackList, err := a.trackProvider.ResolveQuery(ctx, mixURL)
+		trackList, err := a.trackResolver.ResolveQuery(ctx, mixURL)
 		if err != nil {
 			slog.Debug(
 				"failed to load YouTube Mix",

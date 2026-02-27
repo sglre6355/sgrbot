@@ -4,36 +4,36 @@ import (
 	"context"
 
 	"github.com/disgoorg/snowflake/v2"
-	"github.com/sglre6355/sgrbot/internal/modules/music_player/application/ports"
+	"github.com/sglre6355/sgrbot/internal/modules/music_player/application/gateways"
 	"github.com/sglre6355/sgrbot/internal/modules/music_player/domain"
 )
 
 // PlaybackService handles playback operations.
 type PlaybackService struct {
-	playerStates  domain.PlayerStateRepository
-	audioPlayer   ports.AudioPlayer
-	publisher     ports.EventPublisher
-	notifier      ports.NotificationSender
-	trackProvider ports.TrackProvider
-	voiceState    ports.VoiceStateProvider
+	playerStates domain.PlayerStateRepository
+	audioPlayer  gateways.TrackPlayer
+	publisher    gateways.EventPublisher
+	notifier     gateways.NotificationSender
+	trackRepo    domain.TrackRepository
+	voiceState   gateways.VoiceStateProvider
 }
 
 // NewPlaybackService creates a new PlaybackService.
 func NewPlaybackService(
 	playerStates domain.PlayerStateRepository,
-	audioPlayer ports.AudioPlayer,
-	publisher ports.EventPublisher,
-	notifier ports.NotificationSender,
-	trackProvider ports.TrackProvider,
-	voiceState ports.VoiceStateProvider,
+	audioPlayer gateways.TrackPlayer,
+	publisher gateways.EventPublisher,
+	notifier gateways.NotificationSender,
+	trackRepo domain.TrackRepository,
+	voiceState gateways.VoiceStateProvider,
 ) *PlaybackService {
 	return &PlaybackService{
-		playerStates:  playerStates,
-		audioPlayer:   audioPlayer,
-		publisher:     publisher,
-		notifier:      notifier,
-		trackProvider: trackProvider,
-		voiceState:    voiceState,
+		playerStates: playerStates,
+		audioPlayer:  audioPlayer,
+		publisher:    publisher,
+		notifier:     notifier,
+		trackRepo:    trackRepo,
+		voiceState:   voiceState,
 	}
 }
 
@@ -49,18 +49,13 @@ func (p *PlaybackService) Pause(ctx context.Context, input PauseInput) error {
 		return ErrNotConnected
 	}
 
-	if !state.IsPlaybackActive() {
-		return ErrNotPlaying
-	}
-	if state.IsPaused() {
-		return ErrAlreadyPaused
+	if err := state.Pause(); err != nil {
+		return err
 	}
 
 	if err := p.audioPlayer.Pause(ctx, input.GuildID); err != nil {
 		return err
 	}
-
-	state.SetPaused(true)
 
 	return p.playerStates.Save(ctx, state)
 }
@@ -77,18 +72,13 @@ func (p *PlaybackService) Resume(ctx context.Context, input ResumeInput) error {
 		return ErrNotConnected
 	}
 
-	if !state.IsPlaybackActive() {
-		return ErrNotPlaying
-	}
-	if !state.IsPaused() {
-		return ErrNotPaused
+	if err := state.Resume(); err != nil {
+		return err
 	}
 
 	if err := p.audioPlayer.Resume(ctx, input.GuildID); err != nil {
 		return err
 	}
-
-	state.SetPaused(false)
 
 	return p.playerStates.Save(ctx, state)
 }
@@ -111,22 +101,14 @@ func (p *PlaybackService) Skip(ctx context.Context, input SkipInput) (*SkipOutpu
 		return nil, ErrNotConnected
 	}
 
-	skipped := state.Current()
-	if skipped == nil {
-		return nil, ErrNotPlaying
+	skipped, next, err := state.Skip()
+	if err != nil {
+		return nil, err
 	}
-
-	loopmode := state.GetLoopMode()
-	if loopmode == domain.LoopModeTrack {
-		loopmode = domain.LoopModeNone
-	}
-	next := state.Advance(loopmode)
 
 	var nextID *string
 	if next != nil {
 		nextID = (*string)(&next.TrackID)
-	} else {
-		state.SetPlaybackActive(false)
 	}
 
 	if err := p.playerStates.Save(ctx, state); err != nil {

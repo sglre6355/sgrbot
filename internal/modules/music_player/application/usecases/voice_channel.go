@@ -4,7 +4,7 @@ import (
 	"context"
 
 	"github.com/disgoorg/snowflake/v2"
-	"github.com/sglre6355/sgrbot/internal/modules/music_player/application/ports"
+	"github.com/sglre6355/sgrbot/internal/modules/music_player/application/gateways"
 	"github.com/sglre6355/sgrbot/internal/modules/music_player/domain"
 )
 
@@ -35,19 +35,19 @@ type BotVoiceStateChangeInput struct {
 // VoiceChannelService handles voice channel operations.
 type VoiceChannelService struct {
 	repo            domain.PlayerStateRepository
-	voiceConnection ports.VoiceConnection
-	voiceState      ports.VoiceStateProvider
-	publisher       ports.EventPublisher
-	notifier        ports.NotificationSender
+	voiceConnection gateways.VoiceConnectionManager
+	voiceState      gateways.VoiceStateProvider
+	publisher       gateways.EventPublisher
+	notifier        gateways.NotificationSender
 }
 
 // NewVoiceChannelService creates a new VoiceChannelService.
 func NewVoiceChannelService(
 	repo domain.PlayerStateRepository,
-	voiceConnection ports.VoiceConnection,
-	voiceState ports.VoiceStateProvider,
-	publisher ports.EventPublisher,
-	notifier ports.NotificationSender,
+	voiceConnection gateways.VoiceConnectionManager,
+	voiceState gateways.VoiceStateProvider,
+	publisher gateways.EventPublisher,
+	notifier gateways.NotificationSender,
 ) *VoiceChannelService {
 	return &VoiceChannelService{
 		repo:            repo,

@@ -19,7 +19,7 @@ func TestVoiceChannelService_Join(t *testing.T) {
 		name               string
 		input              JoinInput
 		setupRepo          func(*mockRepository)
-		setupConnection    func(*mockVoiceConnection)
+		setupConnection    func(*mockVoiceConnectionManager)
 		setupVoice         func(*mockVoiceStateProvider)
 		wantErr            error
 		wantVoiceChannelID snowflake.ID
@@ -79,7 +79,7 @@ func TestVoiceChannelService_Join(t *testing.T) {
 				NotificationChannelID: notificationChannelID,
 				VoiceChannelID:        voiceChannelID,
 			},
-			setupConnection: func(m *mockVoiceConnection) {
+			setupConnection: func(m *mockVoiceConnectionManager) {
 				m.joinErr = errors.New("connection failed")
 			},
 			wantErr: errors.New("connection failed"),
@@ -105,7 +105,7 @@ func TestVoiceChannelService_Join(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			repo := newMockRepository()
-			connection := &mockVoiceConnection{}
+			connection := &mockVoiceConnectionManager{}
 			voiceState := &mockVoiceStateProvider{channels: make(map[snowflake.ID]snowflake.ID)}
 
 			if tt.setupRepo != nil {
@@ -169,7 +169,7 @@ func TestVoiceChannelService_Join_PreservesQueueOnMove(t *testing.T) {
 	newVoiceChannel := snowflake.ID(999)
 
 	repo := newMockRepository()
-	connection := &mockVoiceConnection{}
+	connection := &mockVoiceConnectionManager{}
 
 	// Create existing state with tracks in queue
 	state := repo.createConnectedState(guildID, oldVoiceChannel, notificationChannelID)
@@ -231,7 +231,7 @@ func TestVoiceChannelService_Leave(t *testing.T) {
 		name            string
 		input           LeaveInput
 		setupRepo       func(*mockRepository)
-		setupConnection func(*mockVoiceConnection)
+		setupConnection func(*mockVoiceConnectionManager)
 		wantErr         error
 	}{
 		{
@@ -258,7 +258,7 @@ func TestVoiceChannelService_Leave(t *testing.T) {
 			setupRepo: func(m *mockRepository) {
 				m.createConnectedState(guildID, voiceChannelID, notificationChannelID)
 			},
-			setupConnection: func(m *mockVoiceConnection) {
+			setupConnection: func(m *mockVoiceConnectionManager) {
 				m.leaveErr = errors.New("disconnect failed")
 			},
 			wantErr: errors.New("disconnect failed"),
@@ -279,7 +279,7 @@ func TestVoiceChannelService_Leave(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			repo := newMockRepository()
-			connection := &mockVoiceConnection{}
+			connection := &mockVoiceConnectionManager{}
 
 			if tt.setupRepo != nil {
 				tt.setupRepo(repo)
@@ -325,7 +325,7 @@ func TestVoiceChannelService_Leave_DeletesNowPlayingMessage(t *testing.T) {
 	nowPlayingMsgID := snowflake.ID(999)
 
 	repo := newMockRepository()
-	connection := &mockVoiceConnection{}
+	connection := &mockVoiceConnectionManager{}
 	notifier := &mockNotificationSender{}
 
 	// Create connected state with a now playing message

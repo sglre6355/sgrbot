@@ -1,10 +1,6 @@
-package ports
+package domain
 
-import (
-	"context"
-
-	"github.com/sglre6355/sgrbot/internal/modules/music_player/domain"
-)
+import "context"
 
 // TrackRecommender defines the interface for recommending tracks based on seed tracks.
 type TrackRecommender interface {
@@ -13,8 +9,8 @@ type TrackRecommender interface {
 	// or the exclude list.
 	Recommend(
 		ctx context.Context,
-		seeds []domain.TrackID,
-		exclude []domain.TrackID,
+		seeds []TrackID,
+		exclude []TrackID,
 		limit int,
-	) ([]domain.Track, error)
+	) ([]Track, error)
 }

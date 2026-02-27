@@ -10,12 +10,10 @@ import (
 	"github.com/sglre6355/sgrbot/internal/modules/music_player/domain"
 )
 
-func strPtr(s string) *string { return &s }
-
 func TestTrackLoaderService_ResolveQuery(t *testing.T) {
-	singleTrackResult := domain.TrackList{
-		Type: domain.TrackListTypeTrack,
-		Tracks: []domain.Track{
+	singleTrackResult := domain.NewTrackList(
+		domain.TrackListTypeTrack,
+		[]domain.Track{
 			{
 				ID:       "track-1",
 				Title:    "Single Track",
@@ -25,26 +23,26 @@ func TestTrackLoaderService_ResolveQuery(t *testing.T) {
 				Source:   domain.TrackSourceYouTube,
 			},
 		},
-	}
+	)
 
-	searchResult := domain.TrackList{
-		Type: domain.TrackListTypeSearch,
-		Tracks: []domain.Track{
+	searchResult := domain.NewTrackList(
+		domain.TrackListTypeSearch,
+		[]domain.Track{
 			{ID: "search-1", Title: "Search Result 1"},
 			{ID: "search-2", Title: "Search Result 2"},
 			{ID: "search-3", Title: "Search Result 3"},
 		},
-	}
+	)
 
-	playlistResult := domain.TrackList{
-		Type: domain.TrackListTypePlaylist,
-		Name: strPtr("My Awesome Playlist"),
-		Tracks: []domain.Track{
+	playlistResult := domain.NewTrackList(
+		domain.TrackListTypePlaylist,
+		[]domain.Track{
 			{ID: "playlist-1", Title: "Playlist Track 1", Artist: "Artist 1"},
 			{ID: "playlist-2", Title: "Playlist Track 2", Artist: "Artist 2"},
 			{ID: "playlist-3", Title: "Playlist Track 3", Artist: "Artist 3"},
 		},
-	}
+		domain.WithPlaylistInfo("", "My Awesome Playlist", ""),
+	)
 
 	tests := []struct {
 		name           string
@@ -122,7 +120,7 @@ func TestTrackLoaderService_ResolveQuery(t *testing.T) {
 				tt.setupResolver(resolver)
 			}
 
-			service := NewTrackLoaderService(resolver)
+			service := NewTrackLoaderService(nil, resolver)
 			output, err := service.ResolveQuery(context.Background(), tt.input)
 
 			if tt.wantErr != nil {

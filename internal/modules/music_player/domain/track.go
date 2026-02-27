@@ -1,6 +1,7 @@
 package domain
 
 import (
+	"context"
 	"time"
 )
 
@@ -49,4 +50,13 @@ func NewTrack(
 		Source:     source,
 		IsStream:   isStream,
 	}
+}
+
+// TrackRepository defines the interface for retrieving tracks by ID.
+type TrackRepository interface {
+	// FindByID returns the Track for the given ID, or error if not found.
+	FindByID(ctx context.Context, id TrackID) (Track, error)
+
+	// FindByIDs returns Tracks for the given IDs, or error if any not found.
+	FindByIDs(ctx context.Context, ids ...TrackID) ([]Track, error)
 }

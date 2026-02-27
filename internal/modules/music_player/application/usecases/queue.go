@@ -5,7 +5,7 @@ import (
 	"time"
 
 	"github.com/disgoorg/snowflake/v2"
-	"github.com/sglre6355/sgrbot/internal/modules/music_player/application/ports"
+	"github.com/sglre6355/sgrbot/internal/modules/music_player/application/gateways"
 	"github.com/sglre6355/sgrbot/internal/modules/music_player/domain"
 )
 
@@ -14,13 +14,13 @@ const DefaultPageSize = 10
 // QueueService handles queue operations.
 type QueueService struct {
 	playerStates domain.PlayerStateRepository
-	publisher    ports.EventPublisher
+	publisher    gateways.EventPublisher
 }
 
 // NewQueueService creates a new QueueService.
 func NewQueueService(
 	playerStates domain.PlayerStateRepository,
-	publisher ports.EventPublisher,
+	publisher gateways.EventPublisher,
 ) *QueueService {
 	return &QueueService{
 		playerStates: playerStates,
@@ -55,12 +55,7 @@ func (q *QueueService) Add(ctx context.Context, input QueueAddInput) (*QueueAddO
 		return nil, ErrNotConnected
 	}
 
-	// Capture whether queue was idle before appending
-	wasActive := state.IsPlaybackActive()
-
-	startIndex := state.Len()
-
-	// Create entries and append
+	// Create entries
 	entries := make([]domain.QueueEntry, 0, len(input.TrackIDs))
 	for _, trackID := range input.TrackIDs {
 		entries = append(
@@ -68,19 +63,15 @@ func (q *QueueService) Add(ctx context.Context, input QueueAddInput) (*QueueAddO
 			domain.NewQueueEntry(domain.TrackID(trackID), input.RequesterID, time.Now(), false),
 		)
 	}
-	state.Append(entries...)
 
-	if !wasActive {
-		state.Seek(startIndex)
-	}
-	state.SetPlaybackActive(true)
+	startIndex, becameActive := state.Enqueue(entries...)
 
 	if err := q.playerStates.Save(ctx, state); err != nil {
 		return nil, err
 	}
 
 	// Publish event if queue transitioned from idle to having a current track
-	if !wasActive {
+	if becameActive {
 		err := q.publisher.Publish(domain.NewCurrentTrackChangedEvent(input.GuildID))
 		if err != nil {
 			return nil, err
@@ -269,24 +260,17 @@ func (q *QueueService) Clear(
 	var count int
 	if input.KeepCurrentTrack {
 		// Clear played + upcoming, keep only current track
-		currentEntry := state.Current()
-		if currentEntry == nil {
-			// No current track (idle state) - clear all played tracks
+		var err error
+		count, err = state.ClearExceptCurrent()
+		if err != nil {
+			// Not playing — fall back to clearing entire queue
 			if state.Len() == 0 {
 				return nil, ErrQueueEmpty
 			}
 			count = state.Len()
 			state.Clear()
-		} else {
-			count = state.Len() - 1
-			if count == 0 {
-				return nil, ErrNothingToClear
-			}
-			// Use existing methods: clear all, add back current, activate
-			savedEntry := *currentEntry
-			state.Clear()
-			state.Append(savedEntry)
-			state.SetPlaybackActive(true)
+		} else if count == 0 {
+			return nil, ErrNothingToClear
 		}
 	} else {
 		// Clear all tracks

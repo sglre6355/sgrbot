@@ -83,27 +83,6 @@ func TestPlayerState_SetPaused(t *testing.T) {
 	}
 }
 
-func TestPlayerState_TogglePaused(t *testing.T) {
-	state := newTestPlayerState()
-
-	// Initially not paused
-	if state.IsPaused() {
-		t.Error("expected not to be paused initially")
-	}
-
-	// Toggle to paused
-	state.TogglePaused()
-	if !state.IsPaused() {
-		t.Error("expected to be paused after toggle")
-	}
-
-	// Toggle back to not paused
-	state.TogglePaused()
-	if state.IsPaused() {
-		t.Error("expected not to be paused after second toggle")
-	}
-}
-
 func TestPlayerState_LoopMode(t *testing.T) {
 	state := newTestPlayerState()
 
@@ -891,4 +870,328 @@ func TestPlayerState_IsAtLast(t *testing.T) {
 	if !state.IsAtLast() {
 		t.Error("state at last track should be at last")
 	}
+}
+
+func TestPlayerState_Pause(t *testing.T) {
+	t.Run("pause successfully", func(t *testing.T) {
+		state := newTestPlayerState()
+		state.Append(testEntry("a"))
+		state.SetPlaybackActive(true)
+
+		err := state.Pause()
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		if !state.IsPaused() {
+			t.Error("expected paused")
+		}
+	})
+
+	t.Run("not playing", func(t *testing.T) {
+		state := newTestPlayerState()
+
+		err := state.Pause()
+		if err != ErrNotPlaying {
+			t.Errorf("expected ErrNotPlaying, got %v", err)
+		}
+	})
+
+	t.Run("already paused", func(t *testing.T) {
+		state := newTestPlayerState()
+		state.Append(testEntry("a"))
+		state.SetPlaybackActive(true)
+		state.SetPaused(true)
+
+		err := state.Pause()
+		if err != ErrAlreadyPaused {
+			t.Errorf("expected ErrAlreadyPaused, got %v", err)
+		}
+	})
+}
+
+func TestPlayerState_Resume(t *testing.T) {
+	t.Run("resume successfully", func(t *testing.T) {
+		state := newTestPlayerState()
+		state.Append(testEntry("a"))
+		state.SetPlaybackActive(true)
+		state.SetPaused(true)
+
+		err := state.Resume()
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		if state.IsPaused() {
+			t.Error("expected not paused")
+		}
+	})
+
+	t.Run("not playing", func(t *testing.T) {
+		state := newTestPlayerState()
+
+		err := state.Resume()
+		if err != ErrNotPlaying {
+			t.Errorf("expected ErrNotPlaying, got %v", err)
+		}
+	})
+
+	t.Run("not paused", func(t *testing.T) {
+		state := newTestPlayerState()
+		state.Append(testEntry("a"))
+		state.SetPlaybackActive(true)
+
+		err := state.Resume()
+		if err != ErrNotPaused {
+			t.Errorf("expected ErrNotPaused, got %v", err)
+		}
+	})
+}
+
+func TestPlayerState_Skip(t *testing.T) {
+	t.Run("skip to next track", func(t *testing.T) {
+		state := newTestPlayerState()
+		state.Append(testEntry("a"), testEntry("b"))
+		state.SetPlaybackActive(true)
+
+		skipped, next, err := state.Skip()
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		if skipped.TrackID != "a" {
+			t.Errorf("expected skipped 'a', got %q", skipped.TrackID)
+		}
+		if next == nil || next.TrackID != "b" {
+			t.Errorf("expected next 'b', got %v", next)
+		}
+		if !state.IsPlaybackActive() {
+			t.Error("expected playback to remain active")
+		}
+	})
+
+	t.Run("skip at last track", func(t *testing.T) {
+		state := newTestPlayerState()
+		state.Append(testEntry("a"))
+		state.SetPlaybackActive(true)
+
+		skipped, next, err := state.Skip()
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		if skipped.TrackID != "a" {
+			t.Errorf("expected skipped 'a', got %q", skipped.TrackID)
+		}
+		if next != nil {
+			t.Errorf("expected next nil, got %v", next)
+		}
+		if state.IsPlaybackActive() {
+			t.Error("expected playback to be inactive")
+		}
+	})
+
+	t.Run("skip overrides LoopModeTrack", func(t *testing.T) {
+		state := newTestPlayerState()
+		state.Append(testEntry("a"), testEntry("b"))
+		state.SetPlaybackActive(true)
+		state.SetLoopMode(LoopModeTrack)
+
+		skipped, next, err := state.Skip()
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		if skipped.TrackID != "a" {
+			t.Errorf("expected skipped 'a', got %q", skipped.TrackID)
+		}
+		if next == nil || next.TrackID != "b" {
+			t.Errorf("expected next 'b', got %v", next)
+		}
+	})
+
+	t.Run("skip respects LoopModeQueue", func(t *testing.T) {
+		state := newTestPlayerState()
+		state.Append(testEntry("a"), testEntry("b"))
+		state.SetPlaybackActive(true)
+		state.SetLoopMode(LoopModeQueue)
+		state.Seek(1) // at last
+
+		_, next, err := state.Skip()
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		if next == nil || next.TrackID != "a" {
+			t.Errorf("expected next 'a' (wrap), got %v", next)
+		}
+	})
+
+	t.Run("not playing", func(t *testing.T) {
+		state := newTestPlayerState()
+
+		_, _, err := state.Skip()
+		if err != ErrNotPlaying {
+			t.Errorf("expected ErrNotPlaying, got %v", err)
+		}
+	})
+}
+
+func TestPlayerState_Enqueue(t *testing.T) {
+	t.Run("enqueue to idle player activates", func(t *testing.T) {
+		state := newTestPlayerState()
+
+		startIndex, becameActive := state.Enqueue(testEntry("a"), testEntry("b"))
+		if startIndex != 0 {
+			t.Errorf("expected startIndex 0, got %d", startIndex)
+		}
+		if !becameActive {
+			t.Error("expected becameActive=true")
+		}
+		if !state.IsPlaybackActive() {
+			t.Error("expected playback active")
+		}
+		if state.CurrentIndex() != 0 {
+			t.Errorf("expected currentIndex 0, got %d", state.CurrentIndex())
+		}
+		current := state.Current()
+		if current == nil || current.TrackID != "a" {
+			t.Errorf("expected current 'a', got %v", current)
+		}
+	})
+
+	t.Run("enqueue to active player appends", func(t *testing.T) {
+		state := newTestPlayerState()
+		state.Append(testEntry("a"))
+		state.SetPlaybackActive(true)
+
+		startIndex, becameActive := state.Enqueue(testEntry("b"), testEntry("c"))
+		if startIndex != 1 {
+			t.Errorf("expected startIndex 1, got %d", startIndex)
+		}
+		if becameActive {
+			t.Error("expected becameActive=false")
+		}
+		if state.CurrentIndex() != 0 {
+			t.Errorf("expected currentIndex 0, got %d", state.CurrentIndex())
+		}
+		if state.Len() != 3 {
+			t.Errorf("expected 3 entries, got %d", state.Len())
+		}
+	})
+}
+
+func TestPlayerState_HandleTrackEnded(t *testing.T) {
+	t.Run("normal end advances", func(t *testing.T) {
+		state := newTestPlayerState()
+		state.Append(testEntry("a"), testEntry("b"))
+		state.SetPlaybackActive(true)
+
+		next := state.HandleTrackEnded(false)
+		if next == nil || next.TrackID != "b" {
+			t.Errorf("expected next 'b', got %v", next)
+		}
+		if !state.IsPlaybackActive() {
+			t.Error("expected playback active")
+		}
+	})
+
+	t.Run("normal end at last deactivates", func(t *testing.T) {
+		state := newTestPlayerState()
+		state.Append(testEntry("a"))
+		state.SetPlaybackActive(true)
+
+		next := state.HandleTrackEnded(false)
+		if next != nil {
+			t.Errorf("expected nil, got %v", next)
+		}
+		if state.IsPlaybackActive() {
+			t.Error("expected playback inactive")
+		}
+	})
+
+	t.Run("normal end with LoopModeTrack repeats", func(t *testing.T) {
+		state := newTestPlayerState()
+		state.Append(testEntry("a"), testEntry("b"))
+		state.SetPlaybackActive(true)
+		state.SetLoopMode(LoopModeTrack)
+
+		next := state.HandleTrackEnded(false)
+		if next == nil || next.TrackID != "a" {
+			t.Errorf("expected next 'a', got %v", next)
+		}
+	})
+
+	t.Run("failed removes track and advances", func(t *testing.T) {
+		state := newTestPlayerState()
+		state.Append(testEntry("a"), testEntry("b"))
+		state.SetPlaybackActive(true)
+
+		next := state.HandleTrackEnded(true)
+		if next == nil || next.TrackID != "b" {
+			t.Errorf("expected next 'b', got %v", next)
+		}
+		if state.Len() != 1 {
+			t.Errorf("expected 1 entry, got %d", state.Len())
+		}
+	})
+
+	t.Run("failed removes last track deactivates", func(t *testing.T) {
+		state := newTestPlayerState()
+		state.Append(testEntry("a"))
+		state.SetPlaybackActive(true)
+
+		next := state.HandleTrackEnded(true)
+		if next != nil {
+			t.Errorf("expected nil, got %v", next)
+		}
+		if state.IsPlaybackActive() {
+			t.Error("expected playback inactive")
+		}
+	})
+}
+
+func TestPlayerState_ClearExceptCurrent(t *testing.T) {
+	t.Run("clears except current", func(t *testing.T) {
+		state := newTestPlayerState()
+		state.Append(testEntry("a"), testEntry("b"), testEntry("c"))
+		state.SetPlaybackActive(true)
+		state.Seek(1) // playing "b"
+
+		count, err := state.ClearExceptCurrent()
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		if count != 2 {
+			t.Errorf("expected count 2, got %d", count)
+		}
+		if state.Len() != 1 {
+			t.Errorf("expected 1 entry, got %d", state.Len())
+		}
+		current := state.Current()
+		if current == nil || current.TrackID != "b" {
+			t.Errorf("expected current 'b', got %v", current)
+		}
+		if state.CurrentIndex() != 0 {
+			t.Errorf("expected currentIndex 0, got %d", state.CurrentIndex())
+		}
+	})
+
+	t.Run("not playing returns error", func(t *testing.T) {
+		state := newTestPlayerState()
+		state.Append(testEntry("a"))
+
+		_, err := state.ClearExceptCurrent()
+		if err != ErrNotPlaying {
+			t.Errorf("expected ErrNotPlaying, got %v", err)
+		}
+	})
+
+	t.Run("only current track returns zero count", func(t *testing.T) {
+		state := newTestPlayerState()
+		state.Append(testEntry("a"))
+		state.SetPlaybackActive(true)
+
+		count, err := state.ClearExceptCurrent()
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		if count != 0 {
+			t.Errorf("expected count 0, got %d", count)
+		}
+	})
 }

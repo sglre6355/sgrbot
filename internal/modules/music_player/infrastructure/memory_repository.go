@@ -8,7 +8,7 @@ import (
 	"github.com/sglre6355/sgrbot/internal/modules/music_player/domain"
 )
 
-// Ensure MemoryRepository implements required ports.
+// Ensure MemoryRepository implements required gateways.
 var (
 	_ domain.PlayerStateRepository = (*MemoryRepository)(nil)
 )

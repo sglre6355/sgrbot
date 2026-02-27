@@ -8,17 +8,17 @@ import (
 	"reflect"
 	"sync"
 
-	"github.com/sglre6355/sgrbot/internal/modules/music_player/application/ports"
+	"github.com/sglre6355/sgrbot/internal/modules/music_player/application/gateways"
 	"github.com/sglre6355/sgrbot/internal/modules/music_player/domain"
 )
 
 // DefaultEventBufferSize is the default buffer size for event channels.
 const DefaultEventBufferSize = 100
 
-// Ensure ChannelEventBus implements required ports.
+// Ensure ChannelEventBus implements required gateways.
 var (
-	_ ports.EventPublisher  = (*ChannelEventBus)(nil)
-	_ ports.EventSubscriber = (*ChannelEventBus)(nil)
+	_ gateways.EventPublisher  = (*ChannelEventBus)(nil)
+	_ gateways.EventSubscriber = (*ChannelEventBus)(nil)
 )
 
 // ChannelEventBus provides a channel-based event bus for async event handling.

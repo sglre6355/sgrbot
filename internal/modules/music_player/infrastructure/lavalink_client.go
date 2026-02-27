@@ -13,7 +13,7 @@ import (
 	"github.com/disgoorg/disgolink/v3/disgolink"
 	"github.com/disgoorg/disgolink/v3/lavalink"
 	"github.com/disgoorg/snowflake/v2"
-	"github.com/sglre6355/sgrbot/internal/modules/music_player/application/ports"
+	"github.com/sglre6355/sgrbot/internal/modules/music_player/application/gateways"
 	"github.com/sglre6355/sgrbot/internal/modules/music_player/domain"
 )
 
@@ -22,13 +22,14 @@ const voiceConnectionTimeout = 10 * time.Second
 
 // Ensure LavalinkAdapter implements port interfaces.
 var (
-	_ ports.AudioPlayer     = (*LavalinkAdapter)(nil)
-	_ ports.VoiceConnection = (*LavalinkAdapter)(nil)
-	_ ports.TrackProvider   = (*LavalinkAdapter)(nil)
+	_ gateways.TrackPlayer            = (*LavalinkAdapter)(nil)
+	_ gateways.VoiceConnectionManager = (*LavalinkAdapter)(nil)
+	_ domain.TrackRepository          = (*LavalinkAdapter)(nil)
+	_ gateways.TrackResolver          = (*LavalinkAdapter)(nil)
 )
 
-// pendingVoiceConnection tracks the state of a pending voice connection.
-type pendingVoiceConnection struct {
+// pendingVoiceConnectionManager tracks the state of a pending voice connection.
+type pendingVoiceConnectionManager struct {
 	mu             sync.Mutex
 	hasVoiceState  bool
 	hasVoiceServer bool
@@ -36,7 +37,7 @@ type pendingVoiceConnection struct {
 }
 
 // onEvent marks an event as received and signals ready if both events are present.
-func (p *pendingVoiceConnection) onEvent(isVoiceState bool) {
+func (p *pendingVoiceConnectionManager) onEvent(isVoiceState bool) {
 	p.mu.Lock()
 	defer p.mu.Unlock()
 
@@ -113,12 +114,12 @@ func (b *voiceEventBuffer) getData() (channelID *snowflake.ID, sessionID, token,
 type LavalinkAdapter struct {
 	link      disgolink.Client
 	session   *discordgo.Session
-	publisher ports.EventPublisher
+	publisher gateways.EventPublisher
 
 	botID snowflake.ID
 
 	pendingMu sync.Mutex
-	pending   map[snowflake.ID]*pendingVoiceConnection
+	pending   map[snowflake.ID]*pendingVoiceConnectionManager
 
 	// voiceBuffers holds buffered voice events per guild to handle out-of-order events
 	voiceBufferMu sync.Mutex
@@ -139,7 +140,7 @@ type LavalinkConfig struct {
 // NewLavalinkAdapter creates a new LavalinkAdapter.
 func NewLavalinkAdapter(
 	session *discordgo.Session,
-	publisher ports.EventPublisher,
+	publisher gateways.EventPublisher,
 	config LavalinkConfig,
 ) (*LavalinkAdapter, error) {
 	botID, err := snowflake.Parse(session.State.User.ID)
@@ -151,7 +152,7 @@ func NewLavalinkAdapter(
 		session:      session,
 		publisher:    publisher,
 		botID:        botID,
-		pending:      make(map[snowflake.ID]*pendingVoiceConnection),
+		pending:      make(map[snowflake.ID]*pendingVoiceConnectionManager),
 		voiceBuffers: make(map[snowflake.ID]*voiceEventBuffer),
 		trackCache:   make(map[domain.TrackID]*domain.Track),
 	}
@@ -190,7 +191,7 @@ func (c *LavalinkAdapter) Link() disgolink.Client {
 // It waits for both VoiceStateUpdate and VoiceServerUpdate events before returning.
 func (c *LavalinkAdapter) JoinChannel(ctx context.Context, guildID, channelID snowflake.ID) error {
 	// Create pending connection tracker
-	pending := &pendingVoiceConnection{
+	pending := &pendingVoiceConnectionManager{
 		ready: make(chan struct{}),
 	}
 
@@ -296,9 +297,9 @@ func (c *LavalinkAdapter) Resume(ctx context.Context, guildID snowflake.ID) erro
 	return nil
 }
 
-// LoadTrack returns the Track for the given ID.
+// FindByID returns the Track for the given ID.
 // It checks the local cache first, falling back to a Lavalink query on cache miss.
-func (c *LavalinkAdapter) LoadTrack(ctx context.Context, id domain.TrackID) (domain.Track, error) {
+func (c *LavalinkAdapter) FindByID(ctx context.Context, id domain.TrackID) (domain.Track, error) {
 	c.trackMu.RLock()
 	track, ok := c.trackCache[id]
 	c.trackMu.RUnlock()
@@ -316,15 +317,15 @@ func (c *LavalinkAdapter) LoadTrack(ctx context.Context, id domain.TrackID) (dom
 	return c.convertTrack(lavalinkTrack), nil
 }
 
-// LoadTracks returns Tracks for the given IDs.
+// FindByIDs returns Tracks for the given IDs.
 // It checks the local cache first, falling back to a Lavalink query for cache misses.
-func (c *LavalinkAdapter) LoadTracks(
+func (c *LavalinkAdapter) FindByIDs(
 	ctx context.Context,
 	ids ...domain.TrackID,
 ) ([]domain.Track, error) {
 	tracks := make([]domain.Track, 0, len(ids))
 	for _, id := range ids {
-		track, err := c.LoadTrack(ctx, id)
+		track, err := c.FindByID(ctx, id)
 		if err != nil {
 			return nil, err
 		}
@@ -355,10 +356,10 @@ func (c *LavalinkAdapter) ResolveQuery(
 
 	switch data := result.Data.(type) {
 	case lavalink.Track:
-		return domain.TrackList{
-			Type:   domain.TrackListTypeTrack,
-			Tracks: []domain.Track{c.convertTrack(data)},
-		}, nil
+		return domain.NewTrackList(
+			domain.TrackListTypeTrack,
+			[]domain.Track{c.convertTrack(data)},
+		), nil
 
 	case lavalink.Playlist:
 		tracks := make([]domain.Track, len(data.Tracks))
@@ -367,23 +368,21 @@ func (c *LavalinkAdapter) ResolveQuery(
 		}
 		sourceName := data.Tracks[0].Info.SourceName
 		identifier, cleanURL := extractPlaylistInfo(query, sourceName)
-		return domain.TrackList{
-			Type:       domain.TrackListTypePlaylist,
-			Identifier: &identifier,
-			Name:       &data.Info.Name,
-			Url:        &cleanURL,
-			Tracks:     tracks,
-		}, nil
+		return domain.NewTrackList(
+			domain.TrackListTypePlaylist,
+			tracks,
+			domain.WithPlaylistInfo(identifier, data.Info.Name, cleanURL),
+		), nil
 
 	case lavalink.Search:
 		tracks := make([]domain.Track, len(data))
 		for i, track := range data {
 			tracks[i] = c.convertTrack(track)
 		}
-		return domain.TrackList{
-			Type:   domain.TrackListTypeSearch,
-			Tracks: tracks,
-		}, nil
+		return domain.NewTrackList(
+			domain.TrackListTypeSearch,
+			tracks,
+		), nil
 
 	case lavalink.Empty:
 		return domain.TrackList{}, fmt.Errorf("no results found")
