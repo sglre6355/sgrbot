@@ -30,3 +30,29 @@ type TrackList struct {
 	Url        *string
 	Tracks     []Track
 }
+
+// TrackListOption configures optional fields on a TrackList.
+type TrackListOption func(*TrackList)
+
+// WithPlaylistInfo sets playlist metadata on a TrackList.
+func WithPlaylistInfo(identifier, name, url string) TrackListOption {
+	return func(tl *TrackList) {
+		tl.Identifier = &identifier
+		tl.Name = &name
+		tl.Url = &url
+	}
+}
+
+// NewTrackList creates a TrackList.
+func NewTrackList(trackListType TrackListType, tracks []Track, opts ...TrackListOption) TrackList {
+	tl := TrackList{
+		Type:   trackListType,
+		Tracks: tracks,
+	}
+
+	for _, opt := range opts {
+		opt(&tl)
+	}
+
+	return tl
+}

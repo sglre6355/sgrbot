@@ -356,10 +356,10 @@ func (c *LavalinkAdapter) ResolveQuery(
 
 	switch data := result.Data.(type) {
 	case lavalink.Track:
-		return domain.TrackList{
-			Type:   domain.TrackListTypeTrack,
-			Tracks: []domain.Track{c.convertTrack(data)},
-		}, nil
+		return domain.NewTrackList(
+			domain.TrackListTypeTrack,
+			[]domain.Track{c.convertTrack(data)},
+		), nil
 
 	case lavalink.Playlist:
 		tracks := make([]domain.Track, len(data.Tracks))
@@ -368,23 +368,21 @@ func (c *LavalinkAdapter) ResolveQuery(
 		}
 		sourceName := data.Tracks[0].Info.SourceName
 		identifier, cleanURL := extractPlaylistInfo(query, sourceName)
-		return domain.TrackList{
-			Type:       domain.TrackListTypePlaylist,
-			Identifier: &identifier,
-			Name:       &data.Info.Name,
-			Url:        &cleanURL,
-			Tracks:     tracks,
-		}, nil
+		return domain.NewTrackList(
+			domain.TrackListTypePlaylist,
+			tracks,
+			domain.WithPlaylistInfo(identifier, data.Info.Name, cleanURL),
+		), nil
 
 	case lavalink.Search:
 		tracks := make([]domain.Track, len(data))
 		for i, track := range data {
 			tracks[i] = c.convertTrack(track)
 		}
-		return domain.TrackList{
-			Type:   domain.TrackListTypeSearch,
-			Tracks: tracks,
-		}, nil
+		return domain.NewTrackList(
+			domain.TrackListTypeSearch,
+			tracks,
+		), nil
 
 	case lavalink.Empty:
 		return domain.TrackList{}, fmt.Errorf("no results found")
