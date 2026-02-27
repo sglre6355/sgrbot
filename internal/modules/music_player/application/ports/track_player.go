@@ -7,8 +7,8 @@ import (
 	"github.com/sglre6355/sgrbot/internal/modules/music_player/domain"
 )
 
-// AudioPlayer defines the interface for audio playback operations.
-type AudioPlayer interface {
+// TrackPlayer defines the interface for track playback operations.
+type TrackPlayer interface {
 	// Play starts playback of the given track.
 	Play(ctx context.Context, guildID snowflake.ID, trackID domain.TrackID) error
 

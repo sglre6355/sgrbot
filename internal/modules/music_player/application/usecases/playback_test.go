@@ -18,7 +18,7 @@ func TestPlaybackService_Pause(t *testing.T) {
 		name        string
 		input       PauseInput
 		setupRepo   func(*mockRepository, *mockTrackRepository)
-		setupPlayer func(*mockAudioPlayer)
+		setupPlayer func(*mockTrackPlayer)
 		wantErr     error
 	}{
 		{
@@ -69,7 +69,7 @@ func TestPlaybackService_Pause(t *testing.T) {
 				state := m.createConnectedState(guildID, voiceChannelID, textChannelID)
 				setupPlaying(state, tp, mockTrack("track-1"))
 			},
-			setupPlayer: func(m *mockAudioPlayer) {
+			setupPlayer: func(m *mockTrackPlayer) {
 				m.pauseErr = errors.New("pause failed")
 			},
 			wantErr: errors.New("pause failed"),
@@ -79,7 +79,7 @@ func TestPlaybackService_Pause(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			repo := newMockRepository()
-			player := &mockAudioPlayer{}
+			player := &mockTrackPlayer{}
 			tp := newMockTrackRepository()
 
 			if tt.setupRepo != nil {
@@ -126,7 +126,7 @@ func TestPlaybackService_Resume(t *testing.T) {
 		name        string
 		input       ResumeInput
 		setupRepo   func(*mockRepository, *mockTrackRepository)
-		setupPlayer func(*mockAudioPlayer)
+		setupPlayer func(*mockTrackPlayer)
 		wantErr     error
 	}{
 		{
@@ -178,7 +178,7 @@ func TestPlaybackService_Resume(t *testing.T) {
 				setupPlaying(state, tp, mockTrack("track-1"))
 				state.SetPaused(true)
 			},
-			setupPlayer: func(m *mockAudioPlayer) {
+			setupPlayer: func(m *mockTrackPlayer) {
 				m.resumeErr = errors.New("resume failed")
 			},
 			wantErr: errors.New("resume failed"),
@@ -188,7 +188,7 @@ func TestPlaybackService_Resume(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			repo := newMockRepository()
-			player := &mockAudioPlayer{}
+			player := &mockTrackPlayer{}
 			tp := newMockTrackRepository()
 
 			if tt.setupRepo != nil {
@@ -308,7 +308,7 @@ func TestPlaybackService_Skip(t *testing.T) {
 				tt.setupRepo(repo, tp)
 			}
 
-			service := NewPlaybackService(repo, &mockAudioPlayer{}, publisher, nil, tp, nil)
+			service := NewPlaybackService(repo, &mockTrackPlayer{}, publisher, nil, tp, nil)
 			output, err := service.Skip(context.Background(), tt.input)
 
 			if tt.wantErr != nil {
@@ -417,7 +417,7 @@ func TestPlaybackService_SetLoopMode(t *testing.T) {
 
 			service := NewPlaybackService(
 				repo,
-				&mockAudioPlayer{},
+				&mockTrackPlayer{},
 				nil,
 				nil,
 				newMockTrackRepository(),
@@ -516,7 +516,7 @@ func TestPlaybackService_CycleLoopMode(t *testing.T) {
 
 			service := NewPlaybackService(
 				repo,
-				&mockAudioPlayer{},
+				&mockTrackPlayer{},
 				nil,
 				nil,
 				newMockTrackRepository(),

@@ -22,7 +22,7 @@ const voiceConnectionTimeout = 10 * time.Second
 
 // Ensure LavalinkAdapter implements port interfaces.
 var (
-	_ ports.AudioPlayer      = (*LavalinkAdapter)(nil)
+	_ ports.TrackPlayer      = (*LavalinkAdapter)(nil)
 	_ ports.VoiceConnection  = (*LavalinkAdapter)(nil)
 	_ domain.TrackRepository = (*LavalinkAdapter)(nil)
 	_ ports.TrackResolver    = (*LavalinkAdapter)(nil)

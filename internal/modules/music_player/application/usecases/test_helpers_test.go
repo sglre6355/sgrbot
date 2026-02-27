@@ -60,26 +60,26 @@ func (m *mockRepository) Delete(_ context.Context, guildID snowflake.ID) error {
 	return nil
 }
 
-type mockAudioPlayer struct {
+type mockTrackPlayer struct {
 	playErr   error
 	stopErr   error
 	pauseErr  error
 	resumeErr error
 }
 
-func (m *mockAudioPlayer) Play(_ context.Context, _ snowflake.ID, _ domain.TrackID) error {
+func (m *mockTrackPlayer) Play(_ context.Context, _ snowflake.ID, _ domain.TrackID) error {
 	return m.playErr
 }
 
-func (m *mockAudioPlayer) Stop(_ context.Context, _ snowflake.ID) error {
+func (m *mockTrackPlayer) Stop(_ context.Context, _ snowflake.ID) error {
 	return m.stopErr
 }
 
-func (m *mockAudioPlayer) Pause(_ context.Context, _ snowflake.ID) error {
+func (m *mockTrackPlayer) Pause(_ context.Context, _ snowflake.ID) error {
 	return m.pauseErr
 }
 
-func (m *mockAudioPlayer) Resume(_ context.Context, _ snowflake.ID) error {
+func (m *mockTrackPlayer) Resume(_ context.Context, _ snowflake.ID) error {
 	return m.resumeErr
 }
 

@@ -11,7 +11,7 @@ import (
 // PlaybackService handles playback operations.
 type PlaybackService struct {
 	playerStates domain.PlayerStateRepository
-	audioPlayer  ports.AudioPlayer
+	audioPlayer  ports.TrackPlayer
 	publisher    ports.EventPublisher
 	notifier     ports.NotificationSender
 	trackRepo    domain.TrackRepository
@@ -21,7 +21,7 @@ type PlaybackService struct {
 // NewPlaybackService creates a new PlaybackService.
 func NewPlaybackService(
 	playerStates domain.PlayerStateRepository,
-	audioPlayer ports.AudioPlayer,
+	audioPlayer ports.TrackPlayer,
 	publisher ports.EventPublisher,
 	notifier ports.NotificationSender,
 	trackRepo domain.TrackRepository,

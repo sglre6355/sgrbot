@@ -15,7 +15,7 @@ import (
 // It subscribes to CurrentTrackChanged and TrackEnded events to manage playback flow.
 type PlaybackEventHandler struct {
 	playerStates    domain.PlayerStateRepository
-	player          ports.AudioPlayer
+	player          ports.TrackPlayer
 	publisher       ports.EventPublisher
 	subscriber      ports.EventSubscriber
 	autoPlayService *domain.AutoPlayService
@@ -25,7 +25,7 @@ type PlaybackEventHandler struct {
 // NewPlaybackEventHandler creates a new PlaybackEventHandler.
 func NewPlaybackEventHandler(
 	playerStates domain.PlayerStateRepository,
-	player ports.AudioPlayer,
+	player ports.TrackPlayer,
 	publisher ports.EventPublisher,
 	subscriber ports.EventSubscriber,
 	autoPlayService *domain.AutoPlayService,
