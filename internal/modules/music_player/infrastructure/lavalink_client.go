@@ -22,9 +22,10 @@ const voiceConnectionTimeout = 10 * time.Second
 
 // Ensure LavalinkAdapter implements port interfaces.
 var (
-	_ ports.AudioPlayer     = (*LavalinkAdapter)(nil)
-	_ ports.VoiceConnection = (*LavalinkAdapter)(nil)
-	_ ports.TrackProvider   = (*LavalinkAdapter)(nil)
+	_ ports.AudioPlayer      = (*LavalinkAdapter)(nil)
+	_ ports.VoiceConnection  = (*LavalinkAdapter)(nil)
+	_ domain.TrackRepository = (*LavalinkAdapter)(nil)
+	_ ports.TrackResolver    = (*LavalinkAdapter)(nil)
 )
 
 // pendingVoiceConnection tracks the state of a pending voice connection.
@@ -296,9 +297,9 @@ func (c *LavalinkAdapter) Resume(ctx context.Context, guildID snowflake.ID) erro
 	return nil
 }
 
-// LoadTrack returns the Track for the given ID.
+// FindByID returns the Track for the given ID.
 // It checks the local cache first, falling back to a Lavalink query on cache miss.
-func (c *LavalinkAdapter) LoadTrack(ctx context.Context, id domain.TrackID) (domain.Track, error) {
+func (c *LavalinkAdapter) FindByID(ctx context.Context, id domain.TrackID) (domain.Track, error) {
 	c.trackMu.RLock()
 	track, ok := c.trackCache[id]
 	c.trackMu.RUnlock()
@@ -316,15 +317,15 @@ func (c *LavalinkAdapter) LoadTrack(ctx context.Context, id domain.TrackID) (dom
 	return c.convertTrack(lavalinkTrack), nil
 }
 
-// LoadTracks returns Tracks for the given IDs.
+// FindByIDs returns Tracks for the given IDs.
 // It checks the local cache first, falling back to a Lavalink query for cache misses.
-func (c *LavalinkAdapter) LoadTracks(
+func (c *LavalinkAdapter) FindByIDs(
 	ctx context.Context,
 	ids ...domain.TrackID,
 ) ([]domain.Track, error) {
 	tracks := make([]domain.Track, 0, len(ids))
 	for _, id := range ids {
-		track, err := c.LoadTrack(ctx, id)
+		track, err := c.FindByID(ctx, id)
 		if err != nil {
 			return nil, err
 		}

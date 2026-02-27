@@ -122,7 +122,7 @@ func TestTrackLoaderService_ResolveQuery(t *testing.T) {
 				tt.setupResolver(resolver)
 			}
 
-			service := NewTrackLoaderService(resolver)
+			service := NewTrackLoaderService(nil, resolver)
 			output, err := service.ResolveQuery(context.Background(), tt.input)
 
 			if tt.wantErr != nil {

@@ -27,7 +27,7 @@ var (
 // Notifier sends notifications to Discord channels.
 type Notifier struct {
 	session          *discordgo.Session
-	trackProvider    ports.TrackProvider
+	trackRepo        domain.TrackRepository
 	userInfoProvider ports.UserInfoProvider
 	httpClient       *http.Client
 }
@@ -35,12 +35,12 @@ type Notifier struct {
 // NewNotifier creates a new Notifier.
 func NewNotifier(
 	session *discordgo.Session,
-	trackProvider ports.TrackProvider,
+	trackRepo domain.TrackRepository,
 	userInfoProvider ports.UserInfoProvider,
 ) *Notifier {
 	return &Notifier{
 		session:          session,
-		trackProvider:    trackProvider,
+		trackRepo:        trackRepo,
 		userInfoProvider: userInfoProvider,
 		httpClient: &http.Client{
 			Timeout: 5 * time.Second,
@@ -56,7 +56,7 @@ func (n *Notifier) SendNowPlaying(
 	requesterID snowflake.ID,
 	enqueuedAt time.Time,
 ) (snowflake.ID, error) {
-	track, err := n.trackProvider.LoadTrack(context.Background(), trackID)
+	track, err := n.trackRepo.FindByID(context.Background(), trackID)
 	if err != nil {
 		return 0, fmt.Errorf("failed to load track %q: %w", trackID, err)
 	}

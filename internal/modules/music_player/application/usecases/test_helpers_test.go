@@ -101,17 +101,6 @@ type mockTrackResolver struct {
 	loadResult domain.TrackList
 }
 
-func (m *mockTrackResolver) LoadTrack(_ context.Context, _ domain.TrackID) (domain.Track, error) {
-	return domain.Track{}, nil
-}
-
-func (m *mockTrackResolver) LoadTracks(
-	_ context.Context,
-	_ ...domain.TrackID,
-) ([]domain.Track, error) {
-	return nil, nil
-}
-
 func (m *mockTrackResolver) ResolveQuery(_ context.Context, _ string) (domain.TrackList, error) {
 	if m.loadErr != nil {
 		return domain.TrackList{}, m.loadErr
@@ -146,17 +135,17 @@ func (m *mockEventPublisher) Publish(event domain.Event) error {
 	return nil
 }
 
-type mockTrackProvider struct {
+type mockTrackRepository struct {
 	tracks map[domain.TrackID]*domain.Track
 }
 
-func newMockTrackProvider() *mockTrackProvider {
-	return &mockTrackProvider{
+func newMockTrackRepository() *mockTrackRepository {
+	return &mockTrackRepository{
 		tracks: make(map[domain.TrackID]*domain.Track),
 	}
 }
 
-func (m *mockTrackProvider) LoadTrack(
+func (m *mockTrackRepository) FindByID(
 	_ context.Context,
 	id domain.TrackID,
 ) (domain.Track, error) {
@@ -167,7 +156,7 @@ func (m *mockTrackProvider) LoadTrack(
 	return *t, nil
 }
 
-func (m *mockTrackProvider) LoadTracks(
+func (m *mockTrackRepository) FindByIDs(
 	_ context.Context,
 	ids ...domain.TrackID,
 ) ([]domain.Track, error) {
@@ -182,14 +171,7 @@ func (m *mockTrackProvider) LoadTracks(
 	return result, nil
 }
 
-func (m *mockTrackProvider) ResolveQuery(
-	_ context.Context,
-	_ string,
-) (domain.TrackList, error) {
-	return domain.TrackList{}, nil
-}
-
-func (m *mockTrackProvider) Store(track *domain.Track) {
+func (m *mockTrackRepository) Store(track *domain.Track) {
 	m.tracks[track.ID] = track
 }
 
@@ -220,9 +202,9 @@ func (m *mockNotificationSender) SendError(_ snowflake.ID, _ string) error {
 }
 
 // setupPlaying sets up a PlayerState with a track playing.
-// It stores the track in the track provider, appends it to the queue, and activates playback.
-func setupPlaying(state *domain.PlayerState, tp *mockTrackProvider, track *domain.Track) {
-	tp.Store(track)
+// It stores the track in the track repository, appends it to the queue, and activates playback.
+func setupPlaying(state *domain.PlayerState, tr *mockTrackRepository, track *domain.Track) {
+	tr.Store(track)
 	state.Append(domain.QueueEntry{TrackID: track.ID})
 	state.SetPlaybackActive(true)
 }

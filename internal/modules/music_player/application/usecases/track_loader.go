@@ -35,14 +35,19 @@ func toTrackData(t domain.Track) TrackData {
 	}
 }
 
-// TrackLoaderService handles track loading operations and implements TrackProvider via caching.
+// TrackLoaderService handles track loading operations.
 type TrackLoaderService struct {
-	trackResolver ports.TrackProvider
+	trackRepo     domain.TrackRepository
+	trackResolver ports.TrackResolver
 }
 
 // NewTrackLoaderService creates a new TrackLoaderService.
-func NewTrackLoaderService(trackResolver ports.TrackProvider) *TrackLoaderService {
+func NewTrackLoaderService(
+	trackRepo domain.TrackRepository,
+	trackResolver ports.TrackResolver,
+) *TrackLoaderService {
 	return &TrackLoaderService{
+		trackRepo:     trackRepo,
 		trackResolver: trackResolver,
 	}
 }
@@ -60,7 +65,7 @@ func (s *TrackLoaderService) LoadTrack(
 	ctx context.Context,
 	input LoadTrackInput,
 ) (LoadTrackOutput, error) {
-	track, err := s.trackResolver.LoadTrack(ctx, domain.TrackID(input.TrackID))
+	track, err := s.trackRepo.FindByID(ctx, domain.TrackID(input.TrackID))
 	if err != nil {
 		return LoadTrackOutput{}, err
 	}
@@ -85,7 +90,7 @@ func (s *TrackLoaderService) LoadTracks(
 		trackIDs[i] = domain.TrackID(id)
 	}
 
-	tracks, err := s.trackResolver.LoadTracks(ctx, trackIDs...)
+	tracks, err := s.trackRepo.FindByIDs(ctx, trackIDs...)
 	if err != nil {
 		return LoadTracksOutput{}, err
 	}

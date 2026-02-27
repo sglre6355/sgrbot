@@ -10,6 +10,7 @@ import (
 	"github.com/sglre6355/sgrbot/internal/bot"
 	"github.com/sglre6355/sgrbot/internal/modules/music_player/application"
 	"github.com/sglre6355/sgrbot/internal/modules/music_player/application/usecases"
+	"github.com/sglre6355/sgrbot/internal/modules/music_player/domain"
 	"github.com/sglre6355/sgrbot/internal/modules/music_player/infrastructure"
 	"github.com/sglre6355/sgrbot/internal/modules/music_player/presentation/discord"
 )
@@ -108,7 +109,7 @@ func (m *MusicPlayerModule) initWithoutLavalink() error {
 	// Create service with nil dependencies
 	// These will fail at runtime if called, but allows the module to load
 	queue := usecases.NewQueueService(repo, nil)
-	trackLoader := usecases.NewTrackLoaderService(nil)
+	trackLoader := usecases.NewTrackLoaderService(nil, nil)
 
 	m.commandHandlers = discord.NewCommandHandlers(nil, nil, queue, nil, nil)
 	m.autocomplete = discord.NewAutocompleteHandler(queue, trackLoader)
@@ -146,7 +147,7 @@ func (m *MusicPlayerModule) initWithLavalink(deps bot.ModuleDependencies) error 
 	notifier := infrastructure.NewNotifier(deps.Session, lavalinkAdapter, userInfoProv)
 
 	// Create services with event bus
-	trackLoader := usecases.NewTrackLoaderService(lavalinkAdapter)
+	trackLoader := usecases.NewTrackLoaderService(lavalinkAdapter, lavalinkAdapter)
 	voiceChannel := usecases.NewVoiceChannelService(
 		repo,
 		lavalinkAdapter,
@@ -172,8 +173,9 @@ func (m *MusicPlayerModule) initWithLavalink(deps bot.ModuleDependencies) error 
 		return err
 	}
 
-	// Create track recommender adapter
+	// Create track recommender and auto-play service
 	trackRecommender := infrastructure.NewTrackRecommenderAdapter(lavalinkAdapter)
+	autoPlayService := domain.NewAutoPlayService(lavalinkAdapter, trackRecommender)
 
 	// Create application event handlers
 	m.playbackHandler = application.NewPlaybackEventHandler(
@@ -181,8 +183,7 @@ func (m *MusicPlayerModule) initWithLavalink(deps bot.ModuleDependencies) error 
 		lavalinkAdapter,
 		m.eventBus,
 		m.eventBus,
-		trackRecommender,
-		lavalinkAdapter,
+		autoPlayService,
 		botID,
 	)
 	m.notificationHandler = application.NewNotificationEventHandler(

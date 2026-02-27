@@ -3,7 +3,6 @@ package application
 import (
 	"context"
 	"log/slog"
-	"math/rand/v2"
 	"reflect"
 	"time"
 
@@ -15,13 +14,12 @@ import (
 // PlaybackEventHandler handles events related to playback control.
 // It subscribes to CurrentTrackChanged and TrackEnded events to manage playback flow.
 type PlaybackEventHandler struct {
-	playerStates  domain.PlayerStateRepository
-	player        ports.AudioPlayer
-	publisher     ports.EventPublisher
-	subscriber    ports.EventSubscriber
-	recommender   ports.TrackRecommender
-	trackProvider ports.TrackProvider
-	botUserID     snowflake.ID
+	playerStates    domain.PlayerStateRepository
+	player          ports.AudioPlayer
+	publisher       ports.EventPublisher
+	subscriber      ports.EventSubscriber
+	autoPlayService *domain.AutoPlayService
+	botUserID       snowflake.ID
 }
 
 // NewPlaybackEventHandler creates a new PlaybackEventHandler.
@@ -30,18 +28,16 @@ func NewPlaybackEventHandler(
 	player ports.AudioPlayer,
 	publisher ports.EventPublisher,
 	subscriber ports.EventSubscriber,
-	recommender ports.TrackRecommender,
-	trackProvider ports.TrackProvider,
+	autoPlayService *domain.AutoPlayService,
 	botUserID snowflake.ID,
 ) *PlaybackEventHandler {
 	return &PlaybackEventHandler{
-		playerStates:  playerStates,
-		player:        player,
-		subscriber:    subscriber,
-		publisher:     publisher,
-		recommender:   recommender,
-		trackProvider: trackProvider,
-		botUserID:     botUserID,
+		playerStates:    playerStates,
+		player:          player,
+		subscriber:      subscriber,
+		publisher:       publisher,
+		autoPlayService: autoPlayService,
+		botUserID:       botUserID,
 	}
 }
 
@@ -89,9 +85,18 @@ func (h *PlaybackEventHandler) handleCurrentTrackChanged(
 	current := state.Current()
 
 	// Queue ended — try auto-play if enabled
-	if current == nil && state.IsAutoPlayEnabled() && h.recommender != nil {
-		ok := h.tryAutoPlay(ctx, &state)
-		if ok {
+	if current == nil && state.IsAutoPlayEnabled() {
+		track := h.autoPlayService.GetRecommendation(ctx, &state)
+		if track != nil {
+			entry := domain.NewQueueEntry(track.ID, h.botUserID, time.Now(), true)
+			state.Enqueue(entry)
+
+			slog.Info(
+				"auto-play queued track",
+				"guild", state.GetGuildID(),
+				"track", track.ID,
+			)
+
 			if err := h.playerStates.Save(ctx, state); err != nil {
 				slog.Error(
 					"failed to save player state after auto-play",
@@ -100,6 +105,7 @@ func (h *PlaybackEventHandler) handleCurrentTrackChanged(
 				)
 				return
 			}
+
 			current = state.Current()
 		}
 	}
@@ -152,22 +158,7 @@ func (h *PlaybackEventHandler) handleTrackEnded(ctx context.Context, event domai
 		"loop_mode", state.GetLoopMode().String(),
 	)
 
-	if event.TrackFailed {
-		// Remove advances past the failed track (respecting loop mode),
-		// then removes it from the queue.
-		if _, err := state.Remove(state.CurrentIndex()); err != nil {
-			slog.Warn(
-				"failed to remove failing track",
-				"event", event,
-				"error", err,
-			)
-		}
-	} else {
-		next := state.Advance(state.GetLoopMode())
-		if next == nil {
-			state.SetPlaybackActive(false)
-		}
-	}
+	state.HandleTrackEnded(event.TrackFailed)
 
 	// Save player state
 	if err := h.playerStates.Save(ctx, state); err != nil {
@@ -189,135 +180,6 @@ func (h *PlaybackEventHandler) handleTrackEnded(ctx context.Context, event domai
 			"error", err,
 		)
 	}
-}
-
-// tryAutoPlay attempts to recommend and enqueue a track for auto-play.
-// Returns true if a track was successfully appended and the state was advanced.
-func (h *PlaybackEventHandler) tryAutoPlay(
-	ctx context.Context,
-	state *domain.PlayerState,
-) bool {
-	// Collect seed and exclude track IDs using a weighted mix:
-	// up to 2 randomly sampled manually added YouTube tracks + the most recent
-	// auto-play YouTube track.
-	// This keeps recommendations anchored to the user's selections while allowing
-	// natural progression via the latest auto-play track.
-	allEntries := state.List()
-	var manualIDs []domain.TrackID
-	var autoPlayIDs []domain.TrackID
-	for _, entry := range allEntries {
-		if entry.IsAutoPlay {
-			autoPlayIDs = append(autoPlayIDs, entry.TrackID)
-		} else {
-			manualIDs = append(manualIDs, entry.TrackID)
-		}
-	}
-
-	seeds := make([]domain.TrackID, 0, 3)
-	seedSet := make(map[domain.TrackID]struct{}, 3)
-
-	// Sample up to 2 manual YouTube seeds
-	rand.Shuffle(len(manualIDs), func(i, j int) {
-		manualIDs[i], manualIDs[j] = manualIDs[j], manualIDs[i]
-	})
-	for _, id := range manualIDs {
-		if len(seeds) >= 2 {
-			break
-		}
-		track, err := h.trackProvider.LoadTrack(ctx, id)
-		if err != nil {
-			slog.Debug(
-				"failed to load manual seed track",
-				"track", id,
-				"error", err,
-			)
-			continue
-		}
-		if track.Source != domain.TrackSourceYouTube {
-			continue
-		}
-		if _, exists := seedSet[id]; exists {
-			continue
-		}
-		seedSet[id] = struct{}{}
-		seeds = append(seeds, id)
-	}
-
-	// Add the most recent auto-play YouTube track as a seed
-	for i := len(autoPlayIDs) - 1; i >= 0; i-- {
-		id := autoPlayIDs[i]
-		if _, exists := seedSet[id]; exists {
-			continue
-		}
-		track, err := h.trackProvider.LoadTrack(ctx, id)
-		if err != nil {
-			slog.Debug(
-				"failed to load auto-play seed track",
-				"track", id,
-				"error", err,
-			)
-			continue
-		}
-		if track.Source != domain.TrackSourceYouTube {
-			continue
-		}
-		seedSet[id] = struct{}{}
-		seeds = append(seeds, id)
-		break
-	}
-
-	if len(seeds) == 0 {
-		slog.Debug(
-			"auto-play has no YouTube seeds",
-			"guild", state.GetGuildID(),
-		)
-		return false
-	}
-
-	// Exclude all tracks not selected as seeds
-	var exclude []domain.TrackID
-	for _, entry := range allEntries {
-		if _, isSeed := seedSet[entry.TrackID]; !isSeed {
-			exclude = append(exclude, entry.TrackID)
-		}
-	}
-
-	tracks, err := h.recommender.Recommend(ctx, seeds, exclude, 1)
-	if err != nil {
-		slog.Warn(
-			"auto-play recommendation failed",
-			"guild", state.GetGuildID(),
-			"error", err,
-		)
-		return false
-	}
-
-	if len(tracks) == 0 {
-		slog.Debug(
-			"auto-play found no recommendations",
-			"guild", state.GetGuildID(),
-		)
-		return false
-	}
-
-	// Append the recommended track as an auto-play entry
-	entry := domain.NewQueueEntry(tracks[0].ID, h.botUserID, time.Now(), true)
-	state.Append(entry)
-
-	// Activate playback and advance to the newly appended track
-	state.SetPlaybackActive(true)
-	next := state.Advance(domain.LoopModeNone)
-	if next == nil {
-		return false
-	}
-
-	slog.Info(
-		"auto-play queued track",
-		"guild", state.GetGuildID(),
-		"track", tracks[0].ID,
-	)
-
-	return true
 }
 
 // NotificationEventHandler handles events related to Discord notifications.

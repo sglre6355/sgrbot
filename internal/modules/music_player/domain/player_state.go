@@ -295,13 +295,112 @@ func (p *PlayerState) Clear() {
 	p.isPlaybackActive = false
 }
 
-// SetPaused sets the paused state to true.
-func (p *PlayerState) SetPaused(isPaused bool) {
-	p.isPaused = isPaused
+// Pause transitions the player to the paused state.
+// Returns ErrNotPlaying if playback is not active, ErrAlreadyPaused if already paused.
+func (p *PlayerState) Pause() error {
+	if !p.isPlaybackActive {
+		return ErrNotPlaying
+	}
+	if p.isPaused {
+		return ErrAlreadyPaused
+	}
+	p.isPaused = true
+	return nil
 }
 
-func (p *PlayerState) TogglePaused() {
-	p.isPaused = !p.isPaused
+// Resume transitions the player from the paused state to the playing state.
+// Returns ErrNotPlaying if playback is not active, ErrNotPaused if not paused.
+func (p *PlayerState) Resume() error {
+	if !p.isPlaybackActive {
+		return ErrNotPlaying
+	}
+	if !p.isPaused {
+		return ErrNotPaused
+	}
+	p.isPaused = false
+	return nil
+}
+
+// Skip advances past the current track.
+// If LoopModeTrack is active, it is overridden to LoopModeNone (explicit skip breaks track loop).
+// Returns the skipped entry, the next entry (nil if queue ended), and an error if not playing.
+func (p *PlayerState) Skip() (skipped *QueueEntry, next *QueueEntry, err error) {
+	current := p.Current()
+	if current == nil {
+		return nil, nil, ErrNotPlaying
+	}
+
+	skipped = current
+
+	loopmode := p.loopMode
+	if loopmode == LoopModeTrack {
+		loopmode = LoopModeNone
+	}
+	next = p.Advance(loopmode)
+
+	if next == nil {
+		p.isPlaybackActive = false
+	}
+
+	return skipped, next, nil
+}
+
+// Enqueue appends entries to the queue. If the player is idle, it seeks to the first
+// new entry and activates playback.
+// Returns the start index of the newly added entries and whether the player became active.
+func (p *PlayerState) Enqueue(entries ...QueueEntry) (startIndex int, becameActive bool) {
+	startIndex = p.queue.Len()
+	p.queue.Append(entries...)
+
+	if !p.isPlaybackActive {
+		p.Seek(startIndex)
+		p.isPlaybackActive = true
+		becameActive = true
+	}
+
+	return startIndex, becameActive
+}
+
+// HandleTrackEnded processes the end of a track.
+// If failed is true, the current track is removed from the queue.
+// Otherwise, the queue advances according to the current loop mode.
+// Returns the next entry to play, or nil if the queue has ended.
+func (p *PlayerState) HandleTrackEnded(failed bool) *QueueEntry {
+	if failed {
+		if _, err := p.Remove(p.currentIndex); err != nil {
+			return nil
+		}
+		return p.Current()
+	}
+
+	next := p.Advance(p.loopMode)
+	if next == nil {
+		p.isPlaybackActive = false
+	}
+	return next
+}
+
+// ClearExceptCurrent removes all entries except the currently playing track.
+// Returns the number of entries removed and an error if not playing.
+func (p *PlayerState) ClearExceptCurrent() (int, error) {
+	current := p.Current()
+	if current == nil {
+		return 0, ErrNotPlaying
+	}
+
+	count := p.queue.Len() - 1
+	savedEntry := *current
+	p.queue.Clear()
+	p.queue.Append(savedEntry)
+	p.currentIndex = 0
+	p.isPlaybackActive = true
+
+	return count, nil
+}
+
+// SetPaused sets the paused state.
+func (p *PlayerState) SetPaused(isPaused bool) {
+	p.isPaused = isPaused
 }
 
 // GetLoopMode returns the current loop mode.

@@ -1,23 +1,18 @@
 package usecases
 
-import "errors"
+import (
+	"errors"
 
-// Domain errors for the music player module.
+	"github.com/sglre6355/sgrbot/internal/modules/music_player/domain"
+)
+
+// Application-layer errors for the music player module.
 var (
 	// ErrNotConnected is returned when an operation requires the bot to be in a voice channel.
 	ErrNotConnected = errors.New("not connected to a voice channel")
 
 	// ErrUserNotInVoice is returned when the user is not in a voice channel.
 	ErrUserNotInVoice = errors.New("you must be in a voice channel")
-
-	// ErrNotPlaying is returned when no track is currently playing.
-	ErrNotPlaying = errors.New("nothing is currently playing")
-
-	// ErrAlreadyPaused is returned when trying to pause while already paused.
-	ErrAlreadyPaused = errors.New("playback is already paused")
-
-	// ErrNotPaused is returned when trying to resume while not paused.
-	ErrNotPaused = errors.New("playback is not paused")
 
 	// ErrNoResults is returned when a search yields no results.
 	ErrNoResults = errors.New("no results found")
@@ -37,4 +32,11 @@ var (
 
 	// ErrLoadFailed is returned when loading tracks fails.
 	ErrLoadFailed = errors.New("failed to load track")
+)
+
+// Re-export domain errors for backward compatibility with presentation layer.
+var (
+	ErrNotPlaying    = domain.ErrNotPlaying
+	ErrAlreadyPaused = domain.ErrAlreadyPaused
+	ErrNotPaused     = domain.ErrNotPaused
 )

@@ -17,7 +17,7 @@ func TestPlaybackService_Pause(t *testing.T) {
 	tests := []struct {
 		name        string
 		input       PauseInput
-		setupRepo   func(*mockRepository, *mockTrackProvider)
+		setupRepo   func(*mockRepository, *mockTrackRepository)
 		setupPlayer func(*mockAudioPlayer)
 		wantErr     error
 	}{
@@ -26,7 +26,7 @@ func TestPlaybackService_Pause(t *testing.T) {
 			input: PauseInput{
 				GuildID: guildID,
 			},
-			setupRepo: func(m *mockRepository, tp *mockTrackProvider) {
+			setupRepo: func(m *mockRepository, tp *mockTrackRepository) {
 				state := m.createConnectedState(guildID, voiceChannelID, textChannelID)
 				setupPlaying(state, tp, mockTrack("track-1"))
 			},
@@ -43,7 +43,7 @@ func TestPlaybackService_Pause(t *testing.T) {
 			input: PauseInput{
 				GuildID: guildID,
 			},
-			setupRepo: func(m *mockRepository, _ *mockTrackProvider) {
+			setupRepo: func(m *mockRepository, _ *mockTrackRepository) {
 				m.createConnectedState(guildID, voiceChannelID, textChannelID)
 			},
 			wantErr: ErrNotPlaying,
@@ -53,7 +53,7 @@ func TestPlaybackService_Pause(t *testing.T) {
 			input: PauseInput{
 				GuildID: guildID,
 			},
-			setupRepo: func(m *mockRepository, tp *mockTrackProvider) {
+			setupRepo: func(m *mockRepository, tp *mockTrackRepository) {
 				state := m.createConnectedState(guildID, voiceChannelID, textChannelID)
 				setupPlaying(state, tp, mockTrack("track-1"))
 				state.SetPaused(true)
@@ -65,7 +65,7 @@ func TestPlaybackService_Pause(t *testing.T) {
 			input: PauseInput{
 				GuildID: guildID,
 			},
-			setupRepo: func(m *mockRepository, tp *mockTrackProvider) {
+			setupRepo: func(m *mockRepository, tp *mockTrackRepository) {
 				state := m.createConnectedState(guildID, voiceChannelID, textChannelID)
 				setupPlaying(state, tp, mockTrack("track-1"))
 			},
@@ -80,7 +80,7 @@ func TestPlaybackService_Pause(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			repo := newMockRepository()
 			player := &mockAudioPlayer{}
-			tp := newMockTrackProvider()
+			tp := newMockTrackRepository()
 
 			if tt.setupRepo != nil {
 				tt.setupRepo(repo, tp)
@@ -125,7 +125,7 @@ func TestPlaybackService_Resume(t *testing.T) {
 	tests := []struct {
 		name        string
 		input       ResumeInput
-		setupRepo   func(*mockRepository, *mockTrackProvider)
+		setupRepo   func(*mockRepository, *mockTrackRepository)
 		setupPlayer func(*mockAudioPlayer)
 		wantErr     error
 	}{
@@ -134,7 +134,7 @@ func TestPlaybackService_Resume(t *testing.T) {
 			input: ResumeInput{
 				GuildID: guildID,
 			},
-			setupRepo: func(m *mockRepository, tp *mockTrackProvider) {
+			setupRepo: func(m *mockRepository, tp *mockTrackRepository) {
 				state := m.createConnectedState(guildID, voiceChannelID, textChannelID)
 				setupPlaying(state, tp, mockTrack("track-1"))
 				state.SetPaused(true)
@@ -152,7 +152,7 @@ func TestPlaybackService_Resume(t *testing.T) {
 			input: ResumeInput{
 				GuildID: guildID,
 			},
-			setupRepo: func(m *mockRepository, _ *mockTrackProvider) {
+			setupRepo: func(m *mockRepository, _ *mockTrackRepository) {
 				m.createConnectedState(guildID, voiceChannelID, textChannelID)
 			},
 			wantErr: ErrNotPlaying,
@@ -162,7 +162,7 @@ func TestPlaybackService_Resume(t *testing.T) {
 			input: ResumeInput{
 				GuildID: guildID,
 			},
-			setupRepo: func(m *mockRepository, tp *mockTrackProvider) {
+			setupRepo: func(m *mockRepository, tp *mockTrackRepository) {
 				state := m.createConnectedState(guildID, voiceChannelID, textChannelID)
 				setupPlaying(state, tp, mockTrack("track-1"))
 			},
@@ -173,7 +173,7 @@ func TestPlaybackService_Resume(t *testing.T) {
 			input: ResumeInput{
 				GuildID: guildID,
 			},
-			setupRepo: func(m *mockRepository, tp *mockTrackProvider) {
+			setupRepo: func(m *mockRepository, tp *mockTrackRepository) {
 				state := m.createConnectedState(guildID, voiceChannelID, textChannelID)
 				setupPlaying(state, tp, mockTrack("track-1"))
 				state.SetPaused(true)
@@ -189,7 +189,7 @@ func TestPlaybackService_Resume(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			repo := newMockRepository()
 			player := &mockAudioPlayer{}
-			tp := newMockTrackProvider()
+			tp := newMockTrackRepository()
 
 			if tt.setupRepo != nil {
 				tt.setupRepo(repo, tp)
@@ -234,7 +234,7 @@ func TestPlaybackService_Skip(t *testing.T) {
 	tests := []struct {
 		name       string
 		input      SkipInput
-		setupRepo  func(*mockRepository, *mockTrackProvider)
+		setupRepo  func(*mockRepository, *mockTrackRepository)
 		wantErr    error
 		wantNextID bool // whether NextTrackID should be non-nil
 	}{
@@ -243,7 +243,7 @@ func TestPlaybackService_Skip(t *testing.T) {
 			input: SkipInput{
 				GuildID: guildID,
 			},
-			setupRepo: func(m *mockRepository, tp *mockTrackProvider) {
+			setupRepo: func(m *mockRepository, tp *mockTrackRepository) {
 				state := m.createConnectedState(guildID, voiceChannelID, textChannelID)
 				setupPlaying(state, tp, mockTrack("current"))
 				tp.Store(mockTrack("next"))
@@ -256,7 +256,7 @@ func TestPlaybackService_Skip(t *testing.T) {
 			input: SkipInput{
 				GuildID: guildID,
 			},
-			setupRepo: func(m *mockRepository, tp *mockTrackProvider) {
+			setupRepo: func(m *mockRepository, tp *mockTrackRepository) {
 				state := m.createConnectedState(guildID, voiceChannelID, textChannelID)
 				setupPlaying(state, tp, mockTrack("current"))
 			},
@@ -274,7 +274,7 @@ func TestPlaybackService_Skip(t *testing.T) {
 			input: SkipInput{
 				GuildID: guildID,
 			},
-			setupRepo: func(m *mockRepository, _ *mockTrackProvider) {
+			setupRepo: func(m *mockRepository, _ *mockTrackRepository) {
 				m.createConnectedState(guildID, voiceChannelID, textChannelID)
 			},
 			wantErr: ErrNotPlaying,
@@ -284,7 +284,7 @@ func TestPlaybackService_Skip(t *testing.T) {
 			input: SkipInput{
 				GuildID: guildID,
 			},
-			setupRepo: func(m *mockRepository, tp *mockTrackProvider) {
+			setupRepo: func(m *mockRepository, tp *mockTrackRepository) {
 				state := m.createConnectedState(guildID, voiceChannelID, textChannelID)
 				tp.Store(mockTrack("first"))
 				tp.Store(mockTrack("last"))
@@ -301,7 +301,7 @@ func TestPlaybackService_Skip(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			repo := newMockRepository()
-			tp := newMockTrackProvider()
+			tp := newMockTrackRepository()
 			publisher := &mockEventPublisher{}
 
 			if tt.setupRepo != nil {
@@ -420,7 +420,7 @@ func TestPlaybackService_SetLoopMode(t *testing.T) {
 				&mockAudioPlayer{},
 				nil,
 				nil,
-				newMockTrackProvider(),
+				newMockTrackRepository(),
 				nil,
 			)
 			err := service.SetLoopMode(context.Background(), tt.input)
@@ -519,7 +519,7 @@ func TestPlaybackService_CycleLoopMode(t *testing.T) {
 				&mockAudioPlayer{},
 				nil,
 				nil,
-				newMockTrackProvider(),
+				newMockTrackRepository(),
 				nil,
 			)
 			output, err := service.CycleLoopMode(context.Background(), tt.input)
