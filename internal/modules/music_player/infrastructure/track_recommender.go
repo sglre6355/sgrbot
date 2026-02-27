@@ -6,7 +6,7 @@ import (
 	"log/slog"
 	"sort"
 
-	"github.com/sglre6355/sgrbot/internal/modules/music_player/application/ports"
+	"github.com/sglre6355/sgrbot/internal/modules/music_player/application/gateways"
 	"github.com/sglre6355/sgrbot/internal/modules/music_player/domain"
 )
 
@@ -15,11 +15,11 @@ var _ domain.TrackRecommender = (*TrackRecommenderAdapter)(nil)
 
 // TrackRecommenderAdapter recommends tracks using YouTube Mix playlists.
 type TrackRecommenderAdapter struct {
-	trackResolver ports.TrackResolver
+	trackResolver gateways.TrackResolver
 }
 
 // NewTrackRecommenderAdapter creates a new TrackRecommenderAdapter.
-func NewTrackRecommenderAdapter(trackResolver ports.TrackResolver) *TrackRecommenderAdapter {
+func NewTrackRecommenderAdapter(trackResolver gateways.TrackResolver) *TrackRecommenderAdapter {
 	return &TrackRecommenderAdapter{
 		trackResolver: trackResolver,
 	}

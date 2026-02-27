@@ -1,4 +1,4 @@
-package ports
+package gateways
 
 import (
 	"github.com/disgoorg/snowflake/v2"

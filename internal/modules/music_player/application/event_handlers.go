@@ -7,7 +7,7 @@ import (
 	"time"
 
 	"github.com/disgoorg/snowflake/v2"
-	"github.com/sglre6355/sgrbot/internal/modules/music_player/application/ports"
+	"github.com/sglre6355/sgrbot/internal/modules/music_player/application/gateways"
 	"github.com/sglre6355/sgrbot/internal/modules/music_player/domain"
 )
 
@@ -15,9 +15,9 @@ import (
 // It subscribes to CurrentTrackChanged and TrackEnded events to manage playback flow.
 type PlaybackEventHandler struct {
 	playerStates    domain.PlayerStateRepository
-	player          ports.TrackPlayer
-	publisher       ports.EventPublisher
-	subscriber      ports.EventSubscriber
+	player          gateways.TrackPlayer
+	publisher       gateways.EventPublisher
+	subscriber      gateways.EventSubscriber
 	autoPlayService *domain.AutoPlayService
 	botUserID       snowflake.ID
 }
@@ -25,9 +25,9 @@ type PlaybackEventHandler struct {
 // NewPlaybackEventHandler creates a new PlaybackEventHandler.
 func NewPlaybackEventHandler(
 	playerStates domain.PlayerStateRepository,
-	player ports.TrackPlayer,
-	publisher ports.EventPublisher,
-	subscriber ports.EventSubscriber,
+	player gateways.TrackPlayer,
+	publisher gateways.EventPublisher,
+	subscriber gateways.EventSubscriber,
 	autoPlayService *domain.AutoPlayService,
 	botUserID snowflake.ID,
 ) *PlaybackEventHandler {
@@ -186,17 +186,17 @@ func (h *PlaybackEventHandler) handleTrackEnded(ctx context.Context, event domai
 // It subscribes to CurrentTrackChangedEvent to send/delete messages.
 type NotificationEventHandler struct {
 	playerStates     domain.PlayerStateRepository
-	subscriber       ports.EventSubscriber
-	notifier         ports.NotificationSender
-	userInfoProvider ports.UserInfoProvider
+	subscriber       gateways.EventSubscriber
+	notifier         gateways.NotificationSender
+	userInfoProvider gateways.UserInfoProvider
 }
 
 // NewNotificationEventHandler creates a new NotificationEventHandler.
 func NewNotificationEventHandler(
 	playerStates domain.PlayerStateRepository,
-	subscriber ports.EventSubscriber,
-	notifier ports.NotificationSender,
-	userInfoProvider ports.UserInfoProvider,
+	subscriber gateways.EventSubscriber,
+	notifier gateways.NotificationSender,
+	userInfoProvider gateways.UserInfoProvider,
 ) *NotificationEventHandler {
 	return &NotificationEventHandler{
 		playerStates:     playerStates,

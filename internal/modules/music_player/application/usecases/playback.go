@@ -4,28 +4,28 @@ import (
 	"context"
 
 	"github.com/disgoorg/snowflake/v2"
-	"github.com/sglre6355/sgrbot/internal/modules/music_player/application/ports"
+	"github.com/sglre6355/sgrbot/internal/modules/music_player/application/gateways"
 	"github.com/sglre6355/sgrbot/internal/modules/music_player/domain"
 )
 
 // PlaybackService handles playback operations.
 type PlaybackService struct {
 	playerStates domain.PlayerStateRepository
-	audioPlayer  ports.TrackPlayer
-	publisher    ports.EventPublisher
-	notifier     ports.NotificationSender
+	audioPlayer  gateways.TrackPlayer
+	publisher    gateways.EventPublisher
+	notifier     gateways.NotificationSender
 	trackRepo    domain.TrackRepository
-	voiceState   ports.VoiceStateProvider
+	voiceState   gateways.VoiceStateProvider
 }
 
 // NewPlaybackService creates a new PlaybackService.
 func NewPlaybackService(
 	playerStates domain.PlayerStateRepository,
-	audioPlayer ports.TrackPlayer,
-	publisher ports.EventPublisher,
-	notifier ports.NotificationSender,
+	audioPlayer gateways.TrackPlayer,
+	publisher gateways.EventPublisher,
+	notifier gateways.NotificationSender,
 	trackRepo domain.TrackRepository,
-	voiceState ports.VoiceStateProvider,
+	voiceState gateways.VoiceStateProvider,
 ) *PlaybackService {
 	return &PlaybackService{
 		playerStates: playerStates,

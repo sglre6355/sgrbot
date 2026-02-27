@@ -4,7 +4,7 @@ import (
 	"context"
 	"time"
 
-	"github.com/sglre6355/sgrbot/internal/modules/music_player/application/ports"
+	"github.com/sglre6355/sgrbot/internal/modules/music_player/application/gateways"
 	"github.com/sglre6355/sgrbot/internal/modules/music_player/domain"
 )
 
@@ -38,13 +38,13 @@ func toTrackData(t domain.Track) TrackData {
 // TrackLoaderService handles track loading operations.
 type TrackLoaderService struct {
 	trackRepo     domain.TrackRepository
-	trackResolver ports.TrackResolver
+	trackResolver gateways.TrackResolver
 }
 
 // NewTrackLoaderService creates a new TrackLoaderService.
 func NewTrackLoaderService(
 	trackRepo domain.TrackRepository,
-	trackResolver ports.TrackResolver,
+	trackResolver gateways.TrackResolver,
 ) *TrackLoaderService {
 	return &TrackLoaderService{
 		trackRepo:     trackRepo,

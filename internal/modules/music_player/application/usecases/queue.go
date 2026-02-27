@@ -5,7 +5,7 @@ import (
 	"time"
 
 	"github.com/disgoorg/snowflake/v2"
-	"github.com/sglre6355/sgrbot/internal/modules/music_player/application/ports"
+	"github.com/sglre6355/sgrbot/internal/modules/music_player/application/gateways"
 	"github.com/sglre6355/sgrbot/internal/modules/music_player/domain"
 )
 
@@ -14,13 +14,13 @@ const DefaultPageSize = 10
 // QueueService handles queue operations.
 type QueueService struct {
 	playerStates domain.PlayerStateRepository
-	publisher    ports.EventPublisher
+	publisher    gateways.EventPublisher
 }
 
 // NewQueueService creates a new QueueService.
 func NewQueueService(
 	playerStates domain.PlayerStateRepository,
-	publisher ports.EventPublisher,
+	publisher gateways.EventPublisher,
 ) *QueueService {
 	return &QueueService{
 		playerStates: playerStates,

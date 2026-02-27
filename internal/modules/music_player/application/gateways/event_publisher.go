@@ -1,4 +1,4 @@
-package ports
+package gateways
 
 import "github.com/sglre6355/sgrbot/internal/modules/music_player/domain"
 

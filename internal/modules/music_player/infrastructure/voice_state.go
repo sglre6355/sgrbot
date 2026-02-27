@@ -3,12 +3,12 @@ package infrastructure
 import (
 	"github.com/bwmarrin/discordgo"
 	"github.com/disgoorg/snowflake/v2"
-	"github.com/sglre6355/sgrbot/internal/modules/music_player/application/ports"
+	"github.com/sglre6355/sgrbot/internal/modules/music_player/application/gateways"
 )
 
-// Ensure VoiceStateProvider implements required ports.
+// Ensure VoiceStateProvider implements required gateways.
 var (
-	_ ports.VoiceStateProvider = (*VoiceStateProvider)(nil)
+	_ gateways.VoiceStateProvider = (*VoiceStateProvider)(nil)
 )
 
 // VoiceStateProvider provides Discord voice state information.

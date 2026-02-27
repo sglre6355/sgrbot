@@ -13,7 +13,7 @@ import (
 	"github.com/disgoorg/disgolink/v3/disgolink"
 	"github.com/disgoorg/disgolink/v3/lavalink"
 	"github.com/disgoorg/snowflake/v2"
-	"github.com/sglre6355/sgrbot/internal/modules/music_player/application/ports"
+	"github.com/sglre6355/sgrbot/internal/modules/music_player/application/gateways"
 	"github.com/sglre6355/sgrbot/internal/modules/music_player/domain"
 )
 
@@ -22,10 +22,10 @@ const voiceConnectionTimeout = 10 * time.Second
 
 // Ensure LavalinkAdapter implements port interfaces.
 var (
-	_ ports.TrackPlayer      = (*LavalinkAdapter)(nil)
-	_ ports.VoiceConnection  = (*LavalinkAdapter)(nil)
-	_ domain.TrackRepository = (*LavalinkAdapter)(nil)
-	_ ports.TrackResolver    = (*LavalinkAdapter)(nil)
+	_ gateways.TrackPlayer     = (*LavalinkAdapter)(nil)
+	_ gateways.VoiceConnection = (*LavalinkAdapter)(nil)
+	_ domain.TrackRepository   = (*LavalinkAdapter)(nil)
+	_ gateways.TrackResolver   = (*LavalinkAdapter)(nil)
 )
 
 // pendingVoiceConnection tracks the state of a pending voice connection.
@@ -114,7 +114,7 @@ func (b *voiceEventBuffer) getData() (channelID *snowflake.ID, sessionID, token,
 type LavalinkAdapter struct {
 	link      disgolink.Client
 	session   *discordgo.Session
-	publisher ports.EventPublisher
+	publisher gateways.EventPublisher
 
 	botID snowflake.ID
 
@@ -140,7 +140,7 @@ type LavalinkConfig struct {
 // NewLavalinkAdapter creates a new LavalinkAdapter.
 func NewLavalinkAdapter(
 	session *discordgo.Session,
-	publisher ports.EventPublisher,
+	publisher gateways.EventPublisher,
 	config LavalinkConfig,
 ) (*LavalinkAdapter, error) {
 	botID, err := snowflake.Parse(session.State.User.ID)

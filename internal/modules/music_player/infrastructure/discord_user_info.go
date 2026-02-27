@@ -5,15 +5,15 @@ import (
 
 	"github.com/bwmarrin/discordgo"
 	"github.com/disgoorg/snowflake/v2"
-	"github.com/sglre6355/sgrbot/internal/modules/music_player/application/ports"
+	"github.com/sglre6355/sgrbot/internal/modules/music_player/application/gateways"
 )
 
-// Ensure DiscordUserInfoProvider implements ports.UserInfoProvider.
+// Ensure DiscordUserInfoProvider implements gateways.UserInfoProvider.
 var (
-	_ ports.UserInfoProvider = (*DiscordUserInfoProvider)(nil)
+	_ gateways.UserInfoProvider = (*DiscordUserInfoProvider)(nil)
 )
 
-// DiscordUserInfoProvider implements ports.UserInfoProvider using a Discord session.
+// DiscordUserInfoProvider implements gateways.UserInfoProvider using a Discord session.
 type DiscordUserInfoProvider struct {
 	session *discordgo.Session
 }
@@ -26,7 +26,7 @@ func NewDiscordUserInfoProvider(session *discordgo.Session) *DiscordUserInfoProv
 // GetUserInfo fetches display info for a user in a guild.
 func (p *DiscordUserInfoProvider) GetUserInfo(
 	guildID, userID snowflake.ID,
-) (*ports.UserInfo, error) {
+) (*gateways.UserInfo, error) {
 	member, err := p.session.GuildMember(guildID.String(), userID.String())
 	if err != nil {
 		return nil, fmt.Errorf("failed to fetch guild member: %w", err)
@@ -35,7 +35,7 @@ func (p *DiscordUserInfoProvider) GetUserInfo(
 	displayName := getDisplayName(member)
 	avatarURL := member.User.AvatarURL("")
 
-	return &ports.UserInfo{
+	return &gateways.UserInfo{
 		DisplayName: displayName,
 		AvatarURL:   avatarURL,
 	}, nil

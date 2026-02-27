@@ -10,7 +10,7 @@ import (
 
 	"github.com/bwmarrin/discordgo"
 	"github.com/disgoorg/snowflake/v2"
-	"github.com/sglre6355/sgrbot/internal/modules/music_player/application/ports"
+	"github.com/sglre6355/sgrbot/internal/modules/music_player/application/gateways"
 	"github.com/sglre6355/sgrbot/internal/modules/music_player/domain"
 )
 
@@ -19,16 +19,16 @@ const (
 	colorRed = 0xE74C3C
 )
 
-// Ensure Notifier implements required ports.
+// Ensure Notifier implements required gateways.
 var (
-	_ ports.NotificationSender = (*Notifier)(nil)
+	_ gateways.NotificationSender = (*Notifier)(nil)
 )
 
 // Notifier sends notifications to Discord channels.
 type Notifier struct {
 	session          *discordgo.Session
 	trackRepo        domain.TrackRepository
-	userInfoProvider ports.UserInfoProvider
+	userInfoProvider gateways.UserInfoProvider
 	httpClient       *http.Client
 }
 
@@ -36,7 +36,7 @@ type Notifier struct {
 func NewNotifier(
 	session *discordgo.Session,
 	trackRepo domain.TrackRepository,
-	userInfoProvider ports.UserInfoProvider,
+	userInfoProvider gateways.UserInfoProvider,
 ) *Notifier {
 	return &Notifier{
 		session:          session,
