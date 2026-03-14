@@ -5,7 +5,7 @@ go 1.25.4
 require (
 	github.com/bwmarrin/discordgo v0.29.0
 	github.com/caarlos0/env/v11 v11.3.1
-	github.com/disgoorg/disgolink/v3 v3.0.4
+	github.com/disgoorg/disgolink/v3 v3.1.0
 	github.com/disgoorg/snowflake/v2 v2.0.3
 )
 
