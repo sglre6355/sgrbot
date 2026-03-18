@@ -24,69 +24,85 @@ Environment variables:
 | `/pause` | Pause playback |
 | `/resume` | Resume playback |
 | `/skip` | Skip to next track |
-| `/loop [mode]` | Set loop mode (none/track/queue) or cycle through modes |
 | `/queue list [page]` | Show queue with sections (Played/Now Playing/Up Next) |
 | `/queue remove <position>` | Remove track from queue (1-indexed position, with autocomplete) |
 | `/queue clear` | Clear queue (keeps current track) |
 | `/queue restart` | Restart queue from the beginning |
 | `/queue shuffle` | Shuffle the queue (current track stays at front) |
 | `/queue seek <position>` | Jump to a specific position in the queue (1-indexed, with autocomplete) |
-
-## Project Structure
-
-```text
-internal/modules/music_player/
-├── module.go                    # Module entry point (bot.Module implementation)
-├── config.go                    # Environment configuration loading
-├── domain/
-│   ├── track.go                 # Track entity and TrackID
-│   ├── queue_entry.go           # QueueEntry value object
-│   ├── queue.go                 # Queue entity and QueueRepository interface
-│   ├── player_state.go          # PlayerState aggregate root and PlayerStateRepository interface
-│   ├── loop_mode.go             # LoopMode value object (none/track/queue)
-│   ├── events.go                # Domain events (TrackEndedEvent, CurrentTrackChangedEvent)
-│   ├── source.go                # TrackSource value object
-│   ├── now_playing.go           # NowPlayingMessage value object
-│   └── track_list.go            # TrackListType and TrackList value objects
-├── application/
-│   ├── ports/
-│   │   ├── audio_player.go      # AudioPlayer interface
-│   │   ├── voice_connection.go  # VoiceConnection interface
-│   │   ├── voice_state.go       # VoiceStateProvider interface
-│   │   ├── track_provider.go    # TrackProvider interface
-│   │   ├── notification.go      # NotificationSender interface
-│   │   ├── event_publisher.go   # EventPublisher interface
-│   │   ├── event_subscriber.go  # EventSubscriber interface
-│   │   └── user_info.go         # UserInfoProvider interface and UserInfo DTO
-│   ├── usecases/
-│   │   ├── errors.go            # Use case error definitions
-│   │   ├── playback.go          # PlaybackService (pause, resume, skip, loop)
-│   │   ├── queue.go             # QueueService (add, list, remove, clear, shuffle, restart, seek)
-│   │   ├── track_loader.go      # TrackLoaderService (load tracks, resolve queries)
-│   │   ├── voice_channel.go     # VoiceChannelService (join, leave, handle bot voice state)
-│   │   └── notification_channel.go # NotificationChannelService (set notification channel)
-│   └── event_handlers.go        # PlaybackEventHandler, NotificationEventHandler
-├── infrastructure/
-│   ├── lavalink_client.go       # LavalinkAdapter (implements AudioPlayer, VoiceConnection, TrackProvider)
-│   ├── memory_repository.go     # In-memory PlayerStateRepository
-│   ├── channel_event_bus.go     # ChannelEventBus (implements EventPublisher, EventSubscriber)
-│   ├── voice_state.go           # VoiceStateProvider (implements VoiceStateProvider)
-│   ├── discord_user_info.go     # DiscordUserInfoProvider (implements UserInfoProvider)
-│   └── notifier.go              # Notifier (implements NotificationSender)
-└── presentation/
-    └── discord/
-        ├── commands.go           # Slash command definitions
-        ├── command_handlers.go   # Command interaction handlers
-        ├── autocomplete.go       # Autocomplete for /play, /queue remove, /queue seek
-        └── event_handlers.go     # Discord gateway event handlers (VoiceStateUpdate)
-```
+| `/loop [mode]` | Set loop mode (none/track/queue) or cycle through modes |
+| `/autoplay <enabled>` | Enable or disable auto-play (automatically play related tracks when queue ends) |
 
 ## Architecture
 
+### Layered Architecture
+
+The module follows a hexagonal (ports & adapters) architecture with four layers:
+
+- **Domain** — Pure business logic with no external dependencies. Contains entities (`Track`,
+  `TrackList`, `Queue`, `PlayerState`, `User`), value objects (`QueueEntry`, `LoopMode`,
+  `TrackSource`), domain services (`PlayerService`, `AutoPlayService`), domain events, repository
+  interfaces, and the `TrackRecommender` interface.
+- **Application** — Orchestrates domain operations through use cases and handles domain events.
+  Defines port interfaces for infrastructure and exposes DTOs for the presentation layer. Each use
+  case is a standalone struct in its own file.
+- **Infrastructure** — Implements port interfaces and domain repository interfaces with concrete
+  technology (Lavalink, Discord API, in-memory stores, YouTube API).
+- **Presentation** — Maps Discord slash commands, autocomplete requests, and gateway events to use
+  case calls. Includes `EventHandlers` for reacting to Discord gateway events (e.g., auto-leave when
+  the bot is disconnected from a voice channel).
+- **Platforms** — Thin type adapters that bridge generic port interfaces to platform-specific types
+  (e.g., Discord snowflake IDs for voice connections and now-playing destinations).
+
+### Platform-Agnostic Domain
+
+The domain layer has no dependency on Discord or any other platform. Platform-specific concepts are
+abstracted:
+
+- `PlayerStateID` (UUID v7) replaces guild snowflake IDs as the aggregate identity
+- `UserID` (string) replaces Discord user snowflake IDs
+- `TrackSource` (enum) replaces Lavalink source names
+- Port interfaces in `application/ports/` use generics (`VoiceConnectionGateway[T]`,
+  `UserVoiceStateProvider[C, P]`, `NowPlayingDestinationSetter[T]`) so the application layer stays
+  platform-neutral while the `platforms/` layer supplies Discord-specific type parameters
+
+#### PlayerService (Domain Service)
+
+`PlayerService` wraps `PlayerState` mutations and produces the correct domain events for each
+operation. It also integrates `AutoPlayService` for automatic track recommendations when the queue
+is exhausted.
+
+Key responsibilities:
+
+- Append tracks → `TrackAddedEvent` (+ `TrackStartedEvent` if playback begins)
+- Prepend/Insert tracks → `TrackAddedEvent`
+- Seek/Skip → `TrackStartedEvent` or `QueueExhaustedEvent`
+- Remove → `TrackRemovedEvent` (+ `TrackStartedEvent` or `PlaybackStoppedEvent`)
+- Clear → `QueueClearedEvent` (+ `PlaybackStoppedEvent`)
+- ClearExceptCurrent → `QueueClearedEvent`
+- Pause/Resume → `PlaybackPausedEvent` / `PlaybackResumedEvent`
+- Shuffle → `QueueShuffledEvent`
+- TryAutoPlay → `TrackAddedEvent` + `TrackStartedEvent` (on success)
+
+#### AutoPlayService (Domain Service)
+
+`AutoPlayService` recommends the next track when the queue is exhausted. It selects seeds from the
+current queue and delegates to a `TrackRecommender` for recommendations.
+
+Seed selection strategy:
+
+- Up to 2 randomly sampled manually added tracks
+- Up to 1 most recent auto-play track
+- Seeds are filtered through `TrackRecommender.AcceptsSeed()`
+- All non-seed tracks are passed as exclusions
+
+`PlayerService.TryAutoPlay` calls `AutoPlayService` when auto-play is enabled on the player state.
+If a recommendation is found, it is appended and playback begins immediately.
+
 ### Index-Based Queue Model
 
-The music player uses an index-based queue instead of a traditional pop-based
-queue. This design enables loop functionality while maintaining track history:
+The music player uses an index-based queue instead of a traditional pop-based queue. This design
+enables loop functionality while maintaining track history:
 
 - **currentIndex**: Tracks position in the queue (-1 before start, 0+ during playback)
 - **Tracks are never removed** when finished—the index advances instead
@@ -100,133 +116,67 @@ queue. This design enables loop functionality while maintaining track history:
 
 Queue sections displayed in `/queue list`:
 
-- **Played**: Tracks before currentIndex (previously played)
+- **Played**: Tracks before currentIndex, or all queued tracks when playback is inactive
 - **Now Playing**: Track at currentIndex
 - **Up Next**: Tracks after currentIndex
 
 ### Event-Driven Design
 
-The music player uses a channel-based event bus for async, decoupled operations.
-This ensures Discord interaction responses are sent immediately while background
-tasks (playback, notifications) happen asynchronously.
+The music player uses a channel-based event bus for async, decoupled operations. This ensures
+Discord interaction responses are sent immediately while background tasks (playback, notifications)
+happen asynchronously.
 
-Events are defined as domain events (`domain/events.go`) implementing a sealed
-`Event` interface. The `EventPublisher` port has a single `Publish(event)` method,
-and the `EventSubscriber` port allows subscribing to specific event types by
-`reflect.Type`.
-
-```text
-/play command
-  │
-  ├─► QueueService.Add()
-  │     └─► publish CurrentTrackChangedEvent ──────┐
-  │                                                │
-  └─► respond "Added to Queue" ◄───────────────────┼──(immediate response)
-                                                   │
-         EventBus (async goroutines)               │
-              │                                    │
-              ├─► PlaybackEventHandler ◄───────────┤
-              │     └─► AudioPlayer.Play(trackID)  │
-              │                                    │
-              └─► NotificationEventHandler ◄───────┘
-                    └─► send "Now Playing" embed (async)
-```
+Events are defined as domain events (`domain/events.go`) implementing a sealed `Event` interface.
+The `EventPublisher` port publishes one or more events, and the `EventSubscriber` port allows
+subscribing to specific event types by `reflect.Type`.
 
 ### Domain Events (`domain/events.go`)
 
-| Event | Published By | Consumed By | Description |
-| ----- | ------------ | ----------- | ----------- |
-| `CurrentTrackChangedEvent` | QueueService (add, seek, restart, clear, remove) | PlaybackEventHandler, NotificationEventHandler | Queue index changed; triggers playback and notification |
-| `TrackEndedEvent` | LavalinkAdapter | PlaybackEventHandler | Track finished (from Lavalink); carries `ShouldAdvanceQueue` and `TrackFailed` flags |
+| Event | Description |
+| ----- | ----------- |
+| `TrackAddedEvent` | One or more tracks added to the queue |
+| `TrackRemovedEvent` | A track removed from the queue |
+| `TrackStartedEvent` | A track started playing (new current track) |
+| `TrackEndedEvent` | A track finished or failed to load (from audio gateway) |
+| `PlaybackStartedEvent` | Playback became active |
+| `PlaybackStoppedEvent` | Playback became inactive (queue ended, cleared, last track removed) |
+| `PlaybackPausedEvent` | Playback paused |
+| `PlaybackResumedEvent` | Playback resumed |
+| `QueueClearedEvent` | Queue cleared (carries count) |
+| `QueueExhaustedEvent` | Queue ran out of tracks (after skip/remove with no next track) |
+| `QueueShuffledEvent` | Queue order randomized |
 
-The `TrackEndedEvent.ShouldAdvanceQueue` flag encapsulates Lavalink's track end
-reasons. Only `finished` and `load_failed` reasons advance the queue; `stopped`,
-`replaced`, and `cleanup` do not. When `TrackFailed` is true, the failed track
-is removed from the queue.
+### Domain Event Handlers (`application/domain_event_handlers.go`)
 
-### Event Handlers (`application/event_handlers.go`)
+`DomainEventHandlers` coordinates application-level side effects:
 
-- **PlaybackEventHandler**: Subscribes to `CurrentTrackChangedEvent` (start
-  playback of current track or stop if none) and `TrackEndedEvent` (advance
-  queue based on loop mode, remove failed tracks, publish new
-  `CurrentTrackChangedEvent`)
-- **NotificationEventHandler**: Subscribes to `CurrentTrackChangedEvent` (delete
-  previous "Now Playing" message, send new one if a track is current)
-
-### Port Interfaces (`application/ports/`)
-
-```go
-// audio_player.go
-type AudioPlayer interface {
-    Play(ctx context.Context, guildID snowflake.ID, trackID domain.TrackID) error
-    Stop(ctx context.Context, guildID snowflake.ID) error
-    Pause(ctx context.Context, guildID snowflake.ID) error
-    Resume(ctx context.Context, guildID snowflake.ID) error
-}
-
-// voice_connection.go
-type VoiceConnection interface {
-    JoinChannel(ctx context.Context, guildID, channelID snowflake.ID) error
-    LeaveChannel(ctx context.Context, guildID snowflake.ID) error
-}
-
-// track_provider.go
-type TrackProvider interface {
-    LoadTrack(ctx context.Context, id domain.TrackID) (domain.Track, error)
-    LoadTracks(ctx context.Context, ids ...domain.TrackID) ([]domain.Track, error)
-    ResolveQuery(ctx context.Context, query string) (domain.TrackList, error)
-}
-
-// voice_state.go
-type VoiceStateProvider interface {
-    GetUserVoiceChannel(guildID, userID snowflake.ID) (*snowflake.ID, error)
-}
-
-// notification.go
-type NotificationSender interface {
-    SendNowPlaying(guildID, channelID snowflake.ID, trackID domain.TrackID,
-        requesterID snowflake.ID, enqueuedAt time.Time) (snowflake.ID, error)
-    DeleteMessage(channelID, messageID snowflake.ID) error
-    SendError(channelID snowflake.ID, message string) error
-}
-
-// event_publisher.go
-type EventPublisher interface {
-    Publish(event domain.Event) error
-}
-
-// event_subscriber.go
-type EventSubscriber interface {
-    Subscribe(eventType reflect.Type, handler func(context.Context, domain.Event)) error
-}
-
-// user_info.go
-type UserInfoProvider interface {
-    GetUserInfo(guildID, userID snowflake.ID) (*UserInfo, error)
-}
-```
+- **HandleTrackStarted**: Updates the now-playing display
+- **HandleTrackEnded**: Advances the queue based on loop mode, removes failed tracks, attempts
+  auto-play when exhausted, triggers next track playback
+- **HandlePlaybackStopped**: Clears the now-playing display
+- **HandleQueueExhausted**: Attempts auto-play; if no recommendation, stops playback
 
 ### Infrastructure Adapters
 
-The `LavalinkAdapter` (`infrastructure/lavalink_client.go`) implements three
-port interfaces:
+**Discord / Lavalink** (`infrastructure/discord/lavalink/`):
 
-- `AudioPlayer` - playback control via Lavalink (resolves fresh encoded track
-  data from Lavalink on each play to avoid stale credentials)
-- `VoiceConnection` - voice channel join/leave via discordgo + Lavalink
-- `TrackProvider` - track loading/searching via Lavalink (caches domain Track
-  objects, falls back to Lavalink queries on cache miss)
+- `AudioGateway` — playback control via Lavalink
+- `TrackRepository` — track loading via Lavalink (with in-memory cache)
+- `TrackResolver` — track search via Lavalink
 
-Voice connection uses a buffered two-phase handshake, handling out-of-order
-`VoiceStateUpdate` and `VoiceServerUpdate` events before forwarding to Lavalink.
+**Discord** (`infrastructure/discord/`):
 
-Other adapters:
+- `VoiceConnectionGateway` — voice channel join/leave via discordgo + Lavalink, with bidirectional
+  guild-to-player-state mapping. Also implements `PlayerStateLocator`.
+- `NowPlayingGateway` — sends Discord embeds with source-specific colors, icons, and artwork
+- `UserRepository` — fetches user display info from Discord
+- `UserVoiceStateProvider` — queries Discord session for user voice state
 
-- `ChannelEventBus` - channel-based event bus implementing both `EventPublisher`
-  and `EventSubscriber`
-- `MemoryRepository` - in-memory `PlayerStateRepository`
-- `VoiceStateProvider` - queries Discord session for user voice state
-- `DiscordUserInfoProvider` - fetches user display name and avatar from Discord
-  (nick > globalName > username)
-- `Notifier` - sends Discord embeds with source-specific colors, icons, and
-  YouTube/Twitch thumbnail resolution
+**In-Memory** (`infrastructure/in_memory/`):
+
+- `EventBus` — channel-based event bus implementing both `EventPublisher` and `EventSubscriber`
+- `PlayerStateRepository` — in-memory `PlayerStateRepository`
+
+**YouTube** (`infrastructure/youtube/`):
+
+- `TrackRecommender` — YouTube mix-based track recommendations for auto-play

@@ -2,17 +2,24 @@ package music_player
 
 import (
 	"context"
+	"errors"
+	"fmt"
 	"log/slog"
+	"reflect"
 
 	"github.com/bwmarrin/discordgo"
 	"github.com/caarlos0/env/v11"
+	"github.com/disgoorg/disgolink/v3/disgolink"
 	"github.com/disgoorg/snowflake/v2"
 	"github.com/sglre6355/sgrbot/internal/bot"
 	"github.com/sglre6355/sgrbot/internal/modules/music_player/application"
 	"github.com/sglre6355/sgrbot/internal/modules/music_player/application/usecases"
 	"github.com/sglre6355/sgrbot/internal/modules/music_player/domain"
-	"github.com/sglre6355/sgrbot/internal/modules/music_player/infrastructure"
-	"github.com/sglre6355/sgrbot/internal/modules/music_player/presentation/discord"
+	"github.com/sglre6355/sgrbot/internal/modules/music_player/infrastructure/discord"
+	"github.com/sglre6355/sgrbot/internal/modules/music_player/infrastructure/discord/lavalink"
+	"github.com/sglre6355/sgrbot/internal/modules/music_player/infrastructure/in_memory"
+	"github.com/sglre6355/sgrbot/internal/modules/music_player/infrastructure/youtube"
+	"github.com/sglre6355/sgrbot/internal/modules/music_player/presentation"
 )
 
 func init() {
@@ -25,17 +32,14 @@ var _ bot.ConfigurableModule = (*MusicPlayerModule)(nil)
 // MusicPlayerModule provides music playback commands.
 type MusicPlayerModule struct {
 	config          *Config
-	commandHandlers *discord.CommandHandlers
-	autocomplete    *discord.AutocompleteHandler
-	eventHandlers   *discord.EventHandlers
-	lavalinkAdapter *infrastructure.LavalinkAdapter
+	commandHandlers *presentation.CommandHandlers
+	autocomplete    *presentation.AutocompleteHandler
+	eventHandlers   *presentation.EventHandlers
 
-	// Event-driven components
-	eventBus            *infrastructure.ChannelEventBus
-	playbackHandler     *application.PlaybackEventHandler
-	notificationHandler *application.NotificationEventHandler
+	voiceConnectionGateway *discord.DiscordVoiceConnectionGateway
+	link                   disgolink.Client
+	eventBus               *in_memory.ChannelEventBus
 
-	// Context for event handlers
 	ctx    context.Context
 	cancel context.CancelFunc
 }
@@ -47,7 +51,7 @@ func (m *MusicPlayerModule) Name() string {
 
 // Commands returns the slash commands for this module.
 func (m *MusicPlayerModule) Commands() []*discordgo.ApplicationCommand {
-	return discord.Commands()
+	return presentation.Commands()
 }
 
 // CommandHandlers returns the command handlers for this module.
@@ -69,15 +73,15 @@ func (m *MusicPlayerModule) CommandHandlers() map[string]bot.InteractionHandler 
 // EventHandlers returns the event handlers for this module.
 func (m *MusicPlayerModule) EventHandlers() []bot.EventHandler {
 	return []bot.EventHandler{
-		func(s *discordgo.Session, event *discordgo.VoiceServerUpdate) {
-			m.handleVoiceServerUpdate(s, event)
+		func(_ *discordgo.Session, event *discordgo.VoiceServerUpdate) {
+			m.voiceConnectionGateway.OnVoiceServerUpdate(event)
 		},
-		func(s *discordgo.Session, event *discordgo.VoiceStateUpdate) {
-			m.handleVoiceStateUpdate(s, event)
+		// Repository cleanup must run before the gateway drops the guild mapping on disconnect.
+		m.eventHandlers.HandleVoiceStateUpdate,
+		func(_ *discordgo.Session, event *discordgo.VoiceStateUpdate) {
+			m.voiceConnectionGateway.OnVoiceStateUpdate(event)
 		},
-		func(s *discordgo.Session, i *discordgo.InteractionCreate) {
-			m.handleInteractionCreate(s, i)
-		},
+		m.autocomplete.HandleInteractionCreate,
 	}
 }
 
@@ -93,124 +97,237 @@ func (m *MusicPlayerModule) LoadConfig() error {
 
 // Init initializes the module.
 func (m *MusicPlayerModule) Init(deps bot.ModuleDependencies) error {
-	// Check if session is available
 	if deps.Session == nil {
-		slog.Warn("music_player module initialized without session, Lavalink integration disabled")
-		return m.initWithoutLavalink()
+		slog.Warn("music_player module initialized without session")
+		return nil
 	}
 
 	return m.initWithLavalink(deps)
 }
 
-func (m *MusicPlayerModule) initWithoutLavalink() error {
-	// Initialize with mock/no-op implementations for testing
-	repo := infrastructure.NewMemoryRepository()
-
-	// Create service with nil dependencies
-	// These will fail at runtime if called, but allows the module to load
-	queue := usecases.NewQueueService(repo, nil)
-	trackLoader := usecases.NewTrackLoaderService(nil, nil)
-
-	m.commandHandlers = discord.NewCommandHandlers(nil, nil, queue, nil, nil)
-	m.autocomplete = discord.NewAutocompleteHandler(queue, trackLoader)
-
-	return nil
-}
-
 func (m *MusicPlayerModule) initWithLavalink(deps bot.ModuleDependencies) error {
-	// Create cancellable context for event handlers
 	m.ctx, m.cancel = context.WithCancel(context.Background())
 
-	// Create event bus (needed by Lavalink adapter for publishing events)
-	m.eventBus = infrastructure.NewChannelEventBus(infrastructure.DefaultEventBufferSize)
+	session := deps.Session
 
-	// Create Lavalink adapter
-	lavalinkConfig := infrastructure.LavalinkConfig{
+	botID, err := snowflake.Parse(session.State.User.ID)
+	if err != nil {
+		return err
+	}
+
+	// --- Infrastructure ---
+
+	m.eventBus = in_memory.NewChannelEventBus(in_memory.DefaultEventBufferSize)
+
+	// Create track cache (shared between track repository, resolver, and audio gateway)
+	trackCache := lavalink.NewTrackCache()
+
+	// Create audio gateway first (without the link client) so we can register its listeners
+	// when creating the disgolink client.
+	// Voice connection gateway is created first without the link, then we set it after.
+	voiceConnectionGateway := discord.NewDiscordVoiceConnectionGateway(session, botID)
+	m.voiceConnectionGateway = voiceConnectionGateway
+
+	audioGateway := lavalink.NewLavalinkAudioGateway(
+		nil,
+		trackCache,
+		voiceConnectionGateway,
+		m.eventBus,
+	)
+
+	// Create disgolink client with audio gateway's listeners
+	link := disgolink.New(botID, audioGateway.ListenerOpts()...)
+	if _, err := link.AddNode(context.Background(), disgolink.NodeConfig{
+		Name:     "main",
 		Address:  m.config.LavalinkAddress,
 		Password: m.config.LavalinkPassword,
+		Secure:   false,
+	}); err != nil {
+		return fmt.Errorf("failed to add Lavalink node: %w", err)
+	}
+	m.link = link
+
+	// Set the link on both gateways now that it exists
+	voiceConnectionGateway.SetLink(link)
+	audioGateway.SetLink(link)
+
+	trackRepository := lavalink.NewLavalinkTrackRepository(link, trackCache)
+	trackResolver := lavalink.NewLavalinkTrackResolver(link, trackCache)
+	userVoiceStateProvider := discord.NewDiscordUserVoiceStateProvider(session)
+	nowPlayingGateway := discord.NewDiscordNowPlayingGateway(session)
+	userRepository := discord.NewDiscordUserRepository(session)
+	playerStateRepository := in_memory.NewInMemoryPlayerStateRepository()
+	trackRecommender := youtube.NewYouTubeTrackRecommender(trackResolver)
+
+	// Domain services
+	autoPlayService := domain.NewAutoPlayService(
+		domain.UserID(session.State.User.ID),
+		trackRecommender,
+	)
+	playerService := domain.NewPlayerService(autoPlayService)
+
+	// --- Use cases ---
+
+	addToQueue := usecases.NewAddToQueueUsecase(
+		playerService,
+		playerStateRepository,
+		trackRepository,
+		audioGateway,
+		m.eventBus,
+		voiceConnectionGateway,
+	)
+	clearQueue := usecases.NewClearQueueUsecase(
+		playerService,
+		playerStateRepository,
+		audioGateway,
+		m.eventBus,
+		voiceConnectionGateway,
+	)
+	cycleLoopMode := usecases.NewCycleLoopModeUsecase(
+		playerStateRepository,
+		voiceConnectionGateway,
+	)
+	joinVoiceChannel := usecases.NewJoinVoiceChannelUsecase(
+		playerStateRepository,
+		userVoiceStateProvider,
+		voiceConnectionGateway,
+		voiceConnectionGateway,
+	)
+	leaveVoiceChannel := usecases.NewLeaveVoiceChannelUsecase(
+		playerStateRepository,
+		nowPlayingGateway,
+		voiceConnectionGateway,
+		voiceConnectionGateway,
+	)
+	listQueue := usecases.NewListQueueUsecase(
+		playerStateRepository,
+		voiceConnectionGateway,
+	)
+	pausePlayback := usecases.NewPausePlaybackUsecase(
+		playerService,
+		playerStateRepository,
+		audioGateway,
+		m.eventBus,
+		voiceConnectionGateway,
+	)
+	removeFromQueue := usecases.NewRemoveFromQueueUsecase(
+		playerService,
+		playerStateRepository,
+		m.eventBus,
+		voiceConnectionGateway,
+	)
+	resolveQuery := usecases.NewResolveQueryUsecase(
+		trackResolver,
+	)
+	restartQueue := usecases.NewRestartQueueUsecase(
+		playerService,
+		playerStateRepository,
+		audioGateway,
+		m.eventBus,
+		voiceConnectionGateway,
+	)
+	resumePlayback := usecases.NewResumePlaybackUsecase(
+		playerService,
+		playerStateRepository,
+		audioGateway,
+		m.eventBus,
+		voiceConnectionGateway,
+	)
+	seekQueue := usecases.NewSeekQueueUsecase(
+		playerService,
+		playerStateRepository,
+		audioGateway,
+		m.eventBus,
+		voiceConnectionGateway,
+	)
+	setAutoPlay := usecases.NewSetAutoPlayUsecase(
+		playerStateRepository,
+		voiceConnectionGateway,
+	)
+	setLoopMode := usecases.NewSetLoopModeUsecase(
+		playerStateRepository,
+		voiceConnectionGateway,
+	)
+	setNowPlayingDestination := usecases.NewSetNowPlayingDestinationUsecase(
+		nowPlayingGateway,
+		voiceConnectionGateway,
+	)
+	shuffleQueue := usecases.NewShuffleQueueUsecase(
+		playerService,
+		playerStateRepository,
+		m.eventBus,
+		voiceConnectionGateway,
+	)
+	skipTrack := usecases.NewSkipTrackUsecase(
+		playerService,
+		playerStateRepository,
+		audioGateway,
+		m.eventBus,
+		voiceConnectionGateway,
+	)
+
+	// --- Event subscriptions ---
+
+	domainEventHandlers := application.NewDomainEventHandlers(
+		playerService,
+		playerStateRepository,
+		userRepository,
+		audioGateway,
+		m.eventBus,
+		nowPlayingGateway,
+	)
+	if err := errors.Join(
+		m.eventBus.Subscribe(
+			reflect.TypeFor[domain.TrackStartedEvent](),
+			domainEventHandlers.HandleTrackStarted,
+		),
+		m.eventBus.Subscribe(
+			reflect.TypeFor[domain.TrackEndedEvent](),
+			domainEventHandlers.HandleTrackEnded,
+		),
+		m.eventBus.Subscribe(
+			reflect.TypeFor[domain.QueueExhaustedEvent](),
+			domainEventHandlers.HandleQueueExhausted,
+		),
+		m.eventBus.Subscribe(
+			reflect.TypeFor[domain.PlaybackStoppedEvent](),
+			domainEventHandlers.HandlePlaybackStopped,
+		),
+	); err != nil {
+		return fmt.Errorf("failed to subscribe to domain events: %w", err)
 	}
 
-	lavalinkAdapter, err := infrastructure.NewLavalinkAdapter(
-		deps.Session,
-		m.eventBus,
-		lavalinkConfig,
-	)
-	if err != nil {
-		return err
-	}
-	m.lavalinkAdapter = lavalinkAdapter
+	// --- Presentation ---
 
-	// Create infrastructure
-	repo := infrastructure.NewMemoryRepository()
-	voiceState := infrastructure.NewVoiceStateProvider(deps.Session)
-	userInfoProv := infrastructure.NewDiscordUserInfoProvider(deps.Session)
-	notifier := infrastructure.NewNotifier(deps.Session, lavalinkAdapter, userInfoProv)
-
-	// Create services with event bus
-	trackLoader := usecases.NewTrackLoaderService(lavalinkAdapter, lavalinkAdapter)
-	voiceChannel := usecases.NewVoiceChannelService(
-		repo,
-		lavalinkAdapter,
-		voiceState,
-		m.eventBus,
-		notifier,
-	)
-	playback := usecases.NewPlaybackService(
-		repo,
-		lavalinkAdapter,
-		m.eventBus,
-		notifier,
-		lavalinkAdapter,
-		voiceState,
-	)
-	queue := usecases.NewQueueService(repo, m.eventBus)
-
-	notificationChannel := usecases.NewNotificationChannelService(repo)
-
-	// Parse bot user ID (needed by event handlers and presentation)
-	botID, err := snowflake.Parse(deps.Session.State.User.ID)
-	if err != nil {
-		return err
-	}
-
-	// Create track recommender and auto-play service
-	trackRecommender := infrastructure.NewTrackRecommenderAdapter(lavalinkAdapter)
-	autoPlayService := domain.NewAutoPlayService(lavalinkAdapter, trackRecommender)
-
-	// Create application event handlers
-	m.playbackHandler = application.NewPlaybackEventHandler(
-		repo,
-		lavalinkAdapter,
-		m.eventBus,
-		m.eventBus,
-		autoPlayService,
-		botID,
-	)
-	m.notificationHandler = application.NewNotificationEventHandler(
-		repo,
-		m.eventBus,
-		notifier,
-		userInfoProv,
+	m.commandHandlers = presentation.NewCommandHandlers(
+		addToQueue,
+		clearQueue,
+		cycleLoopMode,
+		joinVoiceChannel,
+		leaveVoiceChannel,
+		listQueue,
+		pausePlayback,
+		removeFromQueue,
+		resolveQuery,
+		restartQueue,
+		resumePlayback,
+		seekQueue,
+		setAutoPlay,
+		setLoopMode,
+		setNowPlayingDestination,
+		shuffleQueue,
+		skipTrack,
 	)
 
-	// Register event handlers
-	if err := m.playbackHandler.Start(); err != nil {
-		return err
-	}
-	if err := m.notificationHandler.Start(); err != nil {
-		return err
-	}
-
-	// Create presentation handlers
-	m.commandHandlers = discord.NewCommandHandlers(
-		voiceChannel,
-		playback,
-		queue,
-		trackLoader,
-		notificationChannel,
+	m.autocomplete = presentation.NewAutocompleteHandler(
+		listQueue,
+		resolveQuery,
 	)
-	m.autocomplete = discord.NewAutocompleteHandler(queue, trackLoader)
-	m.eventHandlers = discord.NewEventHandlers(botID, voiceChannel)
+
+	m.eventHandlers = presentation.NewEventHandlers(
+		session.State.User.ID,
+		leaveVoiceChannel,
+	)
 
 	slog.Info("music_player module initialized with Lavalink")
 
@@ -219,68 +336,17 @@ func (m *MusicPlayerModule) initWithLavalink(deps bot.ModuleDependencies) error 
 
 // Shutdown cleans up module resources.
 func (m *MusicPlayerModule) Shutdown() error {
-	// Cancel context first to signal event handlers to stop
 	if m.cancel != nil {
 		m.cancel()
 	}
 
-	// Close event bus
 	if m.eventBus != nil {
 		m.eventBus.Close()
 	}
 
-	// Close Lavalink connection
-	if m.lavalinkAdapter != nil {
-		m.lavalinkAdapter.Link().Close()
+	if m.link != nil {
+		m.link.Close()
 	}
 
 	return nil
-}
-
-// Event handlers.
-
-func (m *MusicPlayerModule) handleVoiceServerUpdate(
-	_ *discordgo.Session,
-	event *discordgo.VoiceServerUpdate,
-) {
-	if m.lavalinkAdapter != nil {
-		m.lavalinkAdapter.OnVoiceServerUpdate(event)
-	}
-}
-
-func (m *MusicPlayerModule) handleVoiceStateUpdate(
-	s *discordgo.Session,
-	event *discordgo.VoiceStateUpdate,
-) {
-	if m.lavalinkAdapter != nil {
-		m.lavalinkAdapter.OnVoiceStateUpdate(event)
-	}
-	if m.eventHandlers != nil {
-		m.eventHandlers.HandleVoiceStateUpdate(s, event)
-	}
-}
-
-func (m *MusicPlayerModule) handleInteractionCreate(
-	s *discordgo.Session,
-	i *discordgo.InteractionCreate,
-) {
-	if i.Type != discordgo.InteractionApplicationCommandAutocomplete {
-		return
-	}
-
-	data := i.ApplicationCommandData()
-
-	switch data.Name {
-	case "play":
-		m.autocomplete.HandlePlay(s, i)
-	case "queue":
-		if len(data.Options) > 0 {
-			switch data.Options[0].Name {
-			case "remove":
-				m.autocomplete.HandleQueueRemove(s, i)
-			case "seek":
-				m.autocomplete.HandleQueueSeek(s, i)
-			}
-		}
-	}
 }

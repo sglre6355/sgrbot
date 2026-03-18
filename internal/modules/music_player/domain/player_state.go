@@ -4,82 +4,126 @@ import (
 	"context"
 	"errors"
 
-	"github.com/disgoorg/snowflake/v2"
+	"github.com/google/uuid"
 )
 
-// PlayerState represents the state of a music player for a guild.
-type PlayerState struct {
-	guildID               snowflake.ID       // Guild this player state belongs to
-	voiceChannelID        snowflake.ID       // Voice channel the bot is connected to
-	notificationChannelID snowflake.ID       // Text channel for notifications
-	nowPlayingMessage     *NowPlayingMessage // "Now Playing" message info (for deletion)
-	queue                 Queue              // Queue associated with this player state
-	currentIndex          int                // Index of the currently playing track in the queue
-	isPlaybackActive      bool               // true when playback is active
-	isPaused              bool               // true when playback is paused
-	loopMode              LoopMode           // loop mode for playback
-	autoPlayEnabled       bool               // true when auto-play is enabled
+// PlayerStateID uniquely identifies a player state.
+type PlayerStateID string
+
+// String returns the PlayerStateID as a string.
+func (id PlayerStateID) String() string {
+	return string(id)
 }
+
+// Domain errors for PlayerStateID invariants.
+var (
+	// ErrInvalidPlayerStateID is returned when an invalid string is passed to ParsePlayerStateID.
+	ErrInvalidPlayerStateID = errors.New("invalid player state id")
+)
+
+// NewPlayerStateID generates a new unique PlayerStateID.
+func NewPlayerStateID() PlayerStateID {
+	id := uuid.Must(uuid.NewV7())
+	return PlayerStateID(id.String())
+}
+
+// ParsePlayerStateID converts a player state id string to a PlayerStateID.
+func ParsePlayerStateID(id string) (PlayerStateID, error) {
+	if u, err := uuid.Parse(id); err != nil || u.Version() != 7 {
+		return "", ErrInvalidPlayerStateID
+	}
+	return PlayerStateID(id), nil
+}
+
+// LoopMode represents the loop mode for queue playback.
+type LoopMode int
+
+const (
+	LoopModeNone  LoopMode = iota // Default: no looping
+	LoopModeTrack                 // Repeat current track indefinitely
+	LoopModeQueue                 // Repeat entire queue when reaching end
+)
+
+// String returns a human-readable representation of the loop mode.
+func (m LoopMode) String() string {
+	switch m {
+	case LoopModeTrack:
+		return "track"
+	case LoopModeQueue:
+		return "queue"
+	default:
+		return "none"
+	}
+}
+
+// ParseLoopMode converts a string to domain.LoopMode.
+func ParseLoopMode(s string) LoopMode {
+	switch s {
+	case "track":
+		return LoopModeTrack
+	case "queue":
+		return LoopModeQueue
+	default:
+		return LoopModeNone
+	}
+}
+
+// PlayerState represents the state of a music player.
+type PlayerState struct {
+	id                PlayerStateID // Unique identifier for this player state
+	queue             Queue         // Queue associated with this player state
+	currentIndex      int           // Index of the currently playing track in the queue
+	isPlaybackActive  bool          // true when playback is active
+	isPaused          bool          // true when playback is paused
+	isAutoPlayEnabled bool          // true when auto-play is enabled
+	loopMode          LoopMode      // loop mode for playback
+}
+
+// Domain errors for PlayerState.
+var (
+	// ErrNotPlaying is returned when an operation requires active playback.
+	ErrNotPlaying = errors.New("nothing is currently playing")
+
+	// ErrAlreadyPaused is returned when trying to pause while already paused.
+	ErrAlreadyPaused = errors.New("playback is already paused")
+
+	// ErrNotPaused is returned when trying to resume while not paused.
+	ErrNotPaused = errors.New("playback is not paused")
+)
 
 // NewPlayerState creates a new PlayerState for the given guild and channels.
-func NewPlayerState(
-	guildID snowflake.ID,
-	queue Queue,
-) *PlayerState {
+func NewPlayerState() *PlayerState {
 	return &PlayerState{
-		guildID:         guildID,
-		queue:           queue,
-		autoPlayEnabled: true,
+		id:                NewPlayerStateID(),
+		queue:             NewQueue(),
+		isAutoPlayEnabled: true,
 	}
 }
 
-// IsPaused returns true if playback is paused.
-func (p *PlayerState) IsPaused() bool {
-	return p.isPaused
-}
-
-// GetGuildID returns the guild ID.
-func (p *PlayerState) GetGuildID() snowflake.ID {
-	// No read mutex: guildID must not be modified after initialization
-	return p.guildID
-}
-
-// No SetGuildID method: guildID must not be modified after initialization
-
-// GetVoiceChannelID returns the current voice channel ID.
-func (p *PlayerState) GetVoiceChannelID() snowflake.ID {
-	return p.voiceChannelID
-}
-
-// SetVoiceChannelID updates the voice channel ID.
-func (p *PlayerState) SetVoiceChannelID(channelID snowflake.ID) {
-	p.voiceChannelID = channelID
-}
-
-// GetNotificationChannelID returns the current voice channel ID.
-func (p *PlayerState) GetNotificationChannelID() snowflake.ID {
-	return p.notificationChannelID
-}
-
-// SetNotificationChannelID updates the notification channel ID.
-func (p *PlayerState) SetNotificationChannelID(channelID snowflake.ID) {
-	p.notificationChannelID = channelID
-}
-
-// GetNowPlayingMessage returns a copy of the "Now Playing" message info.
-func (p *PlayerState) GetNowPlayingMessage() *NowPlayingMessage {
-	if p.nowPlayingMessage == nil {
-		return nil
-	}
-	return &NowPlayingMessage{
-		ChannelID: p.nowPlayingMessage.ChannelID,
-		MessageID: p.nowPlayingMessage.MessageID,
+// ConstructPlayerState recreates a PlayerState from persisted data.
+func ConstructPlayerState(
+	id PlayerStateID,
+	queue Queue,
+	currentIndex int,
+	isPlaybackActive bool,
+	isPaused bool,
+	isAutoPlayEnabled bool,
+	loopMode LoopMode,
+) PlayerState {
+	return PlayerState{
+		id,
+		queue,
+		currentIndex,
+		isPlaybackActive,
+		isPaused,
+		isAutoPlayEnabled,
+		loopMode,
 	}
 }
 
-// SetNowPlayingMessage stores the "Now Playing" message info for later deletion.
-func (p *PlayerState) SetNowPlayingMessage(nowPlayingMessage *NowPlayingMessage) {
-	p.nowPlayingMessage = nowPlayingMessage
+// ID returns the player state's unique identifier.
+func (p *PlayerState) ID() PlayerStateID {
+	return p.id
 }
 
 // CurrentIndex returns the current track index.
@@ -87,12 +131,29 @@ func (p *PlayerState) CurrentIndex() int {
 	return p.currentIndex
 }
 
+// IsPlaybackActive returns true if the player is currently playing or paused with a track.
 func (p *PlayerState) IsPlaybackActive() bool {
 	return p.isPlaybackActive
 }
 
-func (p *PlayerState) SetPlaybackActive(isPlaybackActive bool) {
-	p.isPlaybackActive = isPlaybackActive
+// IsPaused returns true if playback is paused.
+func (p *PlayerState) IsPaused() bool {
+	return p.isPaused
+}
+
+// IsAutoPlayEnabled returns true if auto-play is enabled.
+func (p *PlayerState) IsAutoPlayEnabled() bool {
+	return p.isAutoPlayEnabled
+}
+
+// LoopMode returns the current loop mode.
+func (p *PlayerState) LoopMode() LoopMode {
+	return p.loopMode
+}
+
+// IsEmpty returns true if the queue has no entries.
+func (p *PlayerState) IsEmpty() bool {
+	return p.queue.IsEmpty()
 }
 
 // IsAtLast returns true if the current track is the last in the queue.
@@ -100,8 +161,12 @@ func (p *PlayerState) IsAtLast() bool {
 	return p.currentIndex == p.queue.Len()-1
 }
 
-// HasNext returns true if there's a next track available (considering loop mode).
+// HasNext returns true if there's a next track available (considering auto play and loop mode).
 func (p *PlayerState) HasNext(mode LoopMode) bool {
+	if p.IsAutoPlayEnabled() {
+		return true
+	}
+
 	if p.queue.IsEmpty() {
 		return false
 	}
@@ -115,11 +180,30 @@ func (p *PlayerState) HasNext(mode LoopMode) bool {
 	}
 }
 
+// Len returns the number of entries in the queue.
+func (p *PlayerState) Len() int {
+	return p.queue.Len()
+}
+
+// Get returns the entry at the given index without removing it.
+func (p *PlayerState) Get(index int) (*QueueEntry, error) {
+	return p.queue.Get(index)
+}
+
+// List returns a copy of all entries in the queue.
+func (p *PlayerState) List() []QueueEntry {
+	return p.queue.List()
+}
+
 // Played returns entries before the current index.
-// Returns empty slice if no entries or at the first track.
+// When playback is inactive, it returns all entries in the queue.
 func (p *PlayerState) Played() []QueueEntry {
 	if p.queue.IsEmpty() {
 		return []QueueEntry{}
+	}
+
+	if !p.IsPlaybackActive() {
+		return p.queue.List()
 	}
 
 	played := p.queue.entries[:p.currentIndex]
@@ -149,7 +233,58 @@ func (p *PlayerState) Upcoming() []QueueEntry {
 	return result
 }
 
+// ManualPlayEntries returns a copy of all entries that were manually requested.
+func (p *PlayerState) ManualPlayEntries() []QueueEntry {
+	return p.queue.ManualPlayEntries()
+}
+
+// AutoPlayEntries returns a copy of all entries that were added by auto-play.
+func (p *PlayerState) AutoPlayEntries() []QueueEntry {
+	return p.queue.AutoPlayEntries()
+}
+
+// Prepend adds entries to the front of the queue.
+// If playback is active, adjusts currentIndex to keep pointing at the same track.
+func (p *PlayerState) Prepend(entries ...QueueEntry) {
+	p.queue.Prepend(entries...)
+
+	if p.isPlaybackActive {
+		p.currentIndex += len(entries)
+	}
+}
+
+// Append adds entries to the end of the queue.
+// If playback is idle, it seeks to the first new entry and activates playback.
+// Returns the start index of the newly added entries and whether the playback became active.
+func (p *PlayerState) Append(entries ...QueueEntry) (startIndex int, becameActive bool) {
+	startIndex = p.queue.Len()
+	p.queue.Append(entries...)
+
+	if !p.isPlaybackActive {
+		p.Seek(startIndex)
+		becameActive = true
+	}
+
+	return startIndex, becameActive
+}
+
+// Insert inserts entries at the given index in the queue.
+// If playback is active and the insertion point is at or before the current index,
+// adjusts currentIndex to keep pointing at the same track.
+func (p *PlayerState) Insert(index int, entries ...QueueEntry) error {
+	if err := p.queue.Insert(index, entries...); err != nil {
+		return err
+	}
+
+	if p.isPlaybackActive && index <= p.currentIndex {
+		p.currentIndex += len(entries)
+	}
+
+	return nil
+}
+
 // Seek sets the currentIndex to the specified index.
+// If the player is idle, it activates playback.
 // Returns the entry at that index, or nil if index is out of bounds.
 // Does not change currentIndex if index is invalid.
 func (p *PlayerState) Seek(index int) *QueueEntry {
@@ -157,19 +292,24 @@ func (p *PlayerState) Seek(index int) *QueueEntry {
 		return nil
 	}
 
+	p.isPlaybackActive = true
+	p.isPaused = false
 	p.currentIndex = index
+
 	return &p.queue.entries[index]
 }
 
 // Advance moves to the next track based on loop mode.
 // Returns the new current entry, or nil if queue ended.
-//   - LoopModeNone: advance index, return nil if past end
-//   - LoopModeTrack: don't advance, return same entry
-//   - LoopModeQueue: advance, wrap to 0 if past end
+// - LoopModeNone: advance index, return nil if past end
+// - LoopModeTrack: don't advance, return same entry
+// - LoopModeQueue: advance, wrap to 0 if past end
 func (p *PlayerState) Advance(mode LoopMode) *QueueEntry {
 	if p.queue.IsEmpty() {
 		return nil
 	}
+
+	p.isPaused = false
 
 	switch mode {
 	case LoopModeTrack:
@@ -186,6 +326,7 @@ func (p *PlayerState) Advance(mode LoopMode) *QueueEntry {
 	default: // LoopModeNone
 		// Advance if current track is not the last in the queue
 		if p.IsAtLast() {
+			p.isPlaybackActive = false
 			return nil
 		}
 		p.currentIndex++
@@ -194,37 +335,24 @@ func (p *PlayerState) Advance(mode LoopMode) *QueueEntry {
 	return &p.queue.entries[p.currentIndex]
 }
 
-// Len returns the number of entries in the queue.
-func (p *PlayerState) Len() int {
-	return p.queue.Len()
-}
-
-// IsEmpty returns true if the queue has no entries.
-func (p *PlayerState) IsEmpty() bool {
-	return p.queue.IsEmpty()
-}
-
-// List returns a copy of all entries in the queue.
-func (p *PlayerState) List() []QueueEntry {
-	return p.queue.List()
-}
-
-// Get returns the entry at the given index without removing it.
-func (p *PlayerState) Get(index int) (*QueueEntry, error) {
-	return p.queue.Get(index)
-}
-
-// Append adds entries to the end of the queue.
-func (p *PlayerState) Append(entries ...QueueEntry) {
-	p.queue.Append(entries...)
-}
-
-// Prepend adds entries to the front of the queue.
-// If playback is active, adjusts currentIndex to keep pointing at the same track.
-func (p *PlayerState) Prepend(entries ...QueueEntry) {
-	p.queue.Prepend(entries...)
-	if p.isPlaybackActive {
-		p.currentIndex += len(entries)
+// Shuffle randomizes the order of entries in the queue.
+// When playback is active, the currently playing track is moved to index 0
+// so playback continues uninterrupted.
+func (p *PlayerState) Shuffle() {
+	current := p.Current() // nil if idle
+	var savedEntry QueueEntry
+	if current != nil {
+		savedEntry = *current // copy value before shuffle mutates the slice
+	}
+	p.queue.Shuffle()
+	if current != nil {
+		for i, e := range p.queue.entries {
+			if e == savedEntry {
+				p.queue.entries[0], p.queue.entries[i] = p.queue.entries[i], p.queue.entries[0]
+				break
+			}
+		}
+		p.currentIndex = 0
 	}
 }
 
@@ -239,7 +367,8 @@ func (p *PlayerState) Remove(index int) (*QueueEntry, error) {
 	// If removing the current track, advance first so we know what to play next.
 	// LoopModeTrack is treated as LoopModeNone here because the track being
 	// looped is being removed, so there is nothing to repeat.
-	if p.IsPlaybackActive() && index == p.currentIndex {
+	removingCurrent := p.IsPlaybackActive() && index == p.currentIndex
+	if removingCurrent {
 		loopmode := p.loopMode
 		if loopmode == LoopModeTrack {
 			loopmode = LoopModeNone
@@ -267,32 +396,29 @@ func (p *PlayerState) Remove(index int) (*QueueEntry, error) {
 	return entry, nil
 }
 
-// Shuffle randomizes the order of entries in the queue.
-// When playback is active, the currently playing track is moved to index 0
-// so playback continues uninterrupted.
-func (p *PlayerState) Shuffle() {
-	current := p.Current() // nil if idle
-	var savedEntry QueueEntry
-	if current != nil {
-		savedEntry = *current // copy value before shuffle mutates the slice
-	}
-	p.queue.Shuffle()
-	if current != nil {
-		for i, e := range p.queue.entries {
-			if e == savedEntry {
-				p.queue.entries[0], p.queue.entries[i] = p.queue.entries[i], p.queue.entries[0]
-				break
-			}
-		}
-		p.currentIndex = 0
-	}
-}
-
 // Clear removes all entries from the queue and resets playback state.
 func (p *PlayerState) Clear() {
 	p.queue.Clear()
 	p.currentIndex = 0
 	p.isPlaybackActive = false
+}
+
+// ClearExceptCurrent removes all entries except the currently playing track.
+// Returns the number of entries removed and an error if not playing.
+func (p *PlayerState) ClearExceptCurrent() (int, error) {
+	current := p.Current()
+	if current == nil {
+		return 0, ErrNotPlaying
+	}
+
+	count := p.queue.Len() - 1
+	savedEntry := *current
+	p.queue.Clear()
+	p.queue.Append(savedEntry)
+	p.currentIndex = 0
+	p.isPlaybackActive = true
+
+	return count, nil
 }
 
 // Pause transitions the player to the paused state.
@@ -345,69 +471,6 @@ func (p *PlayerState) Skip() (skipped *QueueEntry, next *QueueEntry, err error) 
 	return skipped, next, nil
 }
 
-// Enqueue appends entries to the queue. If the player is idle, it seeks to the first
-// new entry and activates playback.
-// Returns the start index of the newly added entries and whether the player became active.
-func (p *PlayerState) Enqueue(entries ...QueueEntry) (startIndex int, becameActive bool) {
-	startIndex = p.queue.Len()
-	p.queue.Append(entries...)
-
-	if !p.isPlaybackActive {
-		p.Seek(startIndex)
-		p.isPlaybackActive = true
-		becameActive = true
-	}
-
-	return startIndex, becameActive
-}
-
-// HandleTrackEnded processes the end of a track.
-// If failed is true, the current track is removed from the queue.
-// Otherwise, the queue advances according to the current loop mode.
-// Returns the next entry to play, or nil if the queue has ended.
-func (p *PlayerState) HandleTrackEnded(failed bool) *QueueEntry {
-	if failed {
-		if _, err := p.Remove(p.currentIndex); err != nil {
-			return nil
-		}
-		return p.Current()
-	}
-
-	next := p.Advance(p.loopMode)
-	if next == nil {
-		p.isPlaybackActive = false
-	}
-	return next
-}
-
-// ClearExceptCurrent removes all entries except the currently playing track.
-// Returns the number of entries removed and an error if not playing.
-func (p *PlayerState) ClearExceptCurrent() (int, error) {
-	current := p.Current()
-	if current == nil {
-		return 0, ErrNotPlaying
-	}
-
-	count := p.queue.Len() - 1
-	savedEntry := *current
-	p.queue.Clear()
-	p.queue.Append(savedEntry)
-	p.currentIndex = 0
-	p.isPlaybackActive = true
-
-	return count, nil
-}
-
-// SetPaused sets the paused state.
-func (p *PlayerState) SetPaused(isPaused bool) {
-	p.isPaused = isPaused
-}
-
-// GetLoopMode returns the current loop mode.
-func (p *PlayerState) GetLoopMode() LoopMode {
-	return p.loopMode
-}
-
 // SetLoopMode sets the loop mode.
 func (p *PlayerState) SetLoopMode(mode LoopMode) {
 	p.loopMode = mode
@@ -427,27 +490,24 @@ func (p *PlayerState) CycleLoopMode() LoopMode {
 	return p.loopMode
 }
 
-// IsAutoPlayEnabled returns true if auto-play is enabled.
-func (p *PlayerState) IsAutoPlayEnabled() bool {
-	return p.autoPlayEnabled
-}
-
 // SetAutoPlayEnabled sets the auto-play enabled state.
 func (p *PlayerState) SetAutoPlayEnabled(enabled bool) {
-	p.autoPlayEnabled = enabled
+	p.isAutoPlayEnabled = enabled
 }
 
-// Errors for PlayerStateRepository
-var ErrPlayerStateNotFound = errors.New("player state not found")
+// Domain errors for PlayerStateRepository.
+var (
+	ErrPlayerStateNotFound = errors.New("player state not found")
+)
 
 // PlayerStateRepository defines the interface for storing and retrieving player states.
 type PlayerStateRepository interface {
-	// Get returns the PlayerState for the given guild, or error if not exists.
-	Get(ctx context.Context, guildID snowflake.ID) (PlayerState, error)
+	// FindByID returns the PlayerState for the given player state ID, or error if not exists.
+	FindByID(ctx context.Context, id PlayerStateID) (PlayerState, error)
 
 	// Save stores the PlayerState.
 	Save(ctx context.Context, state PlayerState) error
 
-	// Delete removes the PlayerState for the given guild.
-	Delete(ctx context.Context, guildID snowflake.ID) error
+	// Delete removes the PlayerState for the given player state ID.
+	Delete(ctx context.Context, id PlayerStateID) error
 }

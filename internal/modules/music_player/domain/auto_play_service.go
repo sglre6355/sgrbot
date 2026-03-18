@@ -2,126 +2,115 @@ package domain
 
 import (
 	"context"
+	"errors"
+	"fmt"
 	"log/slog"
 	"math/rand/v2"
+	"slices"
 )
 
 // AutoPlayService selects seeds from the queue and recommends the next track.
 type AutoPlayService struct {
-	tracks      TrackRepository
+	botUserID   UserID
 	recommender TrackRecommender
 }
 
+// Domain errors for AutoPlayService.
+var (
+	// ErrNoAutoPlaySeeds is returned when no suitable seeds are available.
+	ErrNoAutoPlaySeeds = errors.New("no seeds available for auto-play")
+
+	// ErrNoRecommendations is returned when the recommender returns no tracks.
+	ErrNoRecommendations = errors.New("no recommendations found for auto-play")
+)
+
 // NewAutoPlayService creates a new AutoPlayService.
-func NewAutoPlayService(tracks TrackRepository, recommender TrackRecommender) *AutoPlayService {
+func NewAutoPlayService(botUserID UserID, recommender TrackRecommender) *AutoPlayService {
 	return &AutoPlayService{
-		tracks:      tracks,
+		botUserID:   botUserID,
 		recommender: recommender,
 	}
 }
 
-// GetRecommendation selects seeds from the queue and returns a recommended track.
-// Seeds are chosen as: up to 2 randomly sampled manually added YouTube tracks
-// + the most recent auto-play YouTube track.
-// Returns nil if no recommendation could be made.
-func (s *AutoPlayService) GetRecommendation(ctx context.Context, state *PlayerState) *Track {
-	allEntries := state.List()
-	var manualIDs []TrackID
-	var autoPlayIDs []TrackID
-	for _, entry := range allEntries {
-		if entry.IsAutoPlay {
-			autoPlayIDs = append(autoPlayIDs, entry.TrackID)
-		} else {
-			manualIDs = append(manualIDs, entry.TrackID)
-		}
-	}
+// GetNextRecommendation selects seeds from the queue and returns a recommended auto-play entry.
+// Seeds are chosen as a combination of:
+// - up to 2 randomly sampled manually added tracks
+// - up to 1 most recent auto-play track
+func (s *AutoPlayService) GetNextRecommendation(
+	ctx context.Context,
+	state *PlayerState,
+) (QueueEntry, error) {
+	manualPlaySeedCandidates := state.ManualPlayEntries()
+	autoPlaySeedCandidates := state.AutoPlayEntries()
 
-	seeds := make([]TrackID, 0, 3)
-	seedSet := make(map[TrackID]struct{}, 3)
+	// Collect up to 2 manual-play seeds and up to 1 auto-play seed accepted by the recommender
+	manualPlaySeeds := make([]QueueEntry, 0, 2)
+	autoPlaySeeds := make([]QueueEntry, 0, 1)
 
-	// Sample up to 2 manual YouTube seeds
-	rand.Shuffle(len(manualIDs), func(i, j int) {
-		manualIDs[i], manualIDs[j] = manualIDs[j], manualIDs[i]
+	// Sample manual play seeds
+	rand.Shuffle(len(manualPlaySeedCandidates), func(i, j int) {
+		manualPlaySeedCandidates[i], manualPlaySeedCandidates[j] = manualPlaySeedCandidates[j], manualPlaySeedCandidates[i]
 	})
-	for _, id := range manualIDs {
-		if len(seeds) >= 2 {
+	for _, seed := range manualPlaySeedCandidates {
+		if len(manualPlaySeeds) >= cap(manualPlaySeeds) {
 			break
 		}
-		track, err := s.tracks.FindByID(ctx, id)
-		if err != nil {
-			slog.Debug(
-				"failed to load manual seed track",
-				"track", id,
-				"error", err,
-			)
+		if !s.recommender.AcceptsSeed(seed) || slices.Contains(manualPlaySeeds, seed) {
 			continue
 		}
-		if track.Source != TrackSourceYouTube {
-			continue
-		}
-		if _, exists := seedSet[id]; exists {
-			continue
-		}
-		seedSet[id] = struct{}{}
-		seeds = append(seeds, id)
+		manualPlaySeeds = append(manualPlaySeeds, seed)
 	}
 
-	// Add the most recent auto-play YouTube track as a seed
-	for i := len(autoPlayIDs) - 1; i >= 0; i-- {
-		id := autoPlayIDs[i]
-		if _, exists := seedSet[id]; exists {
+	// Sample the most recent auto-play seed
+	for _, seed := range slices.Backward(autoPlaySeedCandidates) {
+		if len(autoPlaySeeds) >= cap(autoPlaySeeds) {
+			break
+		}
+		if !s.recommender.AcceptsSeed(seed) || slices.Contains(manualPlaySeeds, seed) ||
+			slices.Contains(autoPlaySeeds, seed) {
 			continue
 		}
-		track, err := s.tracks.FindByID(ctx, id)
-		if err != nil {
-			slog.Debug(
-				"failed to load auto-play seed track",
-				"track", id,
-				"error", err,
-			)
-			continue
-		}
-		if track.Source != TrackSourceYouTube {
-			continue
-		}
-		seedSet[id] = struct{}{}
-		seeds = append(seeds, id)
-		break
+		autoPlaySeeds = append(autoPlaySeeds, seed)
 	}
+
+	seeds := append(manualPlaySeeds, autoPlaySeeds...)
 
 	if len(seeds) == 0 {
 		slog.Debug(
-			"auto-play has no YouTube seeds",
-			"guild", state.GetGuildID(),
+			"auto-play has no acceptable seeds",
+			"player_state_id", state.ID(),
 		)
-		return nil
+		return QueueEntry{}, ErrNoAutoPlaySeeds
 	}
 
 	// Exclude all tracks not selected as seeds
-	var exclude []TrackID
-	for _, entry := range allEntries {
-		if _, isSeed := seedSet[entry.TrackID]; !isSeed {
-			exclude = append(exclude, entry.TrackID)
+	var exclusions []QueueEntry
+	for _, entry := range state.List() {
+		if slices.Contains(seeds, entry) {
+			continue
 		}
+		exclusions = append(exclusions, entry)
 	}
 
-	tracks, err := s.recommender.Recommend(ctx, seeds, exclude, 1)
+	tracks, err := s.recommender.GetRecommendation(ctx, seeds, exclusions, 1)
 	if err != nil {
 		slog.Warn(
 			"auto-play recommendation failed",
-			"guild", state.GetGuildID(),
+			"player_state_id", state.ID(),
 			"error", err,
 		)
-		return nil
+		return QueueEntry{}, fmt.Errorf("auto-play recommendation: %w", err)
 	}
 
 	if len(tracks) == 0 {
 		slog.Debug(
 			"auto-play found no recommendations",
-			"guild", state.GetGuildID(),
+			"player_state_id", state.ID(),
 		)
-		return nil
+		return QueueEntry{}, ErrNoRecommendations
 	}
 
-	return &tracks[0]
+	entry := NewQueueEntry(tracks[0], s.botUserID, true)
+
+	return entry, nil
 }

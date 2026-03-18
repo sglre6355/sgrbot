@@ -2,1196 +2,1240 @@ package domain
 
 import (
 	"testing"
-
-	"github.com/disgoorg/snowflake/v2"
 )
 
-const testGuildID = snowflake.ID(1)
+func TestParsePlayerStateID(t *testing.T) {
+	validID := NewPlayerStateID()
 
-func newTestPlayerState() *PlayerState {
-	return NewPlayerState(testGuildID, NewQueue())
-}
-
-func testEntry(id TrackID) QueueEntry {
-	return QueueEntry{TrackID: id}
-}
-
-func TestNewPlayerState(t *testing.T) {
-	guildID := snowflake.ID(123456789)
-	queue := NewQueue()
-
-	state := NewPlayerState(guildID, queue)
-
-	if state.GetGuildID() != guildID {
-		t.Errorf("expected GuildID %d, got %d", guildID, state.GetGuildID())
+	type args struct {
+		id string
 	}
-	if state.IsPaused() {
-		t.Error("expected not to be paused")
+	type want struct {
+		playerStateID PlayerStateID
+		err           error
 	}
-	if state.Len() != 0 {
-		t.Error("expected Queue to be empty")
+
+	tests := []struct {
+		name string
+		args args
+		want want
+	}{
+		{
+			name: "valid UUID v7",
+			args: args{id: string(validID)},
+			want: want{playerStateID: validID, err: nil},
+		},
+		{
+			name: "invalid string",
+			args: args{id: "not-valid"},
+			want: want{playerStateID: "", err: ErrInvalidPlayerStateID},
+		},
 	}
-	if state.CurrentIndex() != 0 {
-		t.Errorf("expected currentIndex 0, got %d", state.CurrentIndex())
-	}
-}
 
-func TestPlayerState_SetVoiceChannelID(t *testing.T) {
-	state := newTestPlayerState()
-	newVoiceID := snowflake.ID(999)
-
-	state.SetVoiceChannelID(newVoiceID)
-
-	if state.GetVoiceChannelID() != newVoiceID {
-		t.Errorf("expected VoiceChannelID %d, got %d", newVoiceID, state.GetVoiceChannelID())
-	}
-}
-
-func TestPlayerState_SetNotificationChannelID(t *testing.T) {
-	state := newTestPlayerState()
-	newNotifyID := snowflake.ID(888)
-
-	state.SetNotificationChannelID(newNotifyID)
-
-	if state.GetNotificationChannelID() != newNotifyID {
-		t.Errorf(
-			"expected NotificationChannelID %d, got %d",
-			newNotifyID,
-			state.GetNotificationChannelID(),
-		)
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got, err := ParsePlayerStateID(tt.args.id)
+			if err != tt.want.err {
+				t.Fatalf("err: got %v, want %v", err, tt.want.err)
+			}
+			if got != tt.want.playerStateID {
+				t.Fatalf("id: got %q, want %q", got, tt.want.playerStateID)
+			}
+		})
 	}
 }
 
-func TestPlayerState_SetPaused(t *testing.T) {
-	state := newTestPlayerState()
-
-	// Initially not paused
-	if state.IsPaused() {
-		t.Error("expected not to be paused initially")
+func TestParseLoopMode(t *testing.T) {
+	type args struct {
+		s string
+	}
+	type want struct {
+		mode LoopMode
 	}
 
-	// Set paused to true
-	state.SetPaused(true)
-	if !state.IsPaused() {
-		t.Error("expected to be paused")
+	tests := []struct {
+		name string
+		args args
+		want want
+	}{
+		{name: "none", args: args{s: "none"}, want: want{mode: LoopModeNone}},
+		{name: "track", args: args{s: "track"}, want: want{mode: LoopModeTrack}},
+		{name: "queue", args: args{s: "queue"}, want: want{mode: LoopModeQueue}},
+		{
+			name: "invalid defaults to none",
+			args: args{s: "invalid"},
+			want: want{mode: LoopModeNone},
+		},
+		{name: "empty defaults to none", args: args{s: ""}, want: want{mode: LoopModeNone}},
 	}
 
-	// Set paused to false
-	state.SetPaused(false)
-	if state.IsPaused() {
-		t.Error("expected not to be paused")
-	}
-}
-
-func TestPlayerState_LoopMode(t *testing.T) {
-	state := newTestPlayerState()
-
-	// Default loop mode is None
-	if got := state.GetLoopMode(); got != LoopModeNone {
-		t.Errorf("expected LoopModeNone, got %v", got)
-	}
-
-	// Set loop mode
-	state.SetLoopMode(LoopModeTrack)
-	if got := state.GetLoopMode(); got != LoopModeTrack {
-		t.Errorf("expected LoopModeTrack, got %v", got)
-	}
-
-	state.SetLoopMode(LoopModeQueue)
-	if got := state.GetLoopMode(); got != LoopModeQueue {
-		t.Errorf("expected LoopModeQueue, got %v", got)
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := ParseLoopMode(tt.args.s); got != tt.want.mode {
+				t.Fatalf("got %v, want %v", got, tt.want.mode)
+			}
+		})
 	}
 }
 
-func TestPlayerState_CycleLoopMode(t *testing.T) {
-	state := newTestPlayerState()
-
-	// None -> Track
-	got := state.CycleLoopMode()
-	if got != LoopModeTrack {
-		t.Errorf("expected LoopModeTrack, got %v", got)
+func TestLoopMode_String(t *testing.T) {
+	type args struct {
+		mode LoopMode
 	}
-	if state.GetLoopMode() != LoopModeTrack {
-		t.Error("state loop mode should be updated")
+	type want struct {
+		str string
 	}
 
-	// Track -> Queue
-	got = state.CycleLoopMode()
-	if got != LoopModeQueue {
-		t.Errorf("expected LoopModeQueue, got %v", got)
+	tests := []struct {
+		name string
+		args args
+		want want
+	}{
+		{name: "none", args: args{mode: LoopModeNone}, want: want{str: "none"}},
+		{name: "track", args: args{mode: LoopModeTrack}, want: want{str: "track"}},
+		{name: "queue", args: args{mode: LoopModeQueue}, want: want{str: "queue"}},
 	}
 
-	// Queue -> None
-	got = state.CycleLoopMode()
-	if got != LoopModeNone {
-		t.Errorf("expected LoopModeNone, got %v", got)
-	}
-}
-
-func TestPlayerState_NowPlayingMessage(t *testing.T) {
-	state := newTestPlayerState()
-
-	// Initially nil
-	if state.GetNowPlayingMessage() != nil {
-		t.Error("expected nil NowPlayingMessage initially")
-	}
-
-	// Set message
-	channelID := snowflake.ID(123)
-	messageID := snowflake.ID(456)
-	nowPlayingMessage := NewNowPlayingMessage(channelID, messageID)
-	state.SetNowPlayingMessage(&nowPlayingMessage)
-
-	msg := state.GetNowPlayingMessage()
-	if msg == nil {
-		t.Fatal("expected NowPlayingMessage to be set")
-	}
-	if msg.ChannelID != channelID {
-		t.Errorf("expected ChannelID %d, got %d", channelID, msg.ChannelID)
-	}
-	if msg.MessageID != messageID {
-		t.Errorf("expected MessageID %d, got %d", messageID, msg.MessageID)
-	}
-
-	// Clear message
-	state.SetNowPlayingMessage(nil)
-	if state.GetNowPlayingMessage() != nil {
-		t.Error("expected nil NowPlayingMessage after clear")
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := tt.args.mode.String(); got != tt.want.str {
+				t.Fatalf("got %q, want %q", got, tt.want.str)
+			}
+		})
 	}
 }
 
-func TestPlayerState_NowPlayingMessage_ReturnsCopy(t *testing.T) {
-	state := newTestPlayerState()
-	channelID := snowflake.ID(123)
-	messageID := snowflake.ID(456)
-	nowPlayingMessage := NewNowPlayingMessage(channelID, messageID)
-	state.SetNowPlayingMessage(&nowPlayingMessage)
+func TestPlayerState_Append(t *testing.T) {
+	type args struct {
+		initialIDs []string
+		appendID   string
+	}
+	type want struct {
+		startIndex   int
+		becameActive bool
+		isActive     bool
+		currentID    string
+		currentIndex int
+		queueLen     int
+	}
 
-	// Get and modify the returned message
-	msg1 := state.GetNowPlayingMessage()
-	msg1.ChannelID = snowflake.ID(999)
+	tests := []struct {
+		name string
+		args args
+		want want
+	}{
+		{
+			name: "first append activates playback",
+			args: args{initialIDs: nil, appendID: "1"},
+			want: want{
+				startIndex: 0, becameActive: true, isActive: true,
+				currentID: "1", currentIndex: 0, queueLen: 1,
+			},
+		},
+		{
+			name: "second append does not reactivate",
+			args: args{initialIDs: []string{"1"}, appendID: "2"},
+			want: want{
+				startIndex: 1, becameActive: false, isActive: true,
+				currentID: "1", currentIndex: 0, queueLen: 2,
+			},
+		},
+	}
 
-	// Original should be unchanged
-	msg2 := state.GetNowPlayingMessage()
-	if msg2.ChannelID != channelID {
-		t.Error("GetNowPlayingMessage should return a copy")
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			ps := NewPlayerState()
+			for _, id := range tt.args.initialIDs {
+				ps.Append(newTestEntry(id, false))
+			}
+
+			startIndex, becameActive := ps.Append(newTestEntry(tt.args.appendID, false))
+
+			if startIndex != tt.want.startIndex {
+				t.Errorf("startIndex: got %d, want %d", startIndex, tt.want.startIndex)
+			}
+			if becameActive != tt.want.becameActive {
+				t.Errorf("becameActive: got %v, want %v", becameActive, tt.want.becameActive)
+			}
+			if ps.IsPlaybackActive() != tt.want.isActive {
+				t.Errorf(
+					"IsPlaybackActive: got %v, want %v",
+					ps.IsPlaybackActive(),
+					tt.want.isActive,
+				)
+			}
+			if ps.Current().Track().ID() != TrackID(tt.want.currentID) {
+				t.Errorf("Current: got %q, want %q", ps.Current().Track().ID(), tt.want.currentID)
+			}
+			if ps.CurrentIndex() != tt.want.currentIndex {
+				t.Errorf("CurrentIndex: got %d, want %d", ps.CurrentIndex(), tt.want.currentIndex)
+			}
+			if ps.Len() != tt.want.queueLen {
+				t.Errorf("Len: got %d, want %d", ps.Len(), tt.want.queueLen)
+			}
+		})
 	}
 }
 
-func TestPlayerState_Current(t *testing.T) {
-	state := newTestPlayerState()
-	trackID := TrackID("track-1")
-
-	// Current on empty queue returns nil
-	if got := state.Current(); got != nil {
-		t.Errorf("expected nil from empty queue, got %v", got)
+func TestPlayerState_Prepend(t *testing.T) {
+	type args struct {
+		prependID string
+	}
+	type want struct {
+		currentIndex int
+		currentID    string
 	}
 
-	state.Append(testEntry(trackID))
-	state.SetPlaybackActive(true)
-
-	// After Append, Current returns the first track
-	got := state.Current()
-	if got == nil {
-		t.Fatal("expected track after Append")
-	}
-	if got.TrackID != trackID {
-		t.Errorf("expected %s, got %s", trackID, got.TrackID)
-	}
-}
-
-func TestPlayerState_Advance_LoopModeNone(t *testing.T) {
-	state := newTestPlayerState()
-	trackID1 := TrackID("track-1")
-	trackID2 := TrackID("track-2")
-
-	// Advance on empty queue returns nil
-	if got := state.Advance(LoopModeNone); got != nil {
-		t.Errorf("expected nil from empty queue, got %v", got)
+	tests := []struct {
+		name string
+		args args
+		want want
+	}{
+		{
+			name: "adjusts current index",
+			args: args{prependID: "0"},
+			want: want{currentIndex: 1, currentID: "1"},
+		},
 	}
 
-	state.Append(testEntry(trackID1), testEntry(trackID2))
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			ps := NewPlayerState()
+			ps.Append(newTestEntry("1", false))
 
-	// Advance should return next track
-	got := state.Advance(LoopModeNone)
-	if got == nil || got.TrackID != trackID2 {
-		t.Errorf("expected track2, got %v", got)
-	}
-	if state.CurrentIndex() != 1 {
-		t.Errorf("expected currentIndex 1, got %d", state.CurrentIndex())
-	}
+			ps.Prepend(newTestEntry(tt.args.prependID, false))
 
-	// Advance past end should return nil
-	got = state.Advance(LoopModeNone)
-	if got != nil {
-		t.Errorf("expected nil past end, got %v", got)
-	}
-
-	// Tracks should still be in queue
-	if state.Len() != 2 {
-		t.Errorf("expected 2 tracks still in queue, got %d", state.Len())
+			if ps.CurrentIndex() != tt.want.currentIndex {
+				t.Errorf("CurrentIndex: got %d, want %d", ps.CurrentIndex(), tt.want.currentIndex)
+			}
+			if ps.Current().Track().ID() != TrackID(tt.want.currentID) {
+				t.Errorf("Current: got %q, want %q", ps.Current().Track().ID(), tt.want.currentID)
+			}
+		})
 	}
 }
 
-func TestPlayerState_Advance_LoopModeTrack(t *testing.T) {
-	state := newTestPlayerState()
-	trackID1 := TrackID("track-1")
-	trackID2 := TrackID("track-2")
-
-	state.Append(testEntry(trackID1), testEntry(trackID2))
-
-	// Advance with LoopModeTrack should return same track
-	got := state.Advance(LoopModeTrack)
-	if got == nil || got.TrackID != trackID1 {
-		t.Errorf("expected track1, got %v", got)
+func TestPlayerState_Insert(t *testing.T) {
+	type args struct {
+		initialIDs []string
+		seekIndex  int
+		insertAt   int
+		insertID   string
 	}
-	if state.CurrentIndex() != 0 {
-		t.Errorf("expected currentIndex 0, got %d", state.CurrentIndex())
+	type want struct {
+		currentIndex int
+		currentID    string
+		err          error
 	}
 
-	// Multiple advances should keep returning same track
-	for i := range 5 {
-		got = state.Advance(LoopModeTrack)
-		if got == nil || got.TrackID != trackID1 {
-			t.Errorf("iteration %d: expected track1, got %v", i, got)
-		}
-	}
-}
-
-func TestPlayerState_Advance_LoopModeQueue(t *testing.T) {
-	state := newTestPlayerState()
-	trackID1 := TrackID("track-1")
-	trackID2 := TrackID("track-2")
-	trackID3 := TrackID("track-3")
-
-	state.Append(testEntry(trackID1), testEntry(trackID2), testEntry(trackID3))
-
-	// Advance through all tracks
-	if got := state.Advance(LoopModeQueue); got == nil || got.TrackID != trackID2 {
-		t.Errorf("expected track2, got %v", got)
-	}
-	if got := state.Advance(LoopModeQueue); got == nil || got.TrackID != trackID3 {
-		t.Errorf("expected track3, got %v", got)
+	tests := []struct {
+		name string
+		args args
+		want want
+	}{
+		{
+			name: "insert at current adjusts index",
+			args: args{initialIDs: []string{"1", "2"}, seekIndex: 0, insertAt: 0, insertID: "0"},
+			want: want{currentIndex: 1, currentID: "1", err: nil},
+		},
+		{
+			name: "insert after current no adjustment",
+			args: args{initialIDs: []string{"1", "3"}, seekIndex: 0, insertAt: 1, insertID: "2"},
+			want: want{currentIndex: 0, currentID: "1", err: nil},
+		},
+		{
+			name: "invalid index",
+			args: args{initialIDs: []string{"1"}, seekIndex: 0, insertAt: 99, insertID: "x"},
+			want: want{currentIndex: 0, currentID: "1", err: ErrInvalidIndex},
+		},
 	}
 
-	// Should wrap to beginning
-	got := state.Advance(LoopModeQueue)
-	if got == nil || got.TrackID != trackID1 {
-		t.Errorf("expected track1 (wrap), got %v", got)
-	}
-	if state.CurrentIndex() != 0 {
-		t.Errorf("expected currentIndex 0 after wrap, got %d", state.CurrentIndex())
-	}
-}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			ps := NewPlayerState()
+			for _, id := range tt.args.initialIDs {
+				ps.Append(newTestEntry(id, false))
+			}
 
-func TestPlayerState_Advance_LoopModeQueue_SingleTrack(t *testing.T) {
-	state := newTestPlayerState()
-	trackID := TrackID("track-1")
+			err := ps.Insert(tt.args.insertAt, newTestEntry(tt.args.insertID, false))
 
-	state.Append(testEntry(trackID))
-
-	// Single track with LoopModeQueue should keep returning same track
-	for i := range 5 {
-		got := state.Advance(LoopModeQueue)
-		if got == nil || got.TrackID != trackID {
-			t.Errorf("iteration %d: expected track, got %v", i, got)
-		}
-	}
-}
-
-func TestPlayerState_HasNext(t *testing.T) {
-	state := newTestPlayerState()
-	trackID1 := TrackID("track-1")
-	trackID2 := TrackID("track-2")
-
-	// HasNext on empty queue returns false
-	if state.HasNext(LoopModeNone) {
-		t.Error("expected HasNext=false for empty queue")
-	}
-
-	state.Append(testEntry(trackID1), testEntry(trackID2))
-
-	// HasNext with LoopModeNone should be true when there are more tracks
-	if !state.HasNext(LoopModeNone) {
-		t.Error("expected HasNext=true with more tracks")
-	}
-
-	// Advance to last track
-	state.Advance(LoopModeNone)
-
-	// HasNext should be false at last track with LoopModeNone
-	if state.HasNext(LoopModeNone) {
-		t.Error("expected HasNext=false at last track with LoopModeNone")
-	}
-
-	// HasNext should be true with LoopModeTrack
-	if !state.HasNext(LoopModeTrack) {
-		t.Error("expected HasNext=true with LoopModeTrack")
-	}
-
-	// HasNext should be true with LoopModeQueue
-	if !state.HasNext(LoopModeQueue) {
-		t.Error("expected HasNext=true with LoopModeQueue")
-	}
-}
-
-func TestPlayerState_Played(t *testing.T) {
-	state := newTestPlayerState()
-	trackID1 := TrackID("track-1")
-	trackID2 := TrackID("track-2")
-	trackID3 := TrackID("track-3")
-
-	// Played on empty queue returns empty slice
-	if played := state.Played(); len(played) != 0 {
-		t.Errorf("expected empty played, got %d", len(played))
-	}
-
-	state.Append(testEntry(trackID1), testEntry(trackID2), testEntry(trackID3))
-
-	// At first track, no played tracks
-	if played := state.Played(); len(played) != 0 {
-		t.Errorf("expected empty played at first track, got %d", len(played))
-	}
-
-	// Advance and check played
-	state.Advance(LoopModeNone)
-	played := state.Played()
-	if len(played) != 1 {
-		t.Errorf("expected 1 played, got %d", len(played))
-	}
-	if played[0].TrackID != trackID1 {
-		t.Error("expected track1 as played")
-	}
-
-	// Advance again
-	state.Advance(LoopModeNone)
-	played = state.Played()
-	if len(played) != 2 {
-		t.Errorf("expected 2 played, got %d", len(played))
-	}
-	if played[0].TrackID != trackID1 || played[1].TrackID != trackID2 {
-		t.Error("unexpected played track order")
-	}
-}
-
-func TestPlayerState_Upcoming(t *testing.T) {
-	state := newTestPlayerState()
-	trackID1 := TrackID("track-1")
-	trackID2 := TrackID("track-2")
-	trackID3 := TrackID("track-3")
-
-	state.Append(testEntry(trackID1), testEntry(trackID2), testEntry(trackID3))
-	state.SetPlaybackActive(true)
-
-	// Upcoming should return tracks after current
-	upcoming := state.Upcoming()
-	if len(upcoming) != 2 {
-		t.Errorf("expected 2 upcoming, got %d", len(upcoming))
-	}
-	if upcoming[0].TrackID != trackID2 || upcoming[1].TrackID != trackID3 {
-		t.Error("unexpected upcoming track order")
-	}
-
-	// Advance and check upcoming again
-	state.Advance(LoopModeNone)
-	upcoming = state.Upcoming()
-	if len(upcoming) != 1 {
-		t.Errorf("expected 1 upcoming, got %d", len(upcoming))
-	}
-	if upcoming[0].TrackID != trackID3 {
-		t.Error("expected track3 as upcoming")
-	}
-
-	// At last track, upcoming should be empty
-	state.Advance(LoopModeNone)
-	upcoming = state.Upcoming()
-	if len(upcoming) != 0 {
-		t.Errorf("expected empty upcoming at last track, got %d", len(upcoming))
+			if err != tt.want.err {
+				t.Fatalf("err: got %v, want %v", err, tt.want.err)
+			}
+			if err == nil {
+				if ps.CurrentIndex() != tt.want.currentIndex {
+					t.Errorf(
+						"CurrentIndex: got %d, want %d",
+						ps.CurrentIndex(),
+						tt.want.currentIndex,
+					)
+				}
+				if ps.Current().Track().ID() != TrackID(tt.want.currentID) {
+					t.Errorf(
+						"Current: got %q, want %q",
+						ps.Current().Track().ID(),
+						tt.want.currentID,
+					)
+				}
+			}
+		})
 	}
 }
 
 func TestPlayerState_Seek(t *testing.T) {
-	t.Run("seek to valid middle position", func(t *testing.T) {
-		state := newTestPlayerState()
-		trackID0 := TrackID("track-0")
-		trackID1 := TrackID("track-1")
-		trackID2 := TrackID("track-2")
-
-		state.Append(testEntry(trackID0), testEntry(trackID1), testEntry(trackID2))
-		state.SetPlaybackActive(true)
-
-		got := state.Seek(1)
-		if got == nil || got.TrackID != trackID1 {
-			t.Errorf("expected track1, got %v", got)
-		}
-		if state.CurrentIndex() != 1 {
-			t.Errorf("expected currentIndex 1, got %d", state.CurrentIndex())
-		}
-		if got := state.Current(); got == nil || got.TrackID != trackID1 {
-			t.Error("Current() should return track1 after seek")
-		}
-	})
-
-	t.Run("seek to first position", func(t *testing.T) {
-		state := newTestPlayerState()
-		trackID0 := TrackID("track-0")
-		trackID1 := TrackID("track-1")
-
-		state.Append(testEntry(trackID0), testEntry(trackID1))
-		state.Advance(LoopModeNone) // now at index 1
-
-		got := state.Seek(0)
-		if got == nil || got.TrackID != trackID0 {
-			t.Errorf("expected track0, got %v", got)
-		}
-		if state.CurrentIndex() != 0 {
-			t.Errorf("expected currentIndex 0, got %d", state.CurrentIndex())
-		}
-	})
-
-	t.Run("seek to last position", func(t *testing.T) {
-		state := newTestPlayerState()
-		state.Append(testEntry("track-0"), testEntry("track-1"), testEntry("track-2"))
-
-		got := state.Seek(2)
-		if got == nil || got.TrackID != "track-2" {
-			t.Errorf("expected track-2, got %v", got)
-		}
-		if state.CurrentIndex() != 2 {
-			t.Errorf("expected currentIndex 2, got %d", state.CurrentIndex())
-		}
-	})
-
-	t.Run("seek to invalid negative position", func(t *testing.T) {
-		state := newTestPlayerState()
-		state.Append(testEntry("track-0"))
-
-		got := state.Seek(-1)
-		if got != nil {
-			t.Errorf("expected nil for negative position, got %v", got)
-		}
-		if state.CurrentIndex() != 0 {
-			t.Errorf("expected currentIndex 0 (unchanged), got %d", state.CurrentIndex())
-		}
-	})
-
-	t.Run("seek to out of bounds position", func(t *testing.T) {
-		state := newTestPlayerState()
-		state.Append(testEntry("track-0"), testEntry("track-1"))
-
-		got := state.Seek(10)
-		if got != nil {
-			t.Errorf("expected nil for out of bounds position, got %v", got)
-		}
-		if state.CurrentIndex() != 0 {
-			t.Errorf("expected currentIndex 0 (unchanged), got %d", state.CurrentIndex())
-		}
-	})
-
-	t.Run("seek on empty queue", func(t *testing.T) {
-		state := newTestPlayerState()
-
-		got := state.Seek(0)
-		if got != nil {
-			t.Errorf("expected nil for empty queue, got %v", got)
-		}
-		if state.CurrentIndex() != 0 {
-			t.Errorf("expected currentIndex 0, got %d", state.CurrentIndex())
-		}
-	})
-
-	t.Run("seek after advancing past end", func(t *testing.T) {
-		state := newTestPlayerState()
-		trackID0 := TrackID("track-0")
-
-		state.Append(testEntry(trackID0), testEntry("track-1"))
-		state.Advance(LoopModeNone) // index=1
-		state.Advance(LoopModeNone) // past end
-
-		got := state.Seek(0)
-		if got == nil || got.TrackID != trackID0 {
-			t.Errorf("expected track0, got %v", got)
-		}
-		if state.CurrentIndex() != 0 {
-			t.Errorf("expected currentIndex 0, got %d", state.CurrentIndex())
-		}
-	})
-}
-
-func TestPlayerState_QueueRemove(t *testing.T) {
-	t.Run("remove before currentIndex adjusts index", func(t *testing.T) {
-		state := newTestPlayerState()
-		state.Append(testEntry("a"), testEntry("b"), testEntry("c"))
-		state.SetPlaybackActive(true)
-		state.Seek(2) // currentIndex=2, playing "c"
-
-		removed, err := state.Remove(0) // remove "a"
-		if err != nil {
-			t.Fatalf("unexpected error: %v", err)
-		}
-		if removed.TrackID != "a" {
-			t.Errorf("expected removed track 'a', got %q", removed.TrackID)
-		}
-		if state.CurrentIndex() != 1 {
-			t.Errorf("expected currentIndex 1, got %d", state.CurrentIndex())
-		}
-		if got := state.Current(); got == nil || got.TrackID != "c" {
-			t.Errorf("expected current track 'c', got %v", got)
-		}
-	})
-
-	t.Run("remove after currentIndex keeps index", func(t *testing.T) {
-		state := newTestPlayerState()
-		state.Append(testEntry("a"), testEntry("b"), testEntry("c"))
-		state.SetPlaybackActive(true)
-		state.Seek(0) // currentIndex=0
-
-		removed, err := state.Remove(2) // remove "c"
-		if err != nil {
-			t.Fatalf("unexpected error: %v", err)
-		}
-		if removed.TrackID != "c" {
-			t.Errorf("expected removed track 'c', got %q", removed.TrackID)
-		}
-		if state.CurrentIndex() != 0 {
-			t.Errorf("expected currentIndex 0, got %d", state.CurrentIndex())
-		}
-	})
-
-	t.Run("remove at currentIndex advances to next", func(t *testing.T) {
-		state := newTestPlayerState()
-		state.Append(testEntry("a"), testEntry("b"), testEntry("c"))
-		state.SetPlaybackActive(true)
-		state.Seek(1) // currentIndex=1, playing "b"
-
-		_, err := state.Remove(1) // remove "b"
-		if err != nil {
-			t.Fatalf("unexpected error: %v", err)
-		}
-		// Advance moved to "c" (was at index 2), then "b" removed shifts it to index 1
-		if state.CurrentIndex() != 1 {
-			t.Errorf("expected currentIndex 1, got %d", state.CurrentIndex())
-		}
-		if got := state.Current(); got == nil || got.TrackID != "c" {
-			t.Errorf("expected current track 'c', got %v", got)
-		}
-		if !state.IsPlaybackActive() {
-			t.Error("expected playback to remain active")
-		}
-	})
-
-	t.Run("remove at currentIndex at last deactivates", func(t *testing.T) {
-		state := newTestPlayerState()
-		state.Append(testEntry("a"), testEntry("b"))
-		state.SetPlaybackActive(true)
-		state.Seek(1) // currentIndex=1 (last)
-
-		_, err := state.Remove(1) // remove "b" at last position
-		if err != nil {
-			t.Fatalf("unexpected error: %v", err)
-		}
-		// Advance returns nil (at last, LoopModeNone) → playback deactivates
-		if state.CurrentIndex() != 0 {
-			t.Errorf("expected currentIndex 0, got %d", state.CurrentIndex())
-		}
-		if state.IsPlaybackActive() {
-			t.Error("expected playback to be inactive")
-		}
-	})
-
-	t.Run("remove at currentIndex at last with queue loop wraps", func(t *testing.T) {
-		state := newTestPlayerState()
-		state.Append(testEntry("a"), testEntry("b"))
-		state.SetPlaybackActive(true)
-		state.SetLoopMode(LoopModeQueue)
-		state.Seek(1) // currentIndex=1 (last)
-
-		_, err := state.Remove(1) // remove "b"
-		if err != nil {
-			t.Fatalf("unexpected error: %v", err)
-		}
-		// Advance wraps to 0 ("a"), then "b" removed → queue ["a"], index 0
-		if state.CurrentIndex() != 0 {
-			t.Errorf("expected currentIndex 0, got %d", state.CurrentIndex())
-		}
-		if got := state.Current(); got == nil || got.TrackID != "a" {
-			t.Errorf("expected current track 'a', got %v", got)
-		}
-		if !state.IsPlaybackActive() {
-			t.Error("expected playback to remain active")
-		}
-	})
-
-	t.Run("remove at currentIndex with track loop advances normally", func(t *testing.T) {
-		state := newTestPlayerState()
-		state.Append(testEntry("a"), testEntry("b"), testEntry("c"))
-		state.SetPlaybackActive(true)
-		state.SetLoopMode(LoopModeTrack)
-		state.Seek(1) // currentIndex=1, playing "b"
-
-		_, err := state.Remove(1) // remove "b"
-		if err != nil {
-			t.Fatalf("unexpected error: %v", err)
-		}
-		// LoopModeTrack treated as LoopModeNone: advance to "c" (index 2→1 after shift)
-		if state.CurrentIndex() != 1 {
-			t.Errorf("expected currentIndex 1, got %d", state.CurrentIndex())
-		}
-		if got := state.Current(); got == nil || got.TrackID != "c" {
-			t.Errorf("expected current track 'c', got %v", got)
-		}
-		if !state.IsPlaybackActive() {
-			t.Error("expected playback to remain active")
-		}
-	})
-
-	t.Run("remove at currentIndex at last with track loop deactivates", func(t *testing.T) {
-		state := newTestPlayerState()
-		state.Append(testEntry("a"), testEntry("b"))
-		state.SetPlaybackActive(true)
-		state.SetLoopMode(LoopModeTrack)
-		state.Seek(1) // currentIndex=1 (last)
-
-		_, err := state.Remove(1) // remove "b"
-		if err != nil {
-			t.Fatalf("unexpected error: %v", err)
-		}
-		// LoopModeTrack treated as LoopModeNone: at last, no next → deactivates
-		if state.CurrentIndex() != 0 {
-			t.Errorf("expected currentIndex 0, got %d", state.CurrentIndex())
-		}
-		if state.IsPlaybackActive() {
-			t.Error("expected playback to be inactive")
-		}
-	})
-
-	t.Run("remove last entry deactivates playback", func(t *testing.T) {
-		state := newTestPlayerState()
-		state.Append(testEntry("a"))
-		state.SetPlaybackActive(true)
-
-		_, err := state.Remove(0)
-		if err != nil {
-			t.Fatalf("unexpected error: %v", err)
-		}
-		if state.CurrentIndex() != 0 {
-			t.Errorf("expected currentIndex 0, got %d", state.CurrentIndex())
-		}
-		if state.IsPlaybackActive() {
-			t.Error("expected playback to be inactive after removing last entry")
-		}
-	})
-
-	t.Run("remove invalid index returns error", func(t *testing.T) {
-		state := newTestPlayerState()
-		state.Append(testEntry("a"))
-
-		_, err := state.Remove(5)
-		if err == nil {
-			t.Error("expected error for invalid index")
-		}
-	})
-}
-
-func TestPlayerState_QueueClear(t *testing.T) {
-	state := newTestPlayerState()
-	state.Append(testEntry("a"), testEntry("b"), testEntry("c"))
-	state.SetPlaybackActive(true)
-	state.Seek(2)
-
-	state.Clear()
-
-	if state.Len() != 0 {
-		t.Errorf("expected empty queue, got %d", state.Len())
+	type args struct {
+		index int
 	}
-	if state.CurrentIndex() != 0 {
-		t.Errorf("expected currentIndex 0, got %d", state.CurrentIndex())
+	type want struct {
+		isNil        bool
+		trackID      string
+		currentIndex int
 	}
-	if state.IsPlaybackActive() {
-		t.Error("expected playback to be inactive")
+
+	tests := []struct {
+		name string
+		args args
+		want want
+	}{
+		{
+			name: "valid index",
+			args: args{index: 2},
+			want: want{isNil: false, trackID: "3", currentIndex: 2},
+		},
+		{
+			name: "invalid index returns nil",
+			args: args{index: 5},
+			want: want{isNil: true, trackID: "", currentIndex: 0},
+		},
 	}
-}
 
-func TestPlayerState_QueuePrepend(t *testing.T) {
-	t.Run("prepend with active playback shifts currentIndex", func(t *testing.T) {
-		state := newTestPlayerState()
-		state.Append(testEntry("a"), testEntry("b"))
-		state.SetPlaybackActive(true)
-		state.Seek(1) // currentIndex=1, playing "b"
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			ps := NewPlayerState()
+			ps.Append(newTestEntry("1", false), newTestEntry("2", false), newTestEntry("3", false))
 
-		state.Prepend(testEntry("x"), testEntry("y"))
+			entry := ps.Seek(tt.args.index)
 
-		// Queue: [x, y, a, b], "b" was at index 1, now at index 3
-		if state.CurrentIndex() != 3 {
-			t.Errorf("expected currentIndex 3, got %d", state.CurrentIndex())
-		}
-		if got := state.Current(); got == nil || got.TrackID != "b" {
-			t.Errorf("expected current track 'b', got %v", got)
-		}
-	})
-
-	t.Run("prepend with inactive playback does not shift", func(t *testing.T) {
-		state := newTestPlayerState()
-		state.Append(testEntry("a"))
-		// playback not active
-
-		state.Prepend(testEntry("x"))
-
-		if state.CurrentIndex() != 0 {
-			t.Errorf("expected currentIndex 0, got %d", state.CurrentIndex())
-		}
-	})
-}
-
-func TestPlayerState_Shuffle(t *testing.T) {
-	t.Run("active playback - current track moves to index 0", func(t *testing.T) {
-		state := newTestPlayerState()
-		state.Append(testEntry("a"), testEntry("b"), testEntry("c"), testEntry("d"), testEntry("e"))
-		state.SetPlaybackActive(true)
-		state.Seek(2) // playing "c"
-
-		state.Shuffle()
-
-		// Current track should now be at index 0
-		if state.CurrentIndex() != 0 {
-			t.Errorf("expected currentIndex 0, got %d", state.CurrentIndex())
-		}
-		current := state.Current()
-		if current == nil || current.TrackID != "c" {
-			t.Errorf("expected current track 'c', got %v", current)
-		}
-
-		// All entries should be preserved
-		if state.Len() != 5 {
-			t.Fatalf("expected 5 entries, got %d", state.Len())
-		}
-		seen := make(map[TrackID]bool)
-		for _, e := range state.List() {
-			seen[e.TrackID] = true
-		}
-		for _, id := range []TrackID{"a", "b", "c", "d", "e"} {
-			if !seen[id] {
-				t.Errorf("missing entry %q after shuffle", id)
+			if tt.want.isNil {
+				if entry != nil {
+					t.Error("expected nil entry")
+				}
+			} else {
+				if entry == nil {
+					t.Fatal("expected non-nil entry")
+				}
+				if string(entry.Track().ID()) != tt.want.trackID {
+					t.Errorf("track: got %q, want %q", entry.Track().ID(), tt.want.trackID)
+				}
+				if ps.CurrentIndex() != tt.want.currentIndex {
+					t.Errorf(
+						"CurrentIndex: got %d, want %d",
+						ps.CurrentIndex(),
+						tt.want.currentIndex,
+					)
+				}
 			}
-		}
-	})
+		})
+	}
+}
 
-	t.Run("idle - all entries shuffled, currentIndex unchanged", func(t *testing.T) {
-		state := newTestPlayerState()
-		state.Append(testEntry("a"), testEntry("b"), testEntry("c"), testEntry("d"), testEntry("e"))
-		// playback not active
+func TestPlayerState_Advance(t *testing.T) {
+	type args struct {
+		trackIDs  []string
+		seekIndex int
+		mode      LoopMode
+	}
+	type want struct {
+		isNil        bool
+		trackID      string
+		currentIndex int
+		isActive     bool
+	}
 
-		state.Shuffle()
+	tests := []struct {
+		name string
+		args args
+		want want
+	}{
+		{
+			name: "LoopModeNone advances to next",
+			args: args{trackIDs: []string{"1", "2"}, seekIndex: 0, mode: LoopModeNone},
+			want: want{isNil: false, trackID: "2", currentIndex: 1, isActive: true},
+		},
+		{
+			name: "LoopModeNone at last returns nil",
+			args: args{trackIDs: []string{"1", "2"}, seekIndex: 1, mode: LoopModeNone},
+			want: want{isNil: true, trackID: "", currentIndex: 1, isActive: false},
+		},
+		{
+			name: "LoopModeTrack repeats same track",
+			args: args{trackIDs: []string{"1", "2"}, seekIndex: 0, mode: LoopModeTrack},
+			want: want{isNil: false, trackID: "1", currentIndex: 0, isActive: true},
+		},
+		{
+			name: "LoopModeQueue wraps to start",
+			args: args{trackIDs: []string{"1", "2"}, seekIndex: 1, mode: LoopModeQueue},
+			want: want{isNil: false, trackID: "1", currentIndex: 0, isActive: true},
+		},
+		{
+			name: "empty queue returns nil",
+			args: args{trackIDs: nil, seekIndex: 0, mode: LoopModeNone},
+			want: want{isNil: true, trackID: "", currentIndex: 0, isActive: false},
+		},
+	}
 
-		if state.CurrentIndex() != 0 {
-			t.Errorf("expected currentIndex 0, got %d", state.CurrentIndex())
-		}
-		if state.Len() != 5 {
-			t.Fatalf("expected 5 entries, got %d", state.Len())
-		}
-		seen := make(map[TrackID]bool)
-		for _, e := range state.List() {
-			seen[e.TrackID] = true
-		}
-		for _, id := range []TrackID{"a", "b", "c", "d", "e"} {
-			if !seen[id] {
-				t.Errorf("missing entry %q after shuffle", id)
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			ps := NewPlayerState()
+			for _, id := range tt.args.trackIDs {
+				ps.Append(newTestEntry(id, false))
 			}
-		}
-	})
+			if tt.args.seekIndex > 0 && len(tt.args.trackIDs) > 0 {
+				ps.Seek(tt.args.seekIndex)
+			}
 
-	t.Run("empty queue is no-op", func(t *testing.T) {
-		state := newTestPlayerState()
-		state.Shuffle() // should not panic
-		if state.Len() != 0 {
-			t.Errorf("expected empty queue, got %d", state.Len())
-		}
-	})
+			next := ps.Advance(tt.args.mode)
 
-	t.Run("single entry is no-op", func(t *testing.T) {
-		state := newTestPlayerState()
-		state.Append(testEntry("only"))
-		state.SetPlaybackActive(true)
-
-		state.Shuffle()
-
-		if state.Len() != 1 {
-			t.Fatalf("expected 1 entry, got %d", state.Len())
-		}
-		if state.CurrentIndex() != 0 {
-			t.Errorf("expected currentIndex 0, got %d", state.CurrentIndex())
-		}
-		current := state.Current()
-		if current == nil || current.TrackID != "only" {
-			t.Errorf("expected current track 'only', got %v", current)
-		}
-	})
-}
-
-func TestPlayerState_AutoPlayEnabled(t *testing.T) {
-	state := newTestPlayerState()
-
-	// Default is true
-	if !state.IsAutoPlayEnabled() {
-		t.Error("expected auto-play to be enabled by default")
-	}
-
-	// Disable auto-play
-	state.SetAutoPlayEnabled(false)
-	if state.IsAutoPlayEnabled() {
-		t.Error("expected auto-play to be disabled")
-	}
-
-	// Re-enable auto-play
-	state.SetAutoPlayEnabled(true)
-	if !state.IsAutoPlayEnabled() {
-		t.Error("expected auto-play to be enabled")
+			if tt.want.isNil {
+				if next != nil {
+					t.Error("expected nil")
+				}
+			} else {
+				if next == nil {
+					t.Fatal("expected non-nil")
+				}
+				if string(next.Track().ID()) != tt.want.trackID {
+					t.Errorf("track: got %q, want %q", next.Track().ID(), tt.want.trackID)
+				}
+			}
+			if ps.IsPlaybackActive() != tt.want.isActive {
+				t.Errorf(
+					"IsPlaybackActive: got %v, want %v",
+					ps.IsPlaybackActive(),
+					tt.want.isActive,
+				)
+			}
+		})
 	}
 }
 
-func TestPlayerState_IsAtLast(t *testing.T) {
-	state := newTestPlayerState()
-
-	state.Append(testEntry("track-0"), testEntry("track-1"), testEntry("track-2"))
-
-	// At first track, not at last
-	if state.IsAtLast() {
-		t.Error("state at first track should not be at last")
+func TestPlayerState_Played_Current_Upcoming(t *testing.T) {
+	type args struct {
+		trackIDs  []string
+		seekIndex int
+	}
+	type want struct {
+		playedIDs   []string
+		currentID   string
+		upcomingIDs []string
 	}
 
-	// Advance to middle
-	state.Advance(LoopModeNone)
-	if state.IsAtLast() {
-		t.Error("state at middle track should not be at last")
+	tests := []struct {
+		name string
+		args args
+		want want
+	}{
+		{
+			name: "seek to middle",
+			args: args{trackIDs: []string{"1", "2", "3"}, seekIndex: 1},
+			want: want{playedIDs: []string{"1"}, currentID: "2", upcomingIDs: []string{"3"}},
+		},
+		{
+			name: "at first track",
+			args: args{trackIDs: []string{"1", "2", "3"}, seekIndex: 0},
+			want: want{playedIDs: nil, currentID: "1", upcomingIDs: []string{"2", "3"}},
+		},
+		{
+			name: "at last track",
+			args: args{trackIDs: []string{"1", "2", "3"}, seekIndex: 2},
+			want: want{playedIDs: []string{"1", "2"}, currentID: "3", upcomingIDs: nil},
+		},
 	}
 
-	// Advance to last
-	state.Advance(LoopModeNone)
-	if !state.IsAtLast() {
-		t.Error("state at last track should be at last")
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			ps := NewPlayerState()
+			for _, id := range tt.args.trackIDs {
+				ps.Append(newTestEntry(id, false))
+			}
+			ps.Seek(tt.args.seekIndex)
+
+			played := ps.Played()
+			if len(played) != len(tt.want.playedIDs) {
+				t.Fatalf("Played len: got %d, want %d", len(played), len(tt.want.playedIDs))
+			}
+			for i, wantID := range tt.want.playedIDs {
+				if string(played[i].Track().ID()) != wantID {
+					t.Errorf("Played[%d]: got %q, want %q", i, played[i].Track().ID(), wantID)
+				}
+			}
+
+			current := ps.Current()
+			if current == nil || string(current.Track().ID()) != tt.want.currentID {
+				t.Errorf("Current: got %v, want %q", current, tt.want.currentID)
+			}
+
+			upcoming := ps.Upcoming()
+			if len(upcoming) != len(tt.want.upcomingIDs) {
+				t.Fatalf("Upcoming len: got %d, want %d", len(upcoming), len(tt.want.upcomingIDs))
+			}
+			for i, wantID := range tt.want.upcomingIDs {
+				if string(upcoming[i].Track().ID()) != wantID {
+					t.Errorf("Upcoming[%d]: got %q, want %q", i, upcoming[i].Track().ID(), wantID)
+				}
+			}
+		})
+	}
+}
+
+func TestPlayerState_Current_WhenInactive(t *testing.T) {
+	type args struct{}
+	type want struct {
+		playedIDs     []string
+		currentIsNil  bool
+		upcomingEmpty bool
+	}
+
+	tests := []struct {
+		name string
+		args args
+		want want
+	}{
+		{
+			name: "inactive state returns nil current and empty upcoming",
+			want: want{
+				playedIDs:     []string{"1", "2", "3"},
+				currentIsNil:  true,
+				upcomingEmpty: true,
+			},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			ps := NewPlayerState()
+			ps.Append(newTestEntry("1", false))
+			ps.Append(newTestEntry("2", false))
+			ps.Append(newTestEntry("3", false))
+			ps.Seek(2)
+			ps.Advance(LoopModeNone)
+
+			played := ps.Played()
+			if len(played) != len(tt.want.playedIDs) {
+				t.Fatalf("Played len: got %d, want %d", len(played), len(tt.want.playedIDs))
+			}
+			for i, wantID := range tt.want.playedIDs {
+				if string(played[i].Track().ID()) != wantID {
+					t.Errorf("Played[%d]: got %q, want %q", i, played[i].Track().ID(), wantID)
+				}
+			}
+
+			if (ps.Current() == nil) != tt.want.currentIsNil {
+				t.Errorf("Current nil: got %v, want %v", ps.Current() == nil, tt.want.currentIsNil)
+			}
+			if (len(ps.Upcoming()) == 0) != tt.want.upcomingEmpty {
+				t.Errorf(
+					"Upcoming empty: got %v, want %v",
+					len(ps.Upcoming()) == 0,
+					tt.want.upcomingEmpty,
+				)
+			}
+		})
+	}
+}
+
+func TestPlayerState_Remove(t *testing.T) {
+	type args struct {
+		trackIDs  []string
+		seekIndex int
+		removeAt  int
+	}
+	type want struct {
+		removedID    string
+		isActive     bool
+		isEmpty      bool
+		currentID    string
+		currentIndex int
+		err          error
+	}
+
+	tests := []struct {
+		name string
+		args args
+		want want
+	}{
+		{
+			name: "remove current track with next",
+			args: args{trackIDs: []string{"1", "2"}, seekIndex: 0, removeAt: 0},
+			want: want{
+				removedID:    "1",
+				isActive:     true,
+				isEmpty:      false,
+				currentID:    "2",
+				currentIndex: 0,
+				err:          nil,
+			},
+		},
+		{
+			name: "remove only track",
+			args: args{trackIDs: []string{"1"}, seekIndex: 0, removeAt: 0},
+			want: want{
+				removedID:    "1",
+				isActive:     false,
+				isEmpty:      true,
+				currentID:    "",
+				currentIndex: 0,
+				err:          nil,
+			},
+		},
+		{
+			name: "remove before current adjusts index",
+			args: args{trackIDs: []string{"1", "2", "3"}, seekIndex: 2, removeAt: 0},
+			want: want{
+				removedID:    "1",
+				isActive:     true,
+				isEmpty:      false,
+				currentID:    "3",
+				currentIndex: 1,
+				err:          nil,
+			},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			ps := NewPlayerState()
+			for _, id := range tt.args.trackIDs {
+				ps.Append(newTestEntry(id, false))
+			}
+			if tt.args.seekIndex > 0 {
+				ps.Seek(tt.args.seekIndex)
+			}
+
+			removed, err := ps.Remove(tt.args.removeAt)
+
+			if err != tt.want.err {
+				t.Fatalf("err: got %v, want %v", err, tt.want.err)
+			}
+			if string(removed.Track().ID()) != tt.want.removedID {
+				t.Errorf("removed: got %q, want %q", removed.Track().ID(), tt.want.removedID)
+			}
+			if ps.IsPlaybackActive() != tt.want.isActive {
+				t.Errorf(
+					"IsPlaybackActive: got %v, want %v",
+					ps.IsPlaybackActive(),
+					tt.want.isActive,
+				)
+			}
+			if ps.IsEmpty() != tt.want.isEmpty {
+				t.Errorf("IsEmpty: got %v, want %v", ps.IsEmpty(), tt.want.isEmpty)
+			}
+			if tt.want.isActive {
+				if ps.CurrentIndex() != tt.want.currentIndex {
+					t.Errorf(
+						"CurrentIndex: got %d, want %d",
+						ps.CurrentIndex(),
+						tt.want.currentIndex,
+					)
+				}
+				if string(ps.Current().Track().ID()) != tt.want.currentID {
+					t.Errorf(
+						"Current: got %q, want %q",
+						ps.Current().Track().ID(),
+						tt.want.currentID,
+					)
+				}
+			}
+		})
+	}
+}
+
+func TestPlayerState_Clear(t *testing.T) {
+	type args struct {
+		trackIDs []string
+	}
+	type want struct {
+		isActive     bool
+		isEmpty      bool
+		currentIndex int
+	}
+
+	tests := []struct {
+		name string
+		args args
+		want want
+	}{
+		{
+			name: "clears active state",
+			args: args{trackIDs: []string{"1", "2"}},
+			want: want{isActive: false, isEmpty: true, currentIndex: 0},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			ps := NewPlayerState()
+			for _, id := range tt.args.trackIDs {
+				ps.Append(newTestEntry(id, false))
+			}
+
+			ps.Clear()
+
+			if ps.IsPlaybackActive() != tt.want.isActive {
+				t.Errorf(
+					"IsPlaybackActive: got %v, want %v",
+					ps.IsPlaybackActive(),
+					tt.want.isActive,
+				)
+			}
+			if ps.IsEmpty() != tt.want.isEmpty {
+				t.Errorf("IsEmpty: got %v, want %v", ps.IsEmpty(), tt.want.isEmpty)
+			}
+			if ps.CurrentIndex() != tt.want.currentIndex {
+				t.Errorf("CurrentIndex: got %d, want %d", ps.CurrentIndex(), tt.want.currentIndex)
+			}
+		})
+	}
+}
+
+func TestPlayerState_ClearExceptCurrent(t *testing.T) {
+	type args struct {
+		trackIDs  []string
+		seekIndex int
+		isActive  bool
+	}
+	type want struct {
+		count        int
+		currentID    string
+		currentIndex int
+		queueLen     int
+		err          error
+	}
+
+	tests := []struct {
+		name string
+		args args
+		want want
+	}{
+		{
+			name: "clears all except current",
+			args: args{trackIDs: []string{"1", "2", "3"}, seekIndex: 1, isActive: true},
+			want: want{count: 2, currentID: "2", currentIndex: 0, queueLen: 1, err: nil},
+		},
+		{
+			name: "not playing returns error",
+			args: args{trackIDs: nil, seekIndex: 0, isActive: false},
+			want: want{err: ErrNotPlaying},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			ps := NewPlayerState()
+			for _, id := range tt.args.trackIDs {
+				ps.Append(newTestEntry(id, false))
+			}
+			if tt.args.seekIndex > 0 && tt.args.isActive {
+				ps.Seek(tt.args.seekIndex)
+			}
+
+			count, err := ps.ClearExceptCurrent()
+
+			if err != tt.want.err {
+				t.Fatalf("err: got %v, want %v", err, tt.want.err)
+			}
+			if err == nil {
+				if count != tt.want.count {
+					t.Errorf("count: got %d, want %d", count, tt.want.count)
+				}
+				if ps.Len() != tt.want.queueLen {
+					t.Errorf("Len: got %d, want %d", ps.Len(), tt.want.queueLen)
+				}
+				if string(ps.Current().Track().ID()) != tt.want.currentID {
+					t.Errorf(
+						"Current: got %q, want %q",
+						ps.Current().Track().ID(),
+						tt.want.currentID,
+					)
+				}
+				if ps.CurrentIndex() != tt.want.currentIndex {
+					t.Errorf(
+						"CurrentIndex: got %d, want %d",
+						ps.CurrentIndex(),
+						tt.want.currentIndex,
+					)
+				}
+			}
+		})
 	}
 }
 
 func TestPlayerState_Pause(t *testing.T) {
-	t.Run("pause successfully", func(t *testing.T) {
-		state := newTestPlayerState()
-		state.Append(testEntry("a"))
-		state.SetPlaybackActive(true)
+	type args struct {
+		isActive bool
+		isPaused bool
+	}
+	type want struct {
+		err error
+	}
 
-		err := state.Pause()
-		if err != nil {
-			t.Fatalf("unexpected error: %v", err)
-		}
-		if !state.IsPaused() {
-			t.Error("expected paused")
-		}
-	})
+	tests := []struct {
+		name string
+		args args
+		want want
+	}{
+		{
+			name: "pause active playback",
+			args: args{isActive: true, isPaused: false},
+			want: want{err: nil},
+		},
+		{
+			name: "pause when not playing",
+			args: args{isActive: false, isPaused: false},
+			want: want{err: ErrNotPlaying},
+		},
+		{
+			name: "pause when already paused",
+			args: args{isActive: true, isPaused: true},
+			want: want{err: ErrAlreadyPaused},
+		},
+	}
 
-	t.Run("not playing", func(t *testing.T) {
-		state := newTestPlayerState()
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			ps := NewPlayerState()
+			if tt.args.isActive {
+				ps.Append(newTestEntry("1", false))
+			}
+			if tt.args.isPaused {
+				if err := ps.Pause(); err != nil {
+					t.Fatalf("setup Pause: %v", err)
+				}
+			}
 
-		err := state.Pause()
-		if err != ErrNotPlaying {
-			t.Errorf("expected ErrNotPlaying, got %v", err)
-		}
-	})
+			err := ps.Pause()
 
-	t.Run("already paused", func(t *testing.T) {
-		state := newTestPlayerState()
-		state.Append(testEntry("a"))
-		state.SetPlaybackActive(true)
-		state.SetPaused(true)
-
-		err := state.Pause()
-		if err != ErrAlreadyPaused {
-			t.Errorf("expected ErrAlreadyPaused, got %v", err)
-		}
-	})
+			if err != tt.want.err {
+				t.Fatalf("err: got %v, want %v", err, tt.want.err)
+			}
+			if err == nil && !ps.IsPaused() {
+				t.Error("should be paused")
+			}
+		})
+	}
 }
 
 func TestPlayerState_Resume(t *testing.T) {
-	t.Run("resume successfully", func(t *testing.T) {
-		state := newTestPlayerState()
-		state.Append(testEntry("a"))
-		state.SetPlaybackActive(true)
-		state.SetPaused(true)
+	type args struct {
+		isActive bool
+		isPaused bool
+	}
+	type want struct {
+		err error
+	}
 
-		err := state.Resume()
-		if err != nil {
-			t.Fatalf("unexpected error: %v", err)
-		}
-		if state.IsPaused() {
-			t.Error("expected not paused")
-		}
-	})
+	tests := []struct {
+		name string
+		args args
+		want want
+	}{
+		{
+			name: "resume paused playback",
+			args: args{isActive: true, isPaused: true},
+			want: want{err: nil},
+		},
+		{
+			name: "resume when not playing",
+			args: args{isActive: false, isPaused: false},
+			want: want{err: ErrNotPlaying},
+		},
+		{
+			name: "resume when not paused",
+			args: args{isActive: true, isPaused: false},
+			want: want{err: ErrNotPaused},
+		},
+	}
 
-	t.Run("not playing", func(t *testing.T) {
-		state := newTestPlayerState()
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			ps := NewPlayerState()
+			if tt.args.isActive {
+				ps.Append(newTestEntry("1", false))
+			}
+			if tt.args.isPaused {
+				if err := ps.Pause(); err != nil {
+					t.Fatalf("setup Pause: %v", err)
+				}
+			}
 
-		err := state.Resume()
-		if err != ErrNotPlaying {
-			t.Errorf("expected ErrNotPlaying, got %v", err)
-		}
-	})
+			err := ps.Resume()
 
-	t.Run("not paused", func(t *testing.T) {
-		state := newTestPlayerState()
-		state.Append(testEntry("a"))
-		state.SetPlaybackActive(true)
-
-		err := state.Resume()
-		if err != ErrNotPaused {
-			t.Errorf("expected ErrNotPaused, got %v", err)
-		}
-	})
+			if err != tt.want.err {
+				t.Fatalf("err: got %v, want %v", err, tt.want.err)
+			}
+			if err == nil && ps.IsPaused() {
+				t.Error("should not be paused")
+			}
+		})
+	}
 }
 
 func TestPlayerState_Skip(t *testing.T) {
-	t.Run("skip to next track", func(t *testing.T) {
-		state := newTestPlayerState()
-		state.Append(testEntry("a"), testEntry("b"))
-		state.SetPlaybackActive(true)
+	type args struct {
+		trackIDs []string
+		loopMode LoopMode
+	}
+	type want struct {
+		skippedID string
+		hasNext   bool
+		nextID    string
+		isActive  bool
+		err       error
+	}
 
-		skipped, next, err := state.Skip()
-		if err != nil {
-			t.Fatalf("unexpected error: %v", err)
-		}
-		if skipped.TrackID != "a" {
-			t.Errorf("expected skipped 'a', got %q", skipped.TrackID)
-		}
-		if next == nil || next.TrackID != "b" {
-			t.Errorf("expected next 'b', got %v", next)
-		}
-		if !state.IsPlaybackActive() {
-			t.Error("expected playback to remain active")
-		}
-	})
+	tests := []struct {
+		name string
+		args args
+		want want
+	}{
+		{
+			name: "skip to next track",
+			args: args{trackIDs: []string{"1", "2"}, loopMode: LoopModeNone},
+			want: want{skippedID: "1", hasNext: true, nextID: "2", isActive: true, err: nil},
+		},
+		{
+			name: "skip last track",
+			args: args{trackIDs: []string{"1"}, loopMode: LoopModeNone},
+			want: want{skippedID: "1", hasNext: false, isActive: false, err: nil},
+		},
+		{
+			name: "skip not playing",
+			args: args{trackIDs: nil, loopMode: LoopModeNone},
+			want: want{err: ErrNotPlaying},
+		},
+		{
+			name: "skip overrides LoopModeTrack",
+			args: args{trackIDs: []string{"1", "2"}, loopMode: LoopModeTrack},
+			want: want{skippedID: "1", hasNext: true, nextID: "2", isActive: true, err: nil},
+		},
+	}
 
-	t.Run("skip at last track", func(t *testing.T) {
-		state := newTestPlayerState()
-		state.Append(testEntry("a"))
-		state.SetPlaybackActive(true)
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			ps := NewPlayerState()
+			for _, id := range tt.args.trackIDs {
+				ps.Append(newTestEntry(id, false))
+			}
+			ps.SetLoopMode(tt.args.loopMode)
 
-		skipped, next, err := state.Skip()
-		if err != nil {
-			t.Fatalf("unexpected error: %v", err)
-		}
-		if skipped.TrackID != "a" {
-			t.Errorf("expected skipped 'a', got %q", skipped.TrackID)
-		}
-		if next != nil {
-			t.Errorf("expected next nil, got %v", next)
-		}
-		if state.IsPlaybackActive() {
-			t.Error("expected playback to be inactive")
-		}
-	})
+			skipped, next, err := ps.Skip()
 
-	t.Run("skip overrides LoopModeTrack", func(t *testing.T) {
-		state := newTestPlayerState()
-		state.Append(testEntry("a"), testEntry("b"))
-		state.SetPlaybackActive(true)
-		state.SetLoopMode(LoopModeTrack)
-
-		skipped, next, err := state.Skip()
-		if err != nil {
-			t.Fatalf("unexpected error: %v", err)
-		}
-		if skipped.TrackID != "a" {
-			t.Errorf("expected skipped 'a', got %q", skipped.TrackID)
-		}
-		if next == nil || next.TrackID != "b" {
-			t.Errorf("expected next 'b', got %v", next)
-		}
-	})
-
-	t.Run("skip respects LoopModeQueue", func(t *testing.T) {
-		state := newTestPlayerState()
-		state.Append(testEntry("a"), testEntry("b"))
-		state.SetPlaybackActive(true)
-		state.SetLoopMode(LoopModeQueue)
-		state.Seek(1) // at last
-
-		_, next, err := state.Skip()
-		if err != nil {
-			t.Fatalf("unexpected error: %v", err)
-		}
-		if next == nil || next.TrackID != "a" {
-			t.Errorf("expected next 'a' (wrap), got %v", next)
-		}
-	})
-
-	t.Run("not playing", func(t *testing.T) {
-		state := newTestPlayerState()
-
-		_, _, err := state.Skip()
-		if err != ErrNotPlaying {
-			t.Errorf("expected ErrNotPlaying, got %v", err)
-		}
-	})
+			if err != tt.want.err {
+				t.Fatalf("err: got %v, want %v", err, tt.want.err)
+			}
+			if err != nil {
+				return
+			}
+			if string(skipped.Track().ID()) != tt.want.skippedID {
+				t.Errorf("skipped: got %q, want %q", skipped.Track().ID(), tt.want.skippedID)
+			}
+			if tt.want.hasNext {
+				if next == nil || string(next.Track().ID()) != tt.want.nextID {
+					t.Errorf("next: got %v, want %q", next, tt.want.nextID)
+				}
+			} else if next != nil {
+				t.Error("next should be nil")
+			}
+			if ps.IsPlaybackActive() != tt.want.isActive {
+				t.Errorf(
+					"IsPlaybackActive: got %v, want %v",
+					ps.IsPlaybackActive(),
+					tt.want.isActive,
+				)
+			}
+		})
+	}
 }
 
-func TestPlayerState_Enqueue(t *testing.T) {
-	t.Run("enqueue to idle player activates", func(t *testing.T) {
-		state := newTestPlayerState()
+func TestPlayerState_CycleLoopMode(t *testing.T) {
+	type args struct {
+		initialMode LoopMode
+	}
+	type want struct {
+		nextMode LoopMode
+	}
 
-		startIndex, becameActive := state.Enqueue(testEntry("a"), testEntry("b"))
-		if startIndex != 0 {
-			t.Errorf("expected startIndex 0, got %d", startIndex)
-		}
-		if !becameActive {
-			t.Error("expected becameActive=true")
-		}
-		if !state.IsPlaybackActive() {
-			t.Error("expected playback active")
-		}
-		if state.CurrentIndex() != 0 {
-			t.Errorf("expected currentIndex 0, got %d", state.CurrentIndex())
-		}
-		current := state.Current()
-		if current == nil || current.TrackID != "a" {
-			t.Errorf("expected current 'a', got %v", current)
-		}
-	})
+	tests := []struct {
+		name string
+		args args
+		want want
+	}{
+		{
+			name: "none to track",
+			args: args{initialMode: LoopModeNone},
+			want: want{nextMode: LoopModeTrack},
+		},
+		{
+			name: "track to queue",
+			args: args{initialMode: LoopModeTrack},
+			want: want{nextMode: LoopModeQueue},
+		},
+		{
+			name: "queue to none",
+			args: args{initialMode: LoopModeQueue},
+			want: want{nextMode: LoopModeNone},
+		},
+	}
 
-	t.Run("enqueue to active player appends", func(t *testing.T) {
-		state := newTestPlayerState()
-		state.Append(testEntry("a"))
-		state.SetPlaybackActive(true)
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			ps := NewPlayerState()
+			ps.SetLoopMode(tt.args.initialMode)
 
-		startIndex, becameActive := state.Enqueue(testEntry("b"), testEntry("c"))
-		if startIndex != 1 {
-			t.Errorf("expected startIndex 1, got %d", startIndex)
-		}
-		if becameActive {
-			t.Error("expected becameActive=false")
-		}
-		if state.CurrentIndex() != 0 {
-			t.Errorf("expected currentIndex 0, got %d", state.CurrentIndex())
-		}
-		if state.Len() != 3 {
-			t.Errorf("expected 3 entries, got %d", state.Len())
-		}
-	})
+			got := ps.CycleLoopMode()
+
+			if got != tt.want.nextMode {
+				t.Fatalf("got %v, want %v", got, tt.want.nextMode)
+			}
+		})
+	}
 }
 
-func TestPlayerState_HandleTrackEnded(t *testing.T) {
-	t.Run("normal end advances", func(t *testing.T) {
-		state := newTestPlayerState()
-		state.Append(testEntry("a"), testEntry("b"))
-		state.SetPlaybackActive(true)
+func TestPlayerState_SetAutoPlayEnabled(t *testing.T) {
+	type args struct {
+		enabled bool
+	}
+	type want struct {
+		enabled bool
+	}
 
-		next := state.HandleTrackEnded(false)
-		if next == nil || next.TrackID != "b" {
-			t.Errorf("expected next 'b', got %v", next)
-		}
-		if !state.IsPlaybackActive() {
-			t.Error("expected playback active")
-		}
-	})
+	tests := []struct {
+		name string
+		args args
+		want want
+	}{
+		{name: "disable", args: args{enabled: false}, want: want{enabled: false}},
+		{name: "enable", args: args{enabled: true}, want: want{enabled: true}},
+	}
 
-	t.Run("normal end at last deactivates", func(t *testing.T) {
-		state := newTestPlayerState()
-		state.Append(testEntry("a"))
-		state.SetPlaybackActive(true)
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			ps := NewPlayerState()
 
-		next := state.HandleTrackEnded(false)
-		if next != nil {
-			t.Errorf("expected nil, got %v", next)
-		}
-		if state.IsPlaybackActive() {
-			t.Error("expected playback inactive")
-		}
-	})
+			ps.SetAutoPlayEnabled(tt.args.enabled)
 
-	t.Run("normal end with LoopModeTrack repeats", func(t *testing.T) {
-		state := newTestPlayerState()
-		state.Append(testEntry("a"), testEntry("b"))
-		state.SetPlaybackActive(true)
-		state.SetLoopMode(LoopModeTrack)
-
-		next := state.HandleTrackEnded(false)
-		if next == nil || next.TrackID != "a" {
-			t.Errorf("expected next 'a', got %v", next)
-		}
-	})
-
-	t.Run("failed removes track and advances", func(t *testing.T) {
-		state := newTestPlayerState()
-		state.Append(testEntry("a"), testEntry("b"))
-		state.SetPlaybackActive(true)
-
-		next := state.HandleTrackEnded(true)
-		if next == nil || next.TrackID != "b" {
-			t.Errorf("expected next 'b', got %v", next)
-		}
-		if state.Len() != 1 {
-			t.Errorf("expected 1 entry, got %d", state.Len())
-		}
-	})
-
-	t.Run("failed removes last track deactivates", func(t *testing.T) {
-		state := newTestPlayerState()
-		state.Append(testEntry("a"))
-		state.SetPlaybackActive(true)
-
-		next := state.HandleTrackEnded(true)
-		if next != nil {
-			t.Errorf("expected nil, got %v", next)
-		}
-		if state.IsPlaybackActive() {
-			t.Error("expected playback inactive")
-		}
-	})
+			if ps.IsAutoPlayEnabled() != tt.want.enabled {
+				t.Fatalf("got %v, want %v", ps.IsAutoPlayEnabled(), tt.want.enabled)
+			}
+		})
+	}
 }
 
-func TestPlayerState_ClearExceptCurrent(t *testing.T) {
-	t.Run("clears except current", func(t *testing.T) {
-		state := newTestPlayerState()
-		state.Append(testEntry("a"), testEntry("b"), testEntry("c"))
-		state.SetPlaybackActive(true)
-		state.Seek(1) // playing "b"
+func TestPlayerState_HasNext(t *testing.T) {
+	type args struct {
+		autoPlayEnabled bool
+		trackIDs        []string
+		mode            LoopMode
+	}
+	type want struct {
+		hasNext bool
+	}
 
-		count, err := state.ClearExceptCurrent()
-		if err != nil {
-			t.Fatalf("unexpected error: %v", err)
-		}
-		if count != 2 {
-			t.Errorf("expected count 2, got %d", count)
-		}
-		if state.Len() != 1 {
-			t.Errorf("expected 1 entry, got %d", state.Len())
-		}
-		current := state.Current()
-		if current == nil || current.TrackID != "b" {
-			t.Errorf("expected current 'b', got %v", current)
-		}
-		if state.CurrentIndex() != 0 {
-			t.Errorf("expected currentIndex 0, got %d", state.CurrentIndex())
-		}
-	})
+	tests := []struct {
+		name string
+		args args
+		want want
+	}{
+		{
+			name: "auto-play enabled always returns true",
+			args: args{autoPlayEnabled: true, trackIDs: nil, mode: LoopModeNone},
+			want: want{hasNext: true},
+		},
+		{
+			name: "empty queue returns false",
+			args: args{autoPlayEnabled: false, trackIDs: nil, mode: LoopModeNone},
+			want: want{hasNext: false},
+		},
+		{
+			name: "LoopModeTrack always returns true",
+			args: args{autoPlayEnabled: false, trackIDs: []string{"1"}, mode: LoopModeTrack},
+			want: want{hasNext: true},
+		},
+		{
+			name: "LoopModeQueue always returns true",
+			args: args{autoPlayEnabled: false, trackIDs: []string{"1"}, mode: LoopModeQueue},
+			want: want{hasNext: true},
+		},
+		{
+			name: "LoopModeNone at last returns false",
+			args: args{autoPlayEnabled: false, trackIDs: []string{"1"}, mode: LoopModeNone},
+			want: want{hasNext: false},
+		},
+		{
+			name: "LoopModeNone not at last returns true",
+			args: args{autoPlayEnabled: false, trackIDs: []string{"1", "2"}, mode: LoopModeNone},
+			want: want{hasNext: true},
+		},
+	}
 
-	t.Run("not playing returns error", func(t *testing.T) {
-		state := newTestPlayerState()
-		state.Append(testEntry("a"))
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			ps := NewPlayerState()
+			ps.SetAutoPlayEnabled(tt.args.autoPlayEnabled)
+			for _, id := range tt.args.trackIDs {
+				ps.Append(newTestEntry(id, false))
+			}
 
-		_, err := state.ClearExceptCurrent()
-		if err != ErrNotPlaying {
-			t.Errorf("expected ErrNotPlaying, got %v", err)
-		}
-	})
+			if got := ps.HasNext(tt.args.mode); got != tt.want.hasNext {
+				t.Fatalf("got %v, want %v", got, tt.want.hasNext)
+			}
+		})
+	}
+}
 
-	t.Run("only current track returns zero count", func(t *testing.T) {
-		state := newTestPlayerState()
-		state.Append(testEntry("a"))
-		state.SetPlaybackActive(true)
+func TestPlayerState_IsAtLast(t *testing.T) {
+	type args struct {
+		trackIDs  []string
+		seekIndex int
+	}
+	type want struct {
+		isAtLast bool
+	}
 
-		count, err := state.ClearExceptCurrent()
-		if err != nil {
-			t.Fatalf("unexpected error: %v", err)
-		}
-		if count != 0 {
-			t.Errorf("expected count 0, got %d", count)
-		}
-	})
+	tests := []struct {
+		name string
+		args args
+		want want
+	}{
+		{
+			name: "not at last",
+			args: args{trackIDs: []string{"1", "2"}, seekIndex: 0},
+			want: want{isAtLast: false},
+		},
+		{
+			name: "at last",
+			args: args{trackIDs: []string{"1", "2"}, seekIndex: 1},
+			want: want{isAtLast: true},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			ps := NewPlayerState()
+			for _, id := range tt.args.trackIDs {
+				ps.Append(newTestEntry(id, false))
+			}
+			if tt.args.seekIndex > 0 {
+				ps.Seek(tt.args.seekIndex)
+			}
+
+			if got := ps.IsAtLast(); got != tt.want.isAtLast {
+				t.Fatalf("got %v, want %v", got, tt.want.isAtLast)
+			}
+		})
+	}
+}
+
+func TestPlayerState_Shuffle_KeepsCurrentTrack(t *testing.T) {
+	type args struct {
+		count     int
+		seekIndex int
+	}
+	type want struct {
+		currentIndex int
+		currentID    string
+	}
+
+	tests := []struct {
+		name string
+		args args
+		want want
+	}{
+		{
+			name: "current track moves to index 0",
+			args: args{count: 20, seekIndex: 5},
+			want: want{currentIndex: 0, currentID: string(rune('A' + 5))},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			ps := NewPlayerState()
+			for i := range tt.args.count {
+				ps.Append(newTestEntry(string(rune('A'+i)), false))
+			}
+			ps.Seek(tt.args.seekIndex)
+
+			ps.Shuffle()
+
+			if ps.CurrentIndex() != tt.want.currentIndex {
+				t.Errorf("CurrentIndex: got %d, want %d", ps.CurrentIndex(), tt.want.currentIndex)
+			}
+			if string(ps.Current().Track().ID()) != tt.want.currentID {
+				t.Errorf("Current: got %q, want %q", ps.Current().Track().ID(), tt.want.currentID)
+			}
+		})
+	}
+}
+
+func TestNewPlayerState_Defaults(t *testing.T) {
+	type args struct{}
+	type want struct {
+		isActive        bool
+		isPaused        bool
+		autoPlayEnabled bool
+		loopMode        LoopMode
+		isEmpty         bool
+		currentIndex    int
+	}
+
+	tests := []struct {
+		name string
+		args args
+		want want
+	}{
+		{
+			name: "default values",
+			want: want{
+				isActive: false, isPaused: false, autoPlayEnabled: true,
+				loopMode: LoopModeNone, isEmpty: true, currentIndex: 0,
+			},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			ps := NewPlayerState()
+
+			if ps.ID() == "" {
+				t.Error("ID should not be empty")
+			}
+			if ps.IsPlaybackActive() != tt.want.isActive {
+				t.Errorf(
+					"IsPlaybackActive: got %v, want %v",
+					ps.IsPlaybackActive(),
+					tt.want.isActive,
+				)
+			}
+			if ps.IsPaused() != tt.want.isPaused {
+				t.Errorf("IsPaused: got %v, want %v", ps.IsPaused(), tt.want.isPaused)
+			}
+			if ps.IsAutoPlayEnabled() != tt.want.autoPlayEnabled {
+				t.Errorf(
+					"IsAutoPlayEnabled: got %v, want %v",
+					ps.IsAutoPlayEnabled(),
+					tt.want.autoPlayEnabled,
+				)
+			}
+			if ps.LoopMode() != tt.want.loopMode {
+				t.Errorf("LoopMode: got %v, want %v", ps.LoopMode(), tt.want.loopMode)
+			}
+			if ps.IsEmpty() != tt.want.isEmpty {
+				t.Errorf("IsEmpty: got %v, want %v", ps.IsEmpty(), tt.want.isEmpty)
+			}
+			if ps.CurrentIndex() != tt.want.currentIndex {
+				t.Errorf("CurrentIndex: got %d, want %d", ps.CurrentIndex(), tt.want.currentIndex)
+			}
+		})
+	}
 }

@@ -2,76 +2,131 @@ package domain
 
 import (
 	"testing"
+	"time"
 )
 
-func TestNewTrackList(t *testing.T) {
-	tracks := []Track{
-		{ID: "t1", Title: "Track 1"},
-		{ID: "t2", Title: "Track 2"},
-		{ID: "t3", Title: "Track 3"},
+func TestTrackListType_String(t *testing.T) {
+	type args struct {
+		typ TrackListType
+	}
+	type want struct {
+		str string
 	}
 
 	tests := []struct {
-		name           string
-		trackListType  TrackListType
-		tracks         []Track
-		opts           []TrackListOption
-		wantTrackCount int
-		wantFirstID    TrackID
-		wantName       string
+		name string
+		args args
+		want want
+	}{
+		{name: "track", args: args{typ: TrackListTypeTrack}, want: want{str: "track"}},
+		{name: "playlist", args: args{typ: TrackListTypePlaylist}, want: want{str: "playlist"}},
+		{name: "search", args: args{typ: TrackListTypeSearch}, want: want{str: "search"}},
+		{name: "unknown value", args: args{typ: TrackListType(99)}, want: want{str: "unknown"}},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := tt.args.typ.String(); got != tt.want.str {
+				t.Fatalf("got %q, want %q", got, tt.want.str)
+			}
+		})
+	}
+}
+
+func TestNewTrackList(t *testing.T) {
+	tracks := []Track{
+		*ConstructTrack(TrackID("1"), "A", "A", time.Minute, "", "", TrackSourceYouTube, false),
+		*ConstructTrack(TrackID("2"), "B", "B", time.Minute, "", "", TrackSourceYouTube, false),
+	}
+
+	type args struct {
+		trackListType TrackListType
+		tracks        []Track
+		opts          []TrackListOption
+	}
+	type want struct {
+		typ           TrackListType
+		trackCount    int
+		hasIdentifier bool
+		identifier    string
+		hasName       bool
+		name          string
+		hasUrl        bool
+		url           string
+	}
+
+	tests := []struct {
+		name string
+		args args
+		want want
 	}{
 		{
-			name:           "search keeps all tracks",
-			trackListType:  TrackListTypeSearch,
-			tracks:         tracks,
-			wantTrackCount: 3,
-			wantFirstID:    "t1",
-		},
-		{
-			name:           "playlist keeps all tracks",
-			trackListType:  TrackListTypePlaylist,
-			tracks:         tracks,
-			wantTrackCount: 3,
-			wantFirstID:    "t1",
-		},
-		{
-			name:           "track type keeps its track",
-			trackListType:  TrackListTypeTrack,
-			tracks:         tracks[:1],
-			wantTrackCount: 1,
-			wantFirstID:    "t1",
-		},
-		{
-			name:          "playlist with metadata",
-			trackListType: TrackListTypePlaylist,
-			tracks:        tracks,
-			opts: []TrackListOption{
-				WithPlaylistInfo("id-123", "My Playlist", "https://example.com/playlist"),
+			name: "basic creation without options",
+			args: args{
+				trackListType: TrackListTypeSearch,
+				tracks:        tracks,
+				opts:          nil,
 			},
-			wantTrackCount: 3,
-			wantFirstID:    "t1",
-			wantName:       "My Playlist",
+			want: want{
+				typ:           TrackListTypeSearch,
+				trackCount:    2,
+				hasIdentifier: false,
+				hasName:       false,
+				hasUrl:        false,
+			},
+		},
+		{
+			name: "with playlist info",
+			args: args{
+				trackListType: TrackListTypePlaylist,
+				tracks:        tracks,
+				opts: []TrackListOption{
+					WithPlaylistInfo("PL123", "My Playlist", "https://example.com/playlist"),
+				},
+			},
+			want: want{
+				typ:           TrackListTypePlaylist,
+				trackCount:    2,
+				hasIdentifier: true,
+				identifier:    "PL123",
+				hasName:       true,
+				name:          "My Playlist",
+				hasUrl:        true,
+				url:           "https://example.com/playlist",
+			},
 		},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			tl := NewTrackList(tt.trackListType, tt.tracks, tt.opts...)
+			tl := NewTrackList(tt.args.trackListType, tt.args.tracks, tt.args.opts...)
 
-			if len(tl.Tracks) != tt.wantTrackCount {
-				t.Errorf("got %d tracks, want %d", len(tl.Tracks), tt.wantTrackCount)
+			if tl.Type != tt.want.typ {
+				t.Errorf("Type: got %v, want %v", tl.Type, tt.want.typ)
 			}
-
-			if tt.wantTrackCount > 0 && tl.Tracks[0].ID != tt.wantFirstID {
-				t.Errorf("first track ID = %q, want %q", tl.Tracks[0].ID, tt.wantFirstID)
+			if len(tl.Tracks) != tt.want.trackCount {
+				t.Errorf("Tracks len: got %d, want %d", len(tl.Tracks), tt.want.trackCount)
 			}
-
-			gotName := ""
-			if tl.Name != nil {
-				gotName = *tl.Name
+			if tt.want.hasIdentifier {
+				if tl.Identifier == nil || *tl.Identifier != tt.want.identifier {
+					t.Errorf("Identifier: got %v, want %q", tl.Identifier, tt.want.identifier)
+				}
+			} else if tl.Identifier != nil {
+				t.Error("Identifier should be nil")
 			}
-			if gotName != tt.wantName {
-				t.Errorf("Name = %q, want %q", gotName, tt.wantName)
+			if tt.want.hasName {
+				if tl.Name == nil || *tl.Name != tt.want.name {
+					t.Errorf("Name: got %v, want %q", tl.Name, tt.want.name)
+				}
+			} else if tl.Name != nil {
+				t.Error("Name should be nil")
+			}
+			if tt.want.hasUrl {
+				if tl.Url == nil || *tl.Url != tt.want.url {
+					t.Errorf("Url: got %v, want %q", tl.Url, tt.want.url)
+				}
+			} else if tl.Url != nil {
+				t.Error("Url should be nil")
 			}
 		})
 	}
