@@ -18,7 +18,7 @@ func (t TrackListType) String() string {
 	case TrackListTypeSearch:
 		return "search"
 	default:
-		return ""
+		return "unknown"
 	}
 }
 

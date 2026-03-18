@@ -2,260 +2,552 @@ package domain
 
 import (
 	"testing"
+	"time"
 )
 
-func entry(id TrackID) QueueEntry {
-	return QueueEntry{TrackID: id}
+func newTestTrack(id string) Track {
+	return *ConstructTrack(
+		TrackID(id), "Track "+id, "Author", time.Minute,
+		"https://example.com/"+id, "", TrackSourceYouTube, false,
+	)
 }
 
-func TestNewQueue(t *testing.T) {
-	q := NewQueue()
-
-	if q.Len() != 0 {
-		t.Errorf("expected empty queue, got length %d", q.Len())
-	}
+func newTestEntry(id string, isAutoPlay bool) QueueEntry {
+	return ConstructQueueEntry(
+		newTestTrack(id), UserID("user1"), time.Now(), isAutoPlay,
+	)
 }
 
-func TestQueue_IsEmpty(t *testing.T) {
-	q := NewQueue()
+func TestParseQueueID(t *testing.T) {
+	validID := NewQueueID()
 
-	if !q.IsEmpty() {
-		t.Error("new queue should be empty")
+	type args struct {
+		id string
+	}
+	type want struct {
+		queueID QueueID
+		err     error
 	}
 
-	q.Append(entry("track-1"))
-	if q.IsEmpty() {
-		t.Error("queue with track should not be empty")
+	tests := []struct {
+		name string
+		args args
+		want want
+	}{
+		{
+			name: "valid UUID v7",
+			args: args{id: string(validID)},
+			want: want{queueID: validID, err: nil},
+		},
+		{
+			name: "invalid string",
+			args: args{id: "not-a-uuid"},
+			want: want{queueID: "", err: ErrInvalidQueueID},
+		},
+		{
+			name: "UUID v4 rejected",
+			args: args{id: "550e8400-e29b-41d4-a716-446655440000"},
+			want: want{queueID: "", err: ErrInvalidQueueID},
+		},
 	}
 
-	q.Clear()
-	if !q.IsEmpty() {
-		t.Error("queue should be empty after Clear")
-	}
-}
-
-func TestQueue_List(t *testing.T) {
-	q := NewQueue()
-	trackID1 := TrackID("track-1")
-	trackID2 := TrackID("track-2")
-
-	// Empty list
-	list := q.List()
-	if len(list) != 0 {
-		t.Errorf("expected empty list, got %d items", len(list))
-	}
-
-	q.Append(entry(trackID1), entry(trackID2))
-
-	list = q.List()
-	if len(list) != 2 {
-		t.Errorf("expected 2 items, got %d", len(list))
-	}
-	if list[0].TrackID != trackID1 || list[1].TrackID != trackID2 {
-		t.Error("unexpected track order in List")
-	}
-
-	// Verify List returns a copy (modifying it doesn't affect queue)
-	list[0].TrackID = "modified"
-	got, _ := q.Get(0)
-	if got == nil || got.TrackID != trackID1 {
-		t.Error("modifying List result affected queue")
-	}
-}
-
-func TestQueue_Get(t *testing.T) {
-	q := NewQueue()
-	trackID1 := TrackID("track-1")
-	trackID2 := TrackID("track-2")
-
-	// Get on empty queue returns error
-	if _, err := q.Get(0); err != ErrInvalidIndex {
-		t.Errorf("expected ErrInvalidIndex from empty queue, got %v", err)
-	}
-
-	q.Append(entry(trackID1), entry(trackID2))
-
-	got, err := q.Get(0)
-	if err != nil || got == nil || got.TrackID != trackID1 {
-		t.Errorf("expected track1 at index 0, got %v, err %v", got, err)
-	}
-	got, err = q.Get(1)
-	if err != nil || got == nil || got.TrackID != trackID2 {
-		t.Errorf("expected track2 at index 1, got %v, err %v", got, err)
-	}
-	if _, err := q.Get(-1); err != ErrInvalidIndex {
-		t.Errorf("expected ErrInvalidIndex for negative index, got %v", err)
-	}
-	if _, err := q.Get(2); err != ErrInvalidIndex {
-		t.Errorf("expected ErrInvalidIndex for out of bounds index, got %v", err)
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got, err := ParseQueueID(tt.args.id)
+			if err != tt.want.err {
+				t.Fatalf("err: got %v, want %v", err, tt.want.err)
+			}
+			if got != tt.want.queueID {
+				t.Fatalf("id: got %q, want %q", got, tt.want.queueID)
+			}
+		})
 	}
 }
 
-func TestQueue_Remove(t *testing.T) {
-	q := NewQueue()
-	trackID1 := TrackID("track-1")
-	trackID2 := TrackID("track-2")
-	trackID3 := TrackID("track-3")
-
-	q.Append(entry(trackID1), entry(trackID2), entry(trackID3))
-
-	// Remove first entry
-	removed, err := q.Remove(0)
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
+func TestQueueEntry_Accessors(t *testing.T) {
+	type args struct {
+		trackID     string
+		requesterID UserID
+		addedAt     time.Time
+		isAutoPlay  bool
 	}
-	if removed == nil || removed.TrackID != trackID1 {
-		t.Errorf("expected track1, got %v", removed)
-	}
-	if q.Len() != 2 {
-		t.Errorf("expected length 2, got %d", q.Len())
+	type want struct {
+		trackID     TrackID
+		requesterID UserID
+		year        int
+		isAutoPlay  bool
 	}
 
-	// Remaining entries should be in order
-	list := q.List()
-	if list[0].TrackID != trackID2 || list[1].TrackID != trackID3 {
-		t.Error("unexpected order after removal")
+	tests := []struct {
+		name string
+		args args
+		want want
+	}{
+		{
+			name: "auto-play entry",
+			args: args{
+				trackID: "t1", requesterID: UserID("user42"),
+				addedAt: time.Date(2025, 1, 1, 0, 0, 0, 0, time.UTC), isAutoPlay: true,
+			},
+			want: want{
+				trackID: TrackID("t1"), requesterID: UserID("user42"),
+				year: 2025, isAutoPlay: true,
+			},
+		},
+		{
+			name: "manual entry",
+			args: args{
+				trackID: "t2", requesterID: UserID("user1"),
+				addedAt: time.Date(2026, 6, 15, 0, 0, 0, 0, time.UTC), isAutoPlay: false,
+			},
+			want: want{
+				trackID: TrackID("t2"), requesterID: UserID("user1"),
+				year: 2026, isAutoPlay: false,
+			},
+		},
 	}
 
-	// Remove at invalid index returns error
-	if _, err := q.Remove(-1); err != ErrInvalidIndex {
-		t.Errorf("expected ErrInvalidIndex for negative index, got %v", err)
-	}
-	if _, err := q.Remove(10); err != ErrInvalidIndex {
-		t.Errorf("expected ErrInvalidIndex for out of bounds index, got %v", err)
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			entry := ConstructQueueEntry(
+				newTestTrack(
+					tt.args.trackID,
+				),
+				tt.args.requesterID,
+				tt.args.addedAt,
+				tt.args.isAutoPlay,
+			)
+
+			if entry.Track().ID() != tt.want.trackID {
+				t.Errorf("Track ID: got %q, want %q", entry.Track().ID(), tt.want.trackID)
+			}
+			if entry.RequesterID() != tt.want.requesterID {
+				t.Errorf("RequesterID: got %q, want %q", entry.RequesterID(), tt.want.requesterID)
+			}
+			if entry.AddedAt().Year() != tt.want.year {
+				t.Errorf("AddedAt year: got %d, want %d", entry.AddedAt().Year(), tt.want.year)
+			}
+			if entry.IsAutoPlay() != tt.want.isAutoPlay {
+				t.Errorf("IsAutoPlay: got %v, want %v", entry.IsAutoPlay(), tt.want.isAutoPlay)
+			}
+		})
 	}
 }
 
-func TestQueue_Clear(t *testing.T) {
-	q := NewQueue()
-	trackID1 := TrackID("track-1")
-	trackID2 := TrackID("track-2")
+func TestNewQueueEntry(t *testing.T) {
+	type args struct {
+		trackID    string
+		userID     UserID
+		isAutoPlay bool
+	}
+	type want struct {
+		isAutoPlay bool
+	}
 
-	q.Append(entry(trackID1), entry(trackID2))
+	tests := []struct {
+		name string
+		args args
+		want want
+	}{
+		{
+			name: "sets addedAt to now and preserves fields",
+			args: args{trackID: "t1", userID: UserID("user1"), isAutoPlay: false},
+			want: want{isAutoPlay: false},
+		},
+	}
 
-	q.Clear()
-	if q.Len() != 0 {
-		t.Errorf("expected empty queue after Clear, got length %d", q.Len())
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			before := time.Now()
+			entry := NewQueueEntry(
+				newTestTrack(tt.args.trackID),
+				tt.args.userID,
+				tt.args.isAutoPlay,
+			)
+			after := time.Now()
+
+			if entry.IsAutoPlay() != tt.want.isAutoPlay {
+				t.Errorf("IsAutoPlay: got %v, want %v", entry.IsAutoPlay(), tt.want.isAutoPlay)
+			}
+			if entry.AddedAt().Before(before) || entry.AddedAt().After(after) {
+				t.Error("AddedAt should be set to approximately time.Now()")
+			}
+		})
 	}
 }
 
-func TestQueue_Prepend(t *testing.T) {
-	q := NewQueue()
-	q.Append(entry("track-2"), entry("track-3"))
-
-	q.Prepend(entry("track-0"), entry("track-1"))
-
-	list := q.List()
-	if len(list) != 4 {
-		t.Fatalf("expected 4 tracks, got %d", len(list))
+func TestQueue_Operations(t *testing.T) {
+	type args struct {
+		setup func(t *testing.T) *Queue
 	}
-	if list[0].TrackID != "track-0" || list[1].TrackID != "track-1" ||
-		list[2].TrackID != "track-2" ||
-		list[3].TrackID != "track-3" {
-		t.Error("tracks not in expected order after prepend")
+	type want struct {
+		len     int
+		isEmpty bool
+		ids     []string // expected track IDs in order
+	}
+
+	tests := []struct {
+		name string
+		args args
+		want want
+	}{
+		{
+			name: "new queue is empty",
+			args: args{setup: func(_ *testing.T) *Queue {
+				q := NewQueue()
+				return &q
+			}},
+			want: want{len: 0, isEmpty: true, ids: nil},
+		},
+		{
+			name: "append adds to end",
+			args: args{setup: func(_ *testing.T) *Queue {
+				q := NewQueue()
+				q.Append(newTestEntry("1", false), newTestEntry("2", false))
+				return &q
+			}},
+			want: want{len: 2, isEmpty: false, ids: []string{"1", "2"}},
+		},
+		{
+			name: "prepend adds to front",
+			args: args{setup: func(_ *testing.T) *Queue {
+				q := NewQueue()
+				q.Append(newTestEntry("1", false))
+				q.Prepend(newTestEntry("0", false))
+				return &q
+			}},
+			want: want{len: 2, isEmpty: false, ids: []string{"0", "1"}},
+		},
+		{
+			name: "insert at index",
+			args: args{setup: func(t *testing.T) *Queue {
+				t.Helper()
+				q := NewQueue()
+				q.Append(newTestEntry("1", false), newTestEntry("3", false))
+				if err := q.Insert(1, newTestEntry("2", false)); err != nil {
+					t.Fatalf("setup Insert: %v", err)
+				}
+				return &q
+			}},
+			want: want{len: 3, isEmpty: false, ids: []string{"1", "2", "3"}},
+		},
+		{
+			name: "remove at index",
+			args: args{setup: func(t *testing.T) *Queue {
+				t.Helper()
+				q := NewQueue()
+				q.Append(
+					newTestEntry("1", false),
+					newTestEntry("2", false),
+					newTestEntry("3", false),
+				)
+				if _, err := q.Remove(1); err != nil {
+					t.Fatalf("setup Remove: %v", err)
+				}
+				return &q
+			}},
+			want: want{len: 2, isEmpty: false, ids: []string{"1", "3"}},
+		},
+		{
+			name: "clear empties queue",
+			args: args{setup: func(_ *testing.T) *Queue {
+				q := NewQueue()
+				q.Append(newTestEntry("1", false), newTestEntry("2", false))
+				q.Clear()
+				return &q
+			}},
+			want: want{len: 0, isEmpty: true, ids: nil},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			q := tt.args.setup(t)
+
+			if q.Len() != tt.want.len {
+				t.Errorf("Len: got %d, want %d", q.Len(), tt.want.len)
+			}
+			if q.IsEmpty() != tt.want.isEmpty {
+				t.Errorf("IsEmpty: got %v, want %v", q.IsEmpty(), tt.want.isEmpty)
+			}
+			for i, wantID := range tt.want.ids {
+				got, err := q.Get(i)
+				if err != nil {
+					t.Fatalf("Get(%d): %v", i, err)
+				}
+				if string(got.Track().ID()) != wantID {
+					t.Errorf("index %d: got %q, want %q", i, got.Track().ID(), wantID)
+				}
+			}
+		})
+	}
+}
+
+func TestQueue_Get_InvalidIndex(t *testing.T) {
+	type args struct {
+		setup func() *Queue
+		index int
+	}
+	type want struct {
+		err error
+	}
+
+	tests := []struct {
+		name string
+		args args
+		want want
+	}{
+		{
+			name: "empty queue",
+			args: args{
+				setup: func() *Queue { q := NewQueue(); return &q },
+				index: 0,
+			},
+			want: want{err: ErrInvalidIndex},
+		},
+		{
+			name: "negative index",
+			args: args{
+				setup: func() *Queue {
+					q := NewQueue()
+					q.Append(newTestEntry("1", false))
+					return &q
+				},
+				index: -1,
+			},
+			want: want{err: ErrInvalidIndex},
+		},
+		{
+			name: "out of bounds",
+			args: args{
+				setup: func() *Queue {
+					q := NewQueue()
+					q.Append(newTestEntry("1", false))
+					return &q
+				},
+				index: 1,
+			},
+			want: want{err: ErrInvalidIndex},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			q := tt.args.setup()
+			_, err := q.Get(tt.args.index)
+			if err != tt.want.err {
+				t.Fatalf("err: got %v, want %v", err, tt.want.err)
+			}
+		})
+	}
+}
+
+func TestQueue_Insert_InvalidIndex(t *testing.T) {
+	type args struct {
+		index int
+	}
+	type want struct {
+		err error
+	}
+
+	tests := []struct {
+		name string
+		args args
+		want want
+	}{
+		{
+			name: "insert into empty queue",
+			args: args{index: 0},
+			want: want{err: ErrInvalidIndex},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			q := NewQueue()
+			err := q.Insert(tt.args.index, newTestEntry("1", false))
+			if err != tt.want.err {
+				t.Fatalf("err: got %v, want %v", err, tt.want.err)
+			}
+		})
+	}
+}
+
+func TestQueue_Remove_InvalidIndex(t *testing.T) {
+	type args struct {
+		index int
+	}
+	type want struct {
+		err error
+	}
+
+	tests := []struct {
+		name string
+		args args
+		want want
+	}{
+		{
+			name: "remove from empty queue",
+			args: args{index: 0},
+			want: want{err: ErrInvalidIndex},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			q := NewQueue()
+			_, err := q.Remove(tt.args.index)
+			if err != tt.want.err {
+				t.Fatalf("err: got %v, want %v", err, tt.want.err)
+			}
+		})
+	}
+}
+
+func TestQueue_List_ReturnsCopy(t *testing.T) {
+	type args struct {
+		entryIDs []string
+	}
+	type want struct {
+		originalPreserved bool
+	}
+
+	tests := []struct {
+		name string
+		args args
+		want want
+	}{
+		{
+			name: "mutating returned list does not affect queue",
+			args: args{entryIDs: []string{"1"}},
+			want: want{originalPreserved: true},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			q := NewQueue()
+			for _, id := range tt.args.entryIDs {
+				q.Append(newTestEntry(id, false))
+			}
+
+			list := q.List()
+			list[0] = newTestEntry("modified", false)
+
+			got, _ := q.Get(0)
+			if (got.Track().ID() == TrackID("1")) != tt.want.originalPreserved {
+				t.Error("List should return a copy, original queue was mutated")
+			}
+		})
+	}
+}
+
+func TestQueue_FilterEntries(t *testing.T) {
+	type args struct {
+		entries []struct {
+			id         string
+			isAutoPlay bool
+		}
+	}
+	type want struct {
+		manualCount   int
+		autoPlayCount int
+	}
+
+	tests := []struct {
+		name string
+		args args
+		want want
+	}{
+		{
+			name: "filters manual and auto-play entries",
+			args: args{entries: []struct {
+				id         string
+				isAutoPlay bool
+			}{
+				{id: "manual1", isAutoPlay: false},
+				{id: "auto1", isAutoPlay: true},
+				{id: "manual2", isAutoPlay: false},
+				{id: "auto2", isAutoPlay: true},
+			}},
+			want: want{manualCount: 2, autoPlayCount: 2},
+		},
+		{
+			name: "all manual entries",
+			args: args{entries: []struct {
+				id         string
+				isAutoPlay bool
+			}{
+				{id: "m1", isAutoPlay: false},
+				{id: "m2", isAutoPlay: false},
+			}},
+			want: want{manualCount: 2, autoPlayCount: 0},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			q := NewQueue()
+			for _, e := range tt.args.entries {
+				q.Append(newTestEntry(e.id, e.isAutoPlay))
+			}
+
+			if got := len(q.ManualPlayEntries()); got != tt.want.manualCount {
+				t.Errorf("ManualPlayEntries: got %d, want %d", got, tt.want.manualCount)
+			}
+			if got := len(q.AutoPlayEntries()); got != tt.want.autoPlayCount {
+				t.Errorf("AutoPlayEntries: got %d, want %d", got, tt.want.autoPlayCount)
+			}
+		})
 	}
 }
 
 func TestQueue_Shuffle(t *testing.T) {
-	t.Run("preserves all entries", func(t *testing.T) {
-		q := NewQueue()
-		q.Append(entry("a"), entry("b"), entry("c"), entry("d"), entry("e"))
+	type args struct {
+		count int
+	}
+	type want struct {
+		preservesLength bool
+		changesOrder    bool
+	}
 
-		q.Shuffle()
+	tests := []struct {
+		name string
+		args args
+		want want
+	}{
+		{
+			name: "shuffles 20 entries",
+			args: args{count: 20},
+			want: want{preservesLength: true, changesOrder: true},
+		},
+	}
 
-		if q.Len() != 5 {
-			t.Fatalf("expected length 5, got %d", q.Len())
-		}
-
-		// Verify all original entries are still present
-		seen := make(map[TrackID]bool)
-		for _, e := range q.List() {
-			seen[e.TrackID] = true
-		}
-		for _, id := range []TrackID{"a", "b", "c", "d", "e"} {
-			if !seen[id] {
-				t.Errorf("missing entry %q after shuffle", id)
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			q := NewQueue()
+			for i := range tt.args.count {
+				q.Append(newTestEntry(string(rune('A'+i)), false))
 			}
-		}
-	})
 
-	t.Run("empty queue is no-op", func(t *testing.T) {
-		q := NewQueue()
-		q.Shuffle() // should not panic
-		if q.Len() != 0 {
-			t.Errorf("expected empty queue, got length %d", q.Len())
-		}
-	})
+			original := q.List()
+			q.Shuffle()
+			shuffled := q.List()
 
-	t.Run("single entry queue is no-op", func(t *testing.T) {
-		q := NewQueue()
-		q.Append(entry("only"))
+			if (len(shuffled) == len(original)) != tt.want.preservesLength {
+				t.Errorf("length preserved: got %d vs %d", len(shuffled), len(original))
+			}
 
-		q.Shuffle()
-
-		if q.Len() != 1 {
-			t.Fatalf("expected length 1, got %d", q.Len())
-		}
-		got, _ := q.Get(0)
-		if got.TrackID != "only" {
-			t.Errorf("expected track 'only', got %q", got.TrackID)
-		}
-	})
-}
-
-func TestQueue_Append(t *testing.T) {
-	q := NewQueue()
-	trackID1 := TrackID("track-1")
-	trackID2 := TrackID("track-2")
-
-	// Append single track
-	q.Append(entry(trackID1))
-	if q.Len() != 1 {
-		t.Errorf("expected length 1, got %d", q.Len())
+			sameOrder := true
+			for i := range original {
+				if original[i].Track().ID() != shuffled[i].Track().ID() {
+					sameOrder = false
+					break
+				}
+			}
+			if sameOrder == tt.want.changesOrder {
+				t.Error("shuffle did not change order")
+			}
+		})
 	}
-
-	// Append another track
-	q.Append(entry(trackID2))
-	if q.Len() != 2 {
-		t.Errorf("expected length 2, got %d", q.Len())
-	}
-}
-
-func TestQueue_Append_Multiple(t *testing.T) {
-	t.Run("append multiple to empty queue", func(t *testing.T) {
-		q := NewQueue()
-		entries := []QueueEntry{entry("track-1"), entry("track-2"), entry("track-3")}
-
-		q.Append(entries...)
-		if q.Len() != 3 {
-			t.Errorf("expected length 3, got %d", q.Len())
-		}
-	})
-
-	t.Run("append empty slice", func(t *testing.T) {
-		q := NewQueue()
-		entries := []QueueEntry{}
-
-		q.Append(entries...)
-		if q.Len() != 0 {
-			t.Errorf("expected length 0, got %d", q.Len())
-		}
-	})
-
-	t.Run("tracks are appended in order", func(t *testing.T) {
-		q := NewQueue()
-		q.Append(entry("track-0"))
-
-		entries := []QueueEntry{entry("track-1"), entry("track-2")}
-		q.Append(entries...)
-
-		list := q.List()
-		if len(list) != 3 {
-			t.Fatalf("expected 3 tracks, got %d", len(list))
-		}
-		if list[0].TrackID != "track-0" || list[1].TrackID != "track-1" ||
-			list[2].TrackID != "track-2" {
-			t.Error("tracks not in expected order")
-		}
-	})
 }

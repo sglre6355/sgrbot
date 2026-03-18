@@ -2,186 +2,106 @@ package domain
 
 import (
 	"context"
-	"fmt"
+	"errors"
 	"testing"
-	"time"
-
-	"github.com/disgoorg/snowflake/v2"
 )
 
-type mockTrackRepo struct {
-	tracks map[TrackID]*Track
-}
-
-func newMockTrackRepo() *mockTrackRepo {
-	return &mockTrackRepo{tracks: make(map[TrackID]*Track)}
-}
-
-func (m *mockTrackRepo) FindByID(_ context.Context, id TrackID) (Track, error) {
-	t, ok := m.tracks[id]
-	if !ok {
-		return Track{}, fmt.Errorf("track %q not found", id)
+func TestAutoPlayService_GetNextRecommendation(t *testing.T) {
+	type args struct {
+		recommender *stubRecommender
+		trackIDs    []string
 	}
-	return *t, nil
-}
-
-func (m *mockTrackRepo) FindByIDs(_ context.Context, ids ...TrackID) ([]Track, error) {
-	result := make([]Track, 0, len(ids))
-	for _, id := range ids {
-		t, ok := m.tracks[id]
-		if !ok {
-			return nil, fmt.Errorf("track %q not found", id)
-		}
-		result = append(result, *t)
+	type want struct {
+		trackID    string
+		isAutoPlay bool
+		requester  UserID
+		err        error
+		hasErr     bool
 	}
-	return result, nil
-}
 
-func (m *mockTrackRepo) Store(track *Track) {
-	m.tracks[track.ID] = track
-}
-
-type mockRecommender struct {
-	result []Track
-	err    error
-}
-
-func (m *mockRecommender) Recommend(
-	_ context.Context,
-	_ []TrackID,
-	_ []TrackID,
-	_ int,
-) ([]Track, error) {
-	if m.err != nil {
-		return nil, m.err
+	tests := []struct {
+		name string
+		args args
+		want want
+	}{
+		{
+			name: "returns recommendation from seeds",
+			args: args{
+				recommender: &stubRecommender{
+					tracks:     []Track{newTestTrack("recommended")},
+					acceptSeed: true,
+				},
+				trackIDs: []string{"1", "2"},
+			},
+			want: want{trackID: "recommended", isAutoPlay: true, requester: UserID("bot")},
+		},
+		{
+			name: "no acceptable seeds",
+			args: args{
+				recommender: &stubRecommender{acceptSeed: false},
+				trackIDs:    []string{"1"},
+			},
+			want: want{err: ErrNoAutoPlaySeeds, hasErr: true},
+		},
+		{
+			name: "recommender returns empty",
+			args: args{
+				recommender: &stubRecommender{tracks: []Track{}, acceptSeed: true},
+				trackIDs:    []string{"1"},
+			},
+			want: want{err: ErrNoRecommendations, hasErr: true},
+		},
+		{
+			name: "recommender returns error",
+			args: args{
+				recommender: &stubRecommender{err: errors.New("network error"), acceptSeed: true},
+				trackIDs:    []string{"1"},
+			},
+			want: want{hasErr: true},
+		},
+		{
+			name: "empty queue returns no seeds error",
+			args: args{
+				recommender: &stubRecommender{acceptSeed: true},
+				trackIDs:    nil,
+			},
+			want: want{err: ErrNoAutoPlaySeeds, hasErr: true},
+		},
 	}
-	return m.result, nil
-}
 
-func ytTrack(id string) *Track {
-	return &Track{
-		ID:     TrackID(id),
-		Title:  "Track " + id,
-		Source: TrackSourceYouTube,
-	}
-}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			svc := NewAutoPlayService(UserID("bot"), tt.args.recommender)
+			var ps *PlayerState
+			if tt.args.trackIDs == nil {
+				ps = NewPlayerState()
+			} else {
+				ps = newActiveState(tt.args.trackIDs...)
+			}
 
-func TestAutoPlayService_GetRecommendation(t *testing.T) {
-	guildID := snowflake.ID(1)
+			entry, err := svc.GetNextRecommendation(context.Background(), ps)
 
-	t.Run("no seeds returns nil", func(t *testing.T) {
-		repo := newMockTrackRepo()
-		rec := &mockRecommender{}
-		svc := NewAutoPlayService(repo, rec)
-
-		state := NewPlayerState(guildID, NewQueue())
-		// No tracks in queue at all
-		result := svc.GetRecommendation(context.Background(), state)
-		if result != nil {
-			t.Errorf("expected nil, got %v", result)
-		}
-	})
-
-	t.Run("manual YouTube seeds produce recommendation", func(t *testing.T) {
-		repo := newMockTrackRepo()
-		repo.Store(ytTrack("yt1"))
-		repo.Store(ytTrack("yt2"))
-
-		recommended := Track{ID: "rec1", Title: "Recommended", Source: TrackSourceYouTube}
-		rec := &mockRecommender{result: []Track{recommended}}
-
-		svc := NewAutoPlayService(repo, rec)
-
-		state := NewPlayerState(guildID, NewQueue())
-		state.Append(QueueEntry{TrackID: "yt1"})
-		state.Append(QueueEntry{TrackID: "yt2"})
-		state.SetPlaybackActive(true)
-
-		result := svc.GetRecommendation(context.Background(), state)
-		if result == nil {
-			t.Fatal("expected recommendation, got nil")
-		}
-		if result.ID != "rec1" {
-			t.Errorf("expected rec1, got %s", result.ID)
-		}
-	})
-
-	t.Run("non-YouTube tracks are excluded from seeds", func(t *testing.T) {
-		repo := newMockTrackRepo()
-		repo.Store(&Track{ID: "sp1", Title: "Spotify Track", Source: TrackSourceSpotify})
-
-		rec := &mockRecommender{}
-		svc := NewAutoPlayService(repo, rec)
-
-		state := NewPlayerState(guildID, NewQueue())
-		state.Append(QueueEntry{TrackID: "sp1"})
-		state.SetPlaybackActive(true)
-
-		result := svc.GetRecommendation(context.Background(), state)
-		if result != nil {
-			t.Errorf("expected nil (no YouTube seeds), got %v", result)
-		}
-	})
-
-	t.Run("mixed manual and auto-play tracks", func(t *testing.T) {
-		repo := newMockTrackRepo()
-		repo.Store(ytTrack("manual1"))
-		repo.Store(ytTrack("auto1"))
-
-		recommended := Track{ID: "rec1", Title: "Recommended", Source: TrackSourceYouTube}
-		rec := &mockRecommender{result: []Track{recommended}}
-
-		svc := NewAutoPlayService(repo, rec)
-
-		state := NewPlayerState(guildID, NewQueue())
-		state.Append(QueueEntry{TrackID: "manual1"})
-		state.Append(QueueEntry{
-			TrackID:    "auto1",
-			IsAutoPlay: true,
-			EnqueuedAt: time.Now(),
+			if tt.want.hasErr {
+				if err == nil {
+					t.Fatal("expected error")
+				}
+				if tt.want.err != nil && !errors.Is(err, tt.want.err) {
+					t.Fatalf("err: got %v, want %v", err, tt.want.err)
+				}
+				return
+			}
+			if err != nil {
+				t.Fatalf("unexpected error: %v", err)
+			}
+			if string(entry.Track().ID()) != tt.want.trackID {
+				t.Errorf("track: got %q, want %q", entry.Track().ID(), tt.want.trackID)
+			}
+			if entry.IsAutoPlay() != tt.want.isAutoPlay {
+				t.Errorf("IsAutoPlay: got %v, want %v", entry.IsAutoPlay(), tt.want.isAutoPlay)
+			}
+			if entry.RequesterID() != tt.want.requester {
+				t.Errorf("requester: got %q, want %q", entry.RequesterID(), tt.want.requester)
+			}
 		})
-		state.SetPlaybackActive(true)
-
-		result := svc.GetRecommendation(context.Background(), state)
-		if result == nil {
-			t.Fatal("expected recommendation, got nil")
-		}
-		if result.ID != "rec1" {
-			t.Errorf("expected rec1, got %s", result.ID)
-		}
-	})
-
-	t.Run("recommender error returns nil", func(t *testing.T) {
-		repo := newMockTrackRepo()
-		repo.Store(ytTrack("yt1"))
-
-		rec := &mockRecommender{err: fmt.Errorf("recommendation failed")}
-		svc := NewAutoPlayService(repo, rec)
-
-		state := NewPlayerState(guildID, NewQueue())
-		state.Append(QueueEntry{TrackID: "yt1"})
-		state.SetPlaybackActive(true)
-
-		result := svc.GetRecommendation(context.Background(), state)
-		if result != nil {
-			t.Errorf("expected nil, got %v", result)
-		}
-	})
-
-	t.Run("recommender returns empty results", func(t *testing.T) {
-		repo := newMockTrackRepo()
-		repo.Store(ytTrack("yt1"))
-
-		rec := &mockRecommender{result: []Track{}}
-		svc := NewAutoPlayService(repo, rec)
-
-		state := NewPlayerState(guildID, NewQueue())
-		state.Append(QueueEntry{TrackID: "yt1"})
-		state.SetPlaybackActive(true)
-
-		result := svc.GetRecommendation(context.Background(), state)
-		if result != nil {
-			t.Errorf("expected nil, got %v", result)
-		}
-	})
+	}
 }
