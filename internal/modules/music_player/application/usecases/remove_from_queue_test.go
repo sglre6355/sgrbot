@@ -72,6 +72,23 @@ func TestRemoveFromQueueUsecase_Execute(t *testing.T) {
 			want: want{removedID: "1", audioStopped: true},
 		},
 		{
+			name: "remove current track while paused skips and plays next",
+			deps: deps{
+				state: func() domain.PlayerState {
+					s := newActiveState("1", "2")
+					if err := s.Pause(); err != nil {
+						panic("setup Pause: " + err.Error())
+					}
+					return s
+				},
+				locator: func(id domain.PlayerStateID) *stubPlayerStateLocator {
+					return newStubLocator(map[string]domain.PlayerStateID{"guild1": id})
+				},
+			},
+			args: args{index: 0},
+			want: want{removedID: "1", audioPlayedID: "2"},
+		},
+		{
 			name: "invalid index returns ErrInvalidIndex",
 			deps: deps{
 				state: func() domain.PlayerState { return newActiveState("1") },
