@@ -11,6 +11,7 @@ import (
 // ResolveQueryInput holds the input for the ResolveQuery use case.
 type ResolveQueryInput struct {
 	Query string
+	Limit int // Caps the number of tracks returned for search results. Zero means no limit.
 }
 
 // ResolveQueryOutput holds the output for the ResolveQuery use case.
@@ -40,6 +41,10 @@ func (uc *ResolveQueryUsecase) Execute(
 
 	if len(trackList.Tracks) == 0 {
 		return nil, ErrNoResults
+	}
+
+	if input.Limit > 0 && len(trackList.Tracks) > input.Limit {
+		trackList.Tracks = trackList.Tracks[:input.Limit]
 	}
 
 	return &ResolveQueryOutput{

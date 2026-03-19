@@ -239,6 +239,7 @@ func (h *CommandHandlers) HandlePlay(
 	// Resolve query
 	resolveOutput, err := h.resolveQuery.Execute(ctx, usecases.ResolveQueryInput{
 		Query: query,
+		Limit: 1,
 	})
 	if err != nil {
 		return respondError(r, err)

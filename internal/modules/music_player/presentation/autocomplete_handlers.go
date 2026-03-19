@@ -12,7 +12,7 @@ import (
 	"github.com/sglre6355/sgrbot/internal/modules/music_player/platforms/discord"
 )
 
-const queueAutocompletePageSize = 25
+const autocompleteLimit = 25
 
 // AutocompleteHandler handles autocomplete requests.
 type AutocompleteHandler struct {
@@ -83,6 +83,7 @@ func (h *AutocompleteHandler) handlePlay(s *discordgo.Session, i *discordgo.Inte
 
 	output, err := h.resolveQuery.Execute(ctx, usecases.ResolveQueryInput{
 		Query: query,
+		Limit: autocompleteLimit,
 	})
 	if err != nil || len(output.Tracks) == 0 {
 		_ = s.InteractionRespond(i.Interaction, &discordgo.InteractionResponse{
@@ -149,7 +150,7 @@ func (h *AutocompleteHandler) handleQueuePositionAutocomplete(
 		usecases.ListQueueInput[discord.PartialVoiceConnectionInfo]{
 			ConnectionInfo: connInfo,
 			Page:           1,
-			PageSize:       queueAutocompletePageSize,
+			PageSize:       autocompleteLimit,
 		},
 	)
 	if err != nil {
