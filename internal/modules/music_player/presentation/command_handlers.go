@@ -862,14 +862,45 @@ func (h *CommandHandlers) HandleLoop(
 
 // Response helpers.
 
+// userFacingMessages maps known usecase errors to user-friendly messages.
+var userFacingMessages = map[error]string{
+	usecases.ErrNotConnected:   "Not connected to a voice channel.",
+	usecases.ErrUserNotInVoice: "You must be in a voice channel, or use /join to specify one.",
+	usecases.ErrNoResults:      "No results found for your query. Try a different search term.",
+	usecases.ErrQueueEmpty:     "The queue is empty.",
+	usecases.ErrInvalidIndex:   "The provided position doesn't exist in the queue.",
+	usecases.ErrNotPlaying:     "Nothing is playing right now.",
+	usecases.ErrAlreadyPaused:  "Playback is already paused.",
+	usecases.ErrNotPaused:      "Playback isn't paused.",
+	errInvalidCommand:          "Invalid command.",
+	errUnknownCommand:          "Unknown command.",
+}
+
+// userFacingMessage returns a user-friendly message for the given error and
+// reports whether the error matched a known user-facing case.
+func userFacingMessage(err error) (string, bool) {
+	for known, message := range userFacingMessages {
+		if errors.Is(err, known) {
+			return message, true
+		}
+	}
+
+	return "Something went wrong. Please try again later.", false
+}
+
 func respondError(r bot.Responder, err error) error {
+	message, known := userFacingMessage(err)
+	if !known {
+		slog.Warn("unknown music player command error", "error", err)
+	}
+
 	return r.Respond(&discordgo.InteractionResponse{
 		Type: discordgo.InteractionResponseChannelMessageWithSource,
 		Data: &discordgo.InteractionResponseData{
 			Embeds: []*discordgo.MessageEmbed{
 				{
 					Title:       "Error",
-					Description: err.Error(),
+					Description: message,
 					Color:       colorError,
 				},
 			},
