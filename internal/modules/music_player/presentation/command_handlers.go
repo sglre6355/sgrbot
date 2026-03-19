@@ -30,7 +30,6 @@ var (
 type CommandHandlers struct {
 	addToQueue               *usecases.AddToQueueUsecase[discord.PartialVoiceConnectionInfo]
 	clearQueue               *usecases.ClearQueueUsecase[discord.PartialVoiceConnectionInfo]
-	cycleLoopMode            *usecases.CycleLoopModeUsecase[discord.PartialVoiceConnectionInfo]
 	joinVoiceChannel         *usecases.JoinVoiceChannelUsecase[discord.VoiceConnectionInfo, discord.PartialVoiceConnectionInfo]
 	leaveVoiceChannel        *usecases.LeaveVoiceChannelUsecase[discord.VoiceConnectionInfo, discord.PartialVoiceConnectionInfo]
 	listQueue                *usecases.ListQueueUsecase[discord.PartialVoiceConnectionInfo]
@@ -51,7 +50,6 @@ type CommandHandlers struct {
 func NewCommandHandlers(
 	addToQueue *usecases.AddToQueueUsecase[discord.PartialVoiceConnectionInfo],
 	clearQueue *usecases.ClearQueueUsecase[discord.PartialVoiceConnectionInfo],
-	cycleLoopMode *usecases.CycleLoopModeUsecase[discord.PartialVoiceConnectionInfo],
 	joinVoiceChannel *usecases.JoinVoiceChannelUsecase[discord.VoiceConnectionInfo, discord.PartialVoiceConnectionInfo],
 	leaveVoiceChannel *usecases.LeaveVoiceChannelUsecase[discord.VoiceConnectionInfo, discord.PartialVoiceConnectionInfo],
 	listQueue *usecases.ListQueueUsecase[discord.PartialVoiceConnectionInfo],
@@ -70,7 +68,6 @@ func NewCommandHandlers(
 	return &CommandHandlers{
 		addToQueue:               addToQueue,
 		clearQueue:               clearQueue,
-		cycleLoopMode:            cycleLoopMode,
 		joinVoiceChannel:         joinVoiceChannel,
 		leaveVoiceChannel:        leaveVoiceChannel,
 		listQueue:                listQueue,
@@ -842,38 +839,23 @@ func (h *CommandHandlers) HandleLoop(
 
 	h.updateNowPlayingDestination(connectionInfo, i.ChannelID)
 
-	var modeStr string
+	var newMode string
 	options := i.ApplicationCommandData().Options
 	for _, opt := range options {
 		if opt.Name == "mode" {
-			modeStr = opt.StringValue()
+			newMode = opt.StringValue()
 		}
 	}
 
-	var newMode string
-	if modeStr != "" {
-		_, err := h.setLoopMode.Execute(
-			ctx,
-			usecases.SetLoopModeInput[discord.PartialVoiceConnectionInfo]{
-				ConnectionInfo: connectionInfo,
-				Mode:           modeStr,
-			},
-		)
-		if err != nil {
-			return respondError(r, err)
-		}
-		newMode = modeStr
-	} else {
-		output, err := h.cycleLoopMode.Execute(
-			ctx,
-			usecases.CycleLoopModeInput[discord.PartialVoiceConnectionInfo]{
-				ConnectionInfo: connectionInfo,
-			},
-		)
-		if err != nil {
-			return respondError(r, err)
-		}
-		newMode = output.NewMode
+	_, err := h.setLoopMode.Execute(
+		ctx,
+		usecases.SetLoopModeInput[discord.PartialVoiceConnectionInfo]{
+			ConnectionInfo: connectionInfo,
+			Mode:           newMode,
+		},
+	)
+	if err != nil {
+		return respondError(r, err)
 	}
 
 	var description string

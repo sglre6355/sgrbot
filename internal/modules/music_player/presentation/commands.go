@@ -133,13 +133,13 @@ func Commands() []*discordgo.ApplicationCommand {
 		},
 		{
 			Name:        "loop",
-			Description: "Set the loop mode (or cycle through modes if no option provided)",
+			Description: "Set the loop mode",
 			Options: []*discordgo.ApplicationCommandOption{
 				{
 					Type:        discordgo.ApplicationCommandOptionString,
 					Name:        "mode",
-					Description: "Loop mode to set (omit to cycle through modes)",
-					Required:    false,
+					Description: "Loop mode to set",
+					Required:    true,
 					Choices: []*discordgo.ApplicationCommandOptionChoice{
 						{Name: "Off", Value: "none"},
 						{Name: "Track", Value: "track"},

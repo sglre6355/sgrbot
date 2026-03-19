@@ -183,10 +183,6 @@ func (m *MusicPlayerModule) initWithLavalink(deps bot.ModuleDependencies) error 
 		m.eventBus,
 		voiceConnectionGateway,
 	)
-	cycleLoopMode := usecases.NewCycleLoopModeUsecase(
-		playerStateRepository,
-		voiceConnectionGateway,
-	)
 	joinVoiceChannel := usecases.NewJoinVoiceChannelUsecase(
 		playerStateRepository,
 		userVoiceStateProvider,
@@ -302,7 +298,6 @@ func (m *MusicPlayerModule) initWithLavalink(deps bot.ModuleDependencies) error 
 	m.commandHandlers = presentation.NewCommandHandlers(
 		addToQueue,
 		clearQueue,
-		cycleLoopMode,
 		joinVoiceChannel,
 		leaveVoiceChannel,
 		listQueue,
