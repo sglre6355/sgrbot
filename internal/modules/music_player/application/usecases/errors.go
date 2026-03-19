@@ -8,7 +8,6 @@ var (
 	ErrUserNotInVoice  = errors.New("you must be in a voice channel")
 	ErrNoResults       = errors.New("no results found")
 	ErrQueueEmpty      = errors.New("the queue is empty")
-	ErrIsCurrentTrack  = errors.New("cannot remove the currently playing track")
 	ErrInvalidIndex    = errors.New("invalid position")
 	ErrNotPlaying      = errors.New("nothing is currently playing")
 	ErrAlreadyPaused   = errors.New("playback is already paused")

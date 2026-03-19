@@ -593,28 +593,6 @@ func (h *CommandHandlers) handleQueueRemove(
 		},
 	)
 	if err != nil {
-		if errors.Is(err, usecases.ErrIsCurrentTrack) {
-			// Skip first, then remove
-			if _, skipErr := h.skipTrack.Execute(
-				ctx,
-				usecases.SkipTrackInput[discord.PartialVoiceConnectionInfo]{
-					ConnectionInfo: connectionInfo,
-				},
-			); skipErr != nil {
-				return respondError(r, skipErr)
-			}
-			removeOutput, removeErr := h.removeFromQueue.Execute(
-				ctx,
-				usecases.RemoveFromQueueInput[discord.PartialVoiceConnectionInfo]{
-					ConnectionInfo: connectionInfo,
-					Index:          index,
-				},
-			)
-			if removeErr != nil {
-				return respondError(r, removeErr)
-			}
-			return respondQueueRemoved(r, removeOutput.RemovedTrack)
-		}
 		return respondError(r, err)
 	}
 
