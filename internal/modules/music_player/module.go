@@ -209,6 +209,7 @@ func (m *MusicPlayerModule) initWithLavalink(deps bot.ModuleDependencies) error 
 	removeFromQueue := usecases.NewRemoveFromQueueUsecase(
 		playerService,
 		playerStateRepository,
+		audioGateway,
 		m.eventBus,
 		voiceConnectionGateway,
 	)
