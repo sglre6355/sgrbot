@@ -90,6 +90,10 @@ func (uc *RemoveFromQueueUsecase[C]) Execute(
 
 	if shouldRemoveCurrent {
 		// Update audio only when playback advanced or stopped.
+		// NOTE: The earlier Skip call may emit QueueExhaustedEvent, which can
+		// trigger auto-play via HandleQueueExhausted (same as SkipTrackUsecase).
+		// When the queue has remaining tracks, audio.Play starts the next track;
+		// otherwise audio.Stop is called, but auto-play may restart playback.
 		if current := state.Current(); current != nil {
 			if err := uc.audio.Play(ctx, state.ID(), *current); err != nil {
 				return nil, errors.Join(ErrInternal, err)
