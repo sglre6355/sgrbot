@@ -66,7 +66,10 @@ func (uc *RemoveFromQueueUsecase[C]) Execute(
 	var events []domain.Event
 	shouldRemoveCurrent := state.IsPlaybackActive() && input.Index == state.CurrentIndex()
 
-	// If removing the currently playing track, skip first.
+	// If removing the currently playing track, skip first so that
+	// `TrackStartedEvent` is emitted by `Skip` rather than by `Remove`.
+	// This means events are ordered [TrackStartedEvent, TrackRemovedEvent]
+	// instead of [TrackRemovedEvent, TrackStartedEvent].
 	if shouldRemoveCurrent {
 		_, skipEvents, err := uc.player.Skip(&state)
 		if err != nil {
