@@ -2,6 +2,7 @@ package usecases
 
 import (
 	"context"
+	"errors"
 	"time"
 
 	"github.com/sglre6355/sgrbot/internal/modules/music_player/domain"
@@ -90,37 +91,37 @@ func (r *stubPlayerStateRepository) Delete(
 // --- Stub: TrackRepository ---
 
 type stubTrackRepository struct {
-	tracks map[domain.TrackID]domain.Track
+	tracks map[string]domain.Track // keyed by URL
 }
 
 func newStubTrackRepo(tracks ...domain.Track) *stubTrackRepository {
-	m := make(map[domain.TrackID]domain.Track, len(tracks))
+	m := make(map[string]domain.Track, len(tracks))
 	for _, t := range tracks {
-		m[t.ID()] = t
+		m[t.URL()] = t
 	}
 	return &stubTrackRepository{tracks: m}
 }
 
-func (r *stubTrackRepository) FindByID(
+func (r *stubTrackRepository) FindByURL(
 	_ context.Context,
-	id domain.TrackID,
+	url string,
 ) (domain.Track, error) {
-	t, ok := r.tracks[id]
+	t, ok := r.tracks[url]
 	if !ok {
-		return domain.Track{}, domain.ErrEmptyTrackID
+		return domain.Track{}, errors.New("track not found")
 	}
 	return t, nil
 }
 
-func (r *stubTrackRepository) FindByIDs(
+func (r *stubTrackRepository) FindByURLs(
 	_ context.Context,
-	ids ...domain.TrackID,
+	urls ...string,
 ) ([]domain.Track, error) {
-	result := make([]domain.Track, 0, len(ids))
-	for _, id := range ids {
-		t, ok := r.tracks[id]
+	result := make([]domain.Track, 0, len(urls))
+	for _, url := range urls {
+		t, ok := r.tracks[url]
 		if !ok {
-			return nil, domain.ErrEmptyTrackID
+			return nil, errors.New("track not found")
 		}
 		result = append(result, t)
 	}

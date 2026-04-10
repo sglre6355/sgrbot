@@ -75,9 +75,9 @@ func (g *LavalinkAudioGateway) Play(
 		return err
 	}
 
-	track, err := resolveFromLavalink(ctx, g.link, entry.Track().ID())
+	track, err := resolveFromLavalink(ctx, g.link, entry.Track().URL())
 	if err != nil {
-		return fmt.Errorf("failed to resolve track %q: %w", entry.Track().ID(), err)
+		return fmt.Errorf("failed to resolve track %q: %w", entry.Track().URL(), err)
 	}
 
 	// Update trackCache with fresh data

@@ -246,15 +246,15 @@ func (h *CommandHandlers) HandlePlay(
 	}
 
 	// Add to queue
-	trackIDs := make([]string, len(resolveOutput.Tracks))
+	trackURLs := make([]string, len(resolveOutput.Tracks))
 	for idx, t := range resolveOutput.Tracks {
-		trackIDs[idx] = t.ID
+		trackURLs[idx] = t.URL
 	}
 	addOutput, err := h.addToQueue.Execute(
 		ctx,
 		usecases.AddToQueueInput[discord.PartialVoiceConnectionInfo]{
 			ConnectionInfo: connectionInfo,
-			TrackIDs:       trackIDs,
+			TrackURLs:      trackURLs,
 			RequesterID:    userID,
 		},
 	)
