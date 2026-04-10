@@ -9,8 +9,8 @@ import (
 
 func TestTrackCache_Get(t *testing.T) {
 	type args struct {
-		setup func(cache *TrackCache)
-		getID domain.TrackID
+		setup  func(cache *TrackCache)
+		getURL string
 	}
 	type want struct {
 		ok    bool
@@ -30,17 +30,17 @@ func TestTrackCache_Get(t *testing.T) {
 						domain.TrackID("abc"), "Title", "Author", time.Minute,
 						"https://example.com", "", domain.TrackSourceYouTube, false,
 					)
-					cache.Set(domain.TrackID("abc"), track)
+					cache.Set("https://example.com", track)
 				},
-				getID: domain.TrackID("abc"),
+				getURL: "https://example.com",
 			},
 			want: want{ok: true, title: "Title"},
 		},
 		{
 			name: "cache miss returns false",
 			args: args{
-				setup: func(_ *TrackCache) {},
-				getID: domain.TrackID("nonexistent"),
+				setup:  func(_ *TrackCache) {},
+				getURL: "https://example.com/nonexistent",
 			},
 			want: want{ok: false},
 		},
@@ -51,7 +51,7 @@ func TestTrackCache_Get(t *testing.T) {
 			cache := NewTrackCache()
 			tt.args.setup(cache)
 
-			got, ok := cache.Get(tt.args.getID)
+			got, ok := cache.Get(tt.args.getURL)
 
 			if ok != tt.want.ok {
 				t.Fatalf("ok: got %v, want %v", ok, tt.want.ok)
@@ -65,7 +65,7 @@ func TestTrackCache_Get(t *testing.T) {
 
 func TestTrackCache_SetOverwrites(t *testing.T) {
 	type args struct {
-		id     domain.TrackID
+		url    string
 		titles []string
 	}
 	type want struct {
@@ -79,7 +79,7 @@ func TestTrackCache_SetOverwrites(t *testing.T) {
 	}{
 		{
 			name: "second set overwrites first",
-			args: args{id: domain.TrackID("abc"), titles: []string{"First", "Second"}},
+			args: args{url: "https://example.com/abc", titles: []string{"First", "Second"}},
 			want: want{title: "Second"},
 		},
 	}
@@ -90,19 +90,19 @@ func TestTrackCache_SetOverwrites(t *testing.T) {
 
 			for _, title := range tt.args.titles {
 				track := domain.ConstructTrack(
-					tt.args.id,
+					domain.TrackID("abc"),
 					title,
 					"A",
 					time.Minute,
-					"",
+					tt.args.url,
 					"",
 					domain.TrackSourceYouTube,
 					false,
 				)
-				cache.Set(tt.args.id, track)
+				cache.Set(tt.args.url, track)
 			}
 
-			got, ok := cache.Get(tt.args.id)
+			got, ok := cache.Get(tt.args.url)
 			if !ok {
 				t.Fatal("expected ok=true")
 			}

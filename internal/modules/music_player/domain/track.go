@@ -135,11 +135,11 @@ func (t *Track) IsStream() bool {
 	return t.isStream
 }
 
-// TrackRepository defines the interface for retrieving tracks by ID.
+// TrackRepository defines the interface for retrieving tracks by URL.
 type TrackRepository interface {
-	// FindByID returns the Track for the given ID, or error if not found.
-	FindByID(ctx context.Context, id TrackID) (Track, error)
+	// FindByURL returns the Track for the given URL, or error if not found.
+	FindByURL(ctx context.Context, url string) (Track, error)
 
-	// FindByIDs returns Tracks for the given IDs, or error if any not found.
-	FindByIDs(ctx context.Context, ids ...TrackID) ([]Track, error)
+	// FindByURLs returns Tracks for the given URLs, or error if any not found.
+	FindByURLs(ctx context.Context, urls ...string) ([]Track, error)
 }

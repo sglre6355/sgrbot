@@ -11,7 +11,7 @@ import (
 // AddToQueueInput holds the input for the AddToQueue use case.
 type AddToQueueInput[C comparable] struct {
 	ConnectionInfo C
-	TrackIDs       []string
+	TrackURLs      []string
 	RequesterID    string
 }
 
@@ -21,7 +21,7 @@ type AddToQueueOutput struct {
 	Count      int
 }
 
-// AddToQueue resolves track IDs, creates queue entries, and appends them.
+// AddToQueueUsecase resolves track URLs, creates queue entries, and appends them.
 type AddToQueueUsecase[C comparable] struct {
 	player             *domain.PlayerService
 	playerStates       domain.PlayerStateRepository
@@ -66,12 +66,8 @@ func (uc *AddToQueueUsecase[C]) Execute(
 		return nil, errors.Join(ErrInvalidArgument, err)
 	}
 
-	trackIDs := make([]domain.TrackID, len(input.TrackIDs))
-	for i, tid := range input.TrackIDs {
-		trackIDs[i], err = domain.ParseTrackID(tid)
-		if err != nil {
-			return nil, errors.Join(ErrInvalidArgument, err)
-		}
+	if len(input.TrackURLs) == 0 {
+		return nil, errors.Join(ErrInvalidArgument, errors.New("track URLs must not be empty"))
 	}
 
 	state, err := uc.playerStates.FindByID(ctx, playerStateID)
@@ -79,9 +75,9 @@ func (uc *AddToQueueUsecase[C]) Execute(
 		return nil, errors.Join(ErrInternal, err)
 	}
 
-	entries := make([]domain.QueueEntry, 0, len(trackIDs))
-	for _, tid := range trackIDs {
-		track, err := uc.tracks.FindByID(ctx, tid)
+	entries := make([]domain.QueueEntry, 0, len(input.TrackURLs))
+	for _, url := range input.TrackURLs {
+		track, err := uc.tracks.FindByURL(ctx, url)
 		if err != nil {
 			return nil, errors.Join(ErrInternal, err)
 		}

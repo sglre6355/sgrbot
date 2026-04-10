@@ -41,14 +41,14 @@ func TestAddToQueueUsecase_Execute(t *testing.T) {
 			args: args{
 				input: AddToQueueInput[string]{
 					ConnectionInfo: "guild1",
-					TrackIDs:       []string{"t1"},
+					TrackURLs:      []string{"https://example.com/t1"},
 					RequesterID:    "u1",
 				},
 			},
 			want: want{err: ErrNotConnected},
 		},
 		{
-			name: "empty track ID returns ErrInvalidArgument",
+			name: "empty track URLs returns ErrInvalidArgument",
 			deps: deps{
 				state: func() domain.PlayerState { return newActiveState("existing") },
 				locator: func(id domain.PlayerStateID) *stubPlayerStateLocator {
@@ -58,7 +58,7 @@ func TestAddToQueueUsecase_Execute(t *testing.T) {
 			args: args{
 				input: AddToQueueInput[string]{
 					ConnectionInfo: "guild1",
-					TrackIDs:       []string{""},
+					TrackURLs:      []string{},
 					RequesterID:    "u1",
 				},
 			},
@@ -75,7 +75,7 @@ func TestAddToQueueUsecase_Execute(t *testing.T) {
 			args: args{
 				input: AddToQueueInput[string]{
 					ConnectionInfo: "guild1",
-					TrackIDs:       []string{"t1"},
+					TrackURLs:      []string{"https://example.com/t1"},
 					RequesterID:    "u1",
 				},
 			},
@@ -92,7 +92,7 @@ func TestAddToQueueUsecase_Execute(t *testing.T) {
 			args: args{
 				input: AddToQueueInput[string]{
 					ConnectionInfo: "guild1",
-					TrackIDs:       []string{"t2"},
+					TrackURLs:      []string{"https://example.com/t2"},
 					RequesterID:    "u1",
 				},
 			},
@@ -109,7 +109,7 @@ func TestAddToQueueUsecase_Execute(t *testing.T) {
 			args: args{
 				input: AddToQueueInput[string]{
 					ConnectionInfo: "guild1",
-					TrackIDs:       []string{"t1", "t2"},
+					TrackURLs:      []string{"https://example.com/t1", "https://example.com/t2"},
 					RequesterID:    "u1",
 				},
 			},
