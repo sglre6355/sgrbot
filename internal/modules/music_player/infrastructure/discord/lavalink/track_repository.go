@@ -41,7 +41,7 @@ func (r *LavalinkTrackRepository) FindByID(
 	}
 
 	// Cache miss: resolve from Lavalink
-	lavalinkTrack, err := resolveFromLavalink(ctx, r.link, id)
+	lavalinkTrack, err := resolveFromLavalink(ctx, r.link, *track)
 	if err != nil {
 		return domain.Track{}, fmt.Errorf("track %q not found: %w", id, err)
 	}
@@ -66,18 +66,18 @@ func (r *LavalinkTrackRepository) FindByIDs(
 	return tracks, nil
 }
 
-// resolveFromLavalink queries Lavalink to get a fresh track by identifier.
+// resolveFromLavalink queries Lavalink to get a fresh track by URL.
 func resolveFromLavalink(
 	ctx context.Context,
 	link disgolink.Client,
-	trackID domain.TrackID,
+	track domain.Track,
 ) (lavalink.Track, error) {
 	node := link.BestNode()
 	if node == nil {
 		return lavalink.Track{}, fmt.Errorf("no available Lavalink node")
 	}
 
-	result, err := node.LoadTracks(ctx, trackID.String())
+	result, err := node.LoadTracks(ctx, track.URL())
 	if err != nil {
 		return lavalink.Track{}, fmt.Errorf("failed to load track from Lavalink: %w", err)
 	}
@@ -86,14 +86,14 @@ func resolveFromLavalink(
 	case lavalink.Track:
 		return data, nil
 	case lavalink.Empty:
-		return lavalink.Track{}, fmt.Errorf("track %q not found on Lavalink", trackID)
+		return lavalink.Track{}, fmt.Errorf("track %q not found on Lavalink", track.ID())
 	case lavalink.Exception:
 		return lavalink.Track{}, fmt.Errorf(
 			"track resolution raised an exception for track %q: %w",
-			trackID,
+			track.ID(),
 			data,
 		)
 	default:
-		return lavalink.Track{}, fmt.Errorf("invalid track id: %q", trackID)
+		return lavalink.Track{}, fmt.Errorf("invalid track id: %q", track.ID())
 	}
 }
